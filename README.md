@@ -1,6 +1,6 @@
 # OrbitCast 📡
 
-Intelligence, tech, defence and builder event monitor. Scrapes 19 sources, sends Telegram alerts, runs a live web dashboard.
+Intelligence, tech, defence and builder event monitor. Scrapes 20 sources, sends Telegram alerts, runs a live web dashboard.
 
 ## Sources
 
@@ -20,6 +20,7 @@ Intelligence, tech, defence and builder event monitor. Scrapes 19 sources, sends
 - Critical Communications World
 - Digital Government
 - AI Expo Global
+- Eventbrite Tech London
 
 ### Education & Research
 - Imperial College London
