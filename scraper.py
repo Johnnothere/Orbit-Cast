@@ -285,6 +285,36 @@ def scrape_ai_expo():
     return events[:10]
 
 
+@source("Eventbrite Tech London", "🎟️", "Tech & AI")
+def scrape_eventbrite_tech():
+    """Scrape tech events in London from Eventbrite."""
+    import re
+    events = []
+    soup = fetch("https://www.eventbrite.co.uk/d/united-kingdom--london/tech/")
+    if not soup:
+        return events
+    seen_titles = set()
+    date_re = re.compile(r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun).+\d")
+    for el in soup.select("a[data-event-id], [class*=search-event-card]"):
+        a = el if el.name == "a" else el.select_one("a[href]")
+        href = a.get("href", "") if a else ""
+        if "/e/" not in href:
+            continue
+        parent = el.find_parent(["article", "div", "section", "li"]) or el
+        h = parent.select_one("h2, h3, h4")
+        title = h.get_text(strip=True) if h else el.get_text(strip=True)
+        date = None
+        for p in parent.select("p, span, time"):
+            text = p.get_text(strip=True)
+            if date_re.search(text):
+                date = text
+                break
+        if is_valid_event(title) and title not in seen_titles:
+            seen_titles.add(title)
+            events.append({"title": title, "date": date, "url": href, "source": "Eventbrite Tech London"})
+    return events[:20]
+
+
 # ── EDUCATION & RESEARCH ─────────────────────
 
 @source("Imperial College", "🎓", "Education & Research")
