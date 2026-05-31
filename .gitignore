@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+events_cache.json
+last_run.json
+seen_events.json

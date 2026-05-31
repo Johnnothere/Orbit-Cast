@@ -285,6 +285,136 @@ def scrape_ai_expo():
     return events[:10]
 
 
+# ── EVENTBRITE (multiple categories) ─────────
+
+def _scrape_eventbrite(category_slug, source_name):
+    """Generic Eventbrite scraper for London events by category."""
+    import re
+    events = []
+    soup = fetch(f"https://www.eventbrite.co.uk/d/united-kingdom--london/{category_slug}/")
+    if not soup:
+        return events
+    seen_titles = set()
+    date_re = re.compile(r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun).+\d")
+    for el in soup.select("a[data-event-id], [class*=search-event-card]"):
+        a = el if el.name == "a" else el.select_one("a[href]")
+        href = a.get("href", "") if a else ""
+        if "/e/" not in href:
+            continue
+        parent = el.find_parent(["article", "div", "section", "li"]) or el
+        h = parent.select_one("h2, h3, h4")
+        title = h.get_text(strip=True) if h else el.get_text(strip=True)
+        date = None
+        for p in parent.select("p, span, time"):
+            text = p.get_text(strip=True)
+            if date_re.search(text):
+                date = text
+                break
+        if is_valid_event(title) and title not in seen_titles:
+            seen_titles.add(title)
+            events.append({"title": title, "date": date, "url": href, "source": source_name})
+    return events[:20]
+
+
+@source("Eventbrite Tech London", "🎟️", "Tech & AI")
+def scrape_eventbrite_tech():
+    return _scrape_eventbrite("tech", "Eventbrite Tech London")
+
+
+@source("Eventbrite Business London", "💼", "Business & Networking")
+def scrape_eventbrite_business():
+    return _scrape_eventbrite("business", "Eventbrite Business London")
+
+
+@source("Eventbrite Science London", "🔬", "Education & Research")
+def scrape_eventbrite_science():
+    return _scrape_eventbrite("science-and-tech", "Eventbrite Science London")
+
+
+# ── ALLEVENTS (LD+JSON extraction) ──────────
+
+def _scrape_allevents(category, source_name):
+    """Scrape AllEvents.in London using structured LD+JSON data."""
+    events = []
+    url = f"https://allevents.in/london/{category}" if category else "https://allevents.in/london"
+    soup = fetch(url)
+    if not soup:
+        return events
+    for script in soup.select('script[type="application/ld+json"]'):
+        try:
+            data = json.loads(script.string)
+            if not isinstance(data, list):
+                continue
+            for item in data:
+                if item.get("@type") != "Event":
+                    continue
+                title = item.get("name", "").replace("&amp;", "&")
+                event_url = item.get("url", "")
+                date = item.get("startDate")
+                location = ""
+                loc_data = item.get("location", {})
+                if isinstance(loc_data, dict):
+                    location = loc_data.get("name", "")
+                if is_valid_event(title) and event_url:
+                    events.append({
+                        "title": title,
+                        "date": date,
+                        "url": event_url,
+                        "source": source_name,
+                        "location": location,
+                    })
+        except (json.JSONDecodeError, TypeError):
+            continue
+    return events[:25]
+
+
+@source("AllEvents Tech", "🌐", "Tech & AI")
+def scrape_allevents_tech():
+    return _scrape_allevents("tech", "AllEvents Tech")
+
+
+@source("AllEvents Business", "📊", "Business & Networking")
+def scrape_allevents_business():
+    return _scrape_allevents("business", "AllEvents Business")
+
+
+@source("AllEvents Science", "🧪", "Education & Research")
+def scrape_allevents_science():
+    return _scrape_allevents("science", "AllEvents Science")
+
+
+@source("AllEvents Startup", "🚀", "Business & Networking")
+def scrape_allevents_startup():
+    return _scrape_allevents("startup", "AllEvents Startup")
+
+
+# ── LUMA DISCOVER (London geo-based) ─────────
+
+@source("Luma London Discover", "✨", "Builder & Tech Community")
+def scrape_luma_discover():
+    """Discover upcoming events near London via Luma's geo API."""
+    events = []
+    try:
+        url = "https://api.lu.ma/discover/get-paginated-events?geo_latitude=51.5074&geo_longitude=-0.1278&geo_type=circle"
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}, timeout=12)
+        if r.status_code != 200:
+            return events
+        seen = set()
+        for entry in r.json().get("entries", []):
+            ev = entry.get("event", {})
+            title = ev.get("name")
+            slug = ev.get("url") or ev.get("api_id", "")
+            event_url = f"https://lu.ma/{slug}" if slug and not slug.startswith("http") else slug
+            start = ev.get("start_at", "")
+            date = start[:10] if start else None
+            if title and title not in seen:
+                seen.add(title)
+                events.append({"title": title, "date": date, "url": event_url or "https://lu.ma", "source": "Luma London Discover"})
+    except Exception as e:
+        log.warning(f"Luma Discover failed: {e}")
+    return events[:30]
+
+
 # ── EDUCATION & RESEARCH ─────────────────────
 
 @source("Imperial College", "🎓", "Education & Research")
