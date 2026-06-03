@@ -1,0 +1,8 @@
+requests==2.31.0
+beautifulsoup4==4.12.3
+lxml==5.2.2
+feedparser==6.0.11
+flask==3.0.3
+gunicorn==22.0.0
+Flask-Limiter==3.8.0
+anthropic==0.40.0
