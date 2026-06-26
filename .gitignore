@@ -2,3 +2,8 @@ uploads_store.jsonl
 premium_store.json
 .DS_Store
 .claude/
+__pycache__/
+*.pyc
+events_cache.json
+last_run.json
+seen_events.json
