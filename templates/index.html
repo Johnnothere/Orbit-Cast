@@ -265,22 +265,6 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
   .ai-rev-grid{grid-template-columns:1fr}
   .hack-grid{grid-template-columns:1fr}
 }
-
-/* UPGRADE MODAL */
-.oc-scrim{position:fixed;inset:0;background:rgba(24,24,27,.5);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;z-index:5000;padding:20px;}
-.oc-scrim.show{display:flex;}
-.oc-modal{background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:380px;width:100%;padding:28px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.18);}
-.oc-orb{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,var(--blue),#7c3aed);color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;margin:0 auto 14px;}
-.oc-modal h3{font-size:1.2rem;font-weight:600;margin:0 0 6px;color:var(--text);letter-spacing:-.02em;}
-.oc-modal p{font-size:13px;color:var(--t2);margin:0 0 16px;line-height:1.45;}
-.oc-perks{text-align:left;list-style:none;margin:0 0 16px;padding:0;}
-.oc-perks li{font-size:13px;color:var(--text);padding-left:22px;position:relative;margin-bottom:8px;}
-.oc-perks li::before{content:'\2713';position:absolute;left:0;color:var(--ok);font-weight:700;}
-.oc-modal input{width:100%;height:38px;border:1px solid var(--border);border-radius:8px;padding:0 12px;font-family:'IBM Plex Sans',sans-serif;font-size:13px;margin-bottom:12px;outline:none;background:var(--sf2);box-sizing:border-box;}
-.oc-modal input:focus{border-color:var(--blue);background:var(--surface);}
-.oc-go{width:100%;height:40px;background:linear-gradient(135deg,var(--blue),#7c3aed);color:#fff;border:none;border-radius:8px;font-family:'IBM Plex Mono',monospace;font-size:.74rem;font-weight:500;cursor:pointer;}
-.oc-go:disabled{opacity:.6;cursor:default;}
-.oc-x{margin-top:12px;font-size:12px;color:var(--t3);cursor:pointer;}
 </style>
 </head>
 <body>
@@ -295,7 +279,6 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
   <span class="hd-meta" id="lastRunEl">—</span>
   <span class="new-badge" id="newBadge" style="display:none" onclick="filterNew()"><span id="newCt">0</span> new</span>
   <button class="btn-sm" id="refreshBtn" onclick="doRefresh()">↻ Refresh</button>
-  <button class="btn-sm" id="proBtn" onclick="openUpgrade()" style="border-color:#7c3aed;color:#7c3aed">✦ Pro</button>
 </header>
 
 <div class="layout">
@@ -394,7 +377,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
           <div class="ai-orb">✦</div>
         </div>
         <h1 class="ai-title">OrbitCast AI</h1>
-        <p class="ai-subtitle">Drop your CV. OrbitCast reads your real background and recommends the handful of events actually worth your time — honestly, including the gaps. Not everything, just what fits.</p>
+        <p class="ai-subtitle">Drop your CV and we'll analyse your background to reveal strategic insights and recommend exactly the right events for your career.</p>
       </div>
 
       <div class="ai-form-card">
@@ -404,9 +387,9 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
           onclick="document.getElementById('cvFile').click()">
           <span class="cv-icon">📄</span>
           <div class="cv-zone-title">Drop your CV here</div>
-          <div class="cv-zone-sub">PDF, DOCX or TXT · Max 5MB</div>
+          <div class="cv-zone-sub">PDF or TXT · Max 5MB</div>
           <div class="cv-browse-btn">Browse files</div>
-          <input type="file" id="cvFile" accept=".pdf,.docx,.txt" style="display:none" onchange="handleCVFile(this)">
+          <input type="file" id="cvFile" accept=".pdf,.txt" style="display:none" onchange="handleCVFile(this)">
         </div>
         <div class="cv-file-info" id="cvFileInfo" style="display:none">
           <span>📄</span>
@@ -437,23 +420,6 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
       <div id="aiResults"></div>
     </div>
 
-  </div>
-</div>
-
-<div class="oc-scrim" id="ocScrim" onclick="if(event.target===this)closeUpgrade()">
-  <div class="oc-modal">
-    <div class="oc-orb">✦</div>
-    <h3 id="ocTitle">OrbitCast Pro</h3>
-    <p id="ocSub">Unlimited CV analyses and deeper prep for every event.</p>
-    <ul class="oc-perks">
-      <li>Unlimited CV analyses</li>
-      <li>Deeper, role-specific prep briefs</li>
-      <li>Weekly matched-events email</li>
-      <li>Saved profile across visits</li>
-    </ul>
-    <input type="email" id="ocEmail" placeholder="you@email.com" autocomplete="email">
-    <button class="oc-go" id="ocGo" onclick="upgrade()">Continue</button>
-    <div class="oc-x" onclick="closeUpgrade()">Maybe later</div>
   </div>
 </div>
 
@@ -559,7 +525,7 @@ function switchView(view){
   if(view==='calendar')renderCal();
   if(view==='hackathons')renderHackathons();
 }
-function goHome(){switchView('ai');window.scrollTo({top:0,behavior:'smooth'});}
+function goHome(){switchView('events');window.scrollTo({top:0,behavior:'smooth'});}
 
 // ── API ──────────────────────────────────────────────────
 async function fetchEvents(){
@@ -777,11 +743,16 @@ function clearCV(){
 }
 async function processFile(file){
   if(file.size>5*1024*1024){toast('File too large — max 5MB');return;}
-  cvFileData=file;                              // send the real file to the server for extraction
   document.getElementById('cvFileName').textContent=file.name;
   document.getElementById('cvFileInfo').style.display='flex';
   document.getElementById('cvDropZone').classList.add('has-file');
-  toast('CV loaded ✓');
+  if(file.type==='text/plain'){
+    cvText=await file.text();toast('CV loaded ✓');
+  }else if(file.type==='application/pdf'){
+    cvText=await extractPDFText(file);
+    if(cvText.trim().length<20){toast('Could not read PDF text — try saving as TXT');cvText='';}
+    else toast('CV loaded ✓ ('+cvText.length+' chars)');
+  }
 }
 async function extractPDFText(file){
   const buf=await file.arrayBuffer();
@@ -806,96 +777,54 @@ async function extractPDFText(file){
 function updateCharCount(){const l=document.getElementById('aiInput').value.length;document.getElementById('aiCharCount').textContent=l+' / 5000';}
 function setAiTip(t){document.getElementById('aiInput').value=t;updateCharCount();}
 
-// ── UPGRADE / PRIVACY ────────────────────────────────────
-function openUpgrade(limit){
-  const saved=localStorage.getItem('oc_email');if(saved)document.getElementById('ocEmail').value=saved;
-  if(limit){document.getElementById('ocTitle').textContent='You\'ve used your free analyses';document.getElementById('ocSub').textContent='Upgrade to OrbitCast Pro for unlimited matching.';}
-  document.getElementById('ocScrim').classList.add('show');
-}
-function closeUpgrade(){document.getElementById('ocScrim').classList.remove('show');}
-async function upgrade(){
-  const email=document.getElementById('ocEmail').value.trim();
-  if(!email){document.getElementById('ocEmail').focus();return;}
-  localStorage.setItem('oc_email',email);
-  const go=document.getElementById('ocGo');go.disabled=true;go.textContent='…';
-  try{
-    const res=await fetch('/api/upgrade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
-    const data=await res.json();
-    if(data.url){window.location=data.url;return;}
-    document.getElementById('ocSub').textContent=data.error||"Pro isn't live yet — your email is saved, you'll be first to know.";
-  }catch(e){document.getElementById('ocSub').textContent='Could not start checkout.';}
-  finally{go.disabled=false;go.textContent='Continue';}
-}
-async function forgetData(){
-  if(!confirm('Delete all CV data OrbitCast holds for this browser?'))return;
-  const email=localStorage.getItem('oc_email')||'';
-  try{await fetch('/api/forget',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});}catch(e){}
-  localStorage.removeItem('oc_email');toast('Your data has been deleted');
-}
-
 async function submitAI(){
   const input=document.getElementById('aiInput').value.trim();
-  if(!cvFileData && input.length<10){toast('Upload a CV or tell us a bit about yourself');return;}
+  const profile=(cvText?'[CV CONTENT]\n'+cvText+'\n\n[ADDITIONAL CONTEXT]\n':'')+input;
+  if(profile.trim().length<10){toast('Tell us a bit more about yourself');return;}
   const btn=document.getElementById('aiSubmitBtn');
   btn.classList.add('loading');btn.disabled=true;
   try{
-    const fd=new FormData();
-    if(cvFileData)fd.append('cv',cvFileData);
-    if(input)fd.append('profile',input);
-    const email=localStorage.getItem('oc_email');if(email)fd.append('email',email);
-    const res=await fetch('/api/ai/recommend',{method:'POST',body:fd});
+    const res=await fetch('/api/ai/recommend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile})});
     const data=await res.json();
-    if(res.status===402){openUpgrade(true);return;}
     if(!res.ok){toast(data.error||'Something went wrong');return;}
-    renderAIResults(data);
+    renderAIResults(data,profile);
   }catch(err){toast('Failed: '+err.message);}
   finally{btn.classList.remove('loading');btn.disabled=false;}
 }
 
-function renderAIResults(data){
+function renderAIResults(data,profile){
   const container=document.getElementById('aiResults');
-
-  // Not a CV → say so, don't invent a profile.
-  if(data.is_cv===false){
-    container.innerHTML='<div class="ai-profile-card"><div class="ai-profile-label">✦ Not a CV</div><div class="ai-profile-text">'+esc(data.message||'That doesn\'t look like a CV. Paste a few lines about your background, or upload an actual CV.')+'</div></div>';
-    container.scrollIntoView({behavior:'smooth'});return;
-  }
-
   const recs=data.recommendations||[];
+  if(!recs.length){container.innerHTML='<div class="empty"><h3>No recommendations found</h3><p>Try adding more details about your background and goals.</p></div>';return;}
+
+  // Use backend revelations if available (Claude), otherwise generate client-side
+  const cats=[...new Set(recs.map(r=>r.category))];
+  const revelations=data.revelations&&data.revelations.length?data.revelations:[
+    {icon:'🎯',title:'Your Strategic Focus',detail:'Based on your profile, you align strongly with '+cats.slice(0,2).join(' and ')+' — fields where your background creates immediate leverage.'},
+    {icon:'🌐',title:'Network Opportunity',detail:'Attending '+recs.length+' curated events puts you in contact with decision-makers and peers shaping the landscape you\'re moving into.'},
+    {icon:'⚡',title:'Acceleration Window',detail:'London\'s current event density is unusually high right now. Acting on these recommendations compounds your positioning.'},
+    {icon:'🔑',title:'Differentiation Edge',detail:'Your combination of skills maps to '+recs[0]?.category+' — a space where authentic technical voices are rare and highly valued.'},
+  ];
+  const profileSummary=data.profile_summary||('Based on your background, you\'re positioned at the intersection of '+cats.join(', ')+'. OrbitCast has identified '+recs.length+' high-priority events for your trajectory.');
+
   let html='';
-
-  if(data.profile_summary)
-    html+='<div class="ai-profile-card"><div class="ai-profile-label">✦ What we read</div><div class="ai-profile-text">'+esc(data.profile_summary)+'</div></div>';
-
-  if(data.revelations&&data.revelations.length){
-    html+='<div class="ai-revelations"><div class="ai-rev-hd">Honest read</div><div class="ai-rev-grid">';
-    data.revelations.forEach(r=>{html+='<div class="ai-rev-card"><div class="ai-rev-icon">'+esc(r.icon||'•')+'</div><div class="ai-rev-title">'+esc(r.title||'')+'</div><div class="ai-rev-detail">'+esc(r.detail||'')+'</div></div>';});
-    html+='</div></div>';
-  }
-
-  if(!recs.length){
-    html+='<div class="empty"><h3>No strong matches right now</h3><p>'+esc(data.message||'Nothing currently tracked is a clear fit for your background — an honest read, not a bug. Check back as new events come in.')+'</p></div>';
-  }else{
-    html+='<div class="ai-recs-hd">'+recs.length+' event'+(recs.length>1?'s':'')+' worth your time</div>';
-    recs.forEach(r=>{
-      const catCol=CAT_COLOR[r.category]||'var(--border2)';
-      html+='<div class="ai-result-card">'
-        +'<div class="ai-score">'+(r.match_score||80)+'% match</div>'
-        +'<div class="ai-result-title"><a href="'+esc(r.url)+'" target="_blank" rel="noopener">'+esc(r.title)+'</a></div>'
-        +'<div class="ai-result-meta"><span style="color:'+catCol+'">● '+esc(r.category)+'</span><span>'+esc(r.emoji||'')+' '+esc(r.source)+'</span>'+(r.date?'<span>📅 '+esc(r.date)+'</span>':'')+'</div>'
-        +'<div class="ai-section"><div class="ai-section-label">Why you</div><div class="ai-section-text">'+esc(r.why)+'</div></div>'
-        +'<div class="ai-section"><div class="ai-section-label">How to prepare</div><div class="ai-section-text">'+esc(r.prepare)+'</div></div>'
-        +'<div class="ai-section"><div class="ai-section-label">What you\'ll get</div><div class="ai-section-text">'+esc(r.benefit)+'</div></div>'
-        +'</div>';
-    });
-  }
-
-  const m=data._meta||{};
-  if(m.premium)html+='<div class="ai-char-count" style="text-align:center;margin-top:16px">Pro · unlimited analyses</div>';
-  else if(m.remaining_free!=null)html+='<div class="ai-char-count" style="text-align:center;margin-top:16px">'+m.remaining_free+' free '+(m.remaining_free===1?'analysis':'analyses')+' left</div>';
-
-  html+='<div style="text-align:center;margin-top:16px"><span onclick="forgetData()" style="font-size:11px;color:var(--t3);cursor:pointer;text-decoration:underline;font-family:\'IBM Plex Mono\',monospace">Delete my CV data</span></div>';
-
+  html+='<div class="ai-profile-card"><div class="ai-profile-label">✦ Profile Analysis</div><div class="ai-profile-text">'+esc(profileSummary)+'</div></div>';
+  html+='<div class="ai-revelations"><div class="ai-rev-hd">Strategic Revelations</div><div class="ai-rev-grid">';
+  revelations.forEach(r=>{html+='<div class="ai-rev-card"><div class="ai-rev-icon">'+r.icon+'</div><div class="ai-rev-title">'+esc(r.title)+'</div><div class="ai-rev-detail">'+esc(r.detail)+'</div></div>';});
+  html+='</div></div>';
+  // Recommendations
+  html+='<div class="ai-recs-hd">Recommended Events ('+recs.length+')</div>';
+  recs.forEach(r=>{
+    const catCol=CAT_COLOR[r.category]||'var(--border2)';
+    html+='<div class="ai-result-card">'
+      +'<div class="ai-score">'+(r.match_score||80)+'% match</div>'
+      +'<div class="ai-result-title"><a href="'+esc(r.url)+'" target="_blank" rel="noopener">'+esc(r.title)+'</a></div>'
+      +'<div class="ai-result-meta"><span style="color:'+catCol+'">● '+esc(r.category)+'</span><span>'+esc(r.emoji||'')+' '+esc(r.source)+'</span>'+(r.date?'<span>📅 '+esc(r.date)+'</span>':'')+'</div>'
+      +'<div class="ai-section"><div class="ai-section-label">Why attend</div><div class="ai-section-text">'+esc(r.why)+'</div></div>'
+      +'<div class="ai-section"><div class="ai-section-label">How to prepare</div><div class="ai-section-text">'+esc(r.prepare)+'</div></div>'
+      +'<div class="ai-section"><div class="ai-section-label">Career benefit</div><div class="ai-section-text">'+esc(r.benefit)+'</div></div>'
+      +'</div>';
+  });
   container.innerHTML=html;
   container.scrollIntoView({behavior:'smooth'});
 }
@@ -1003,8 +932,6 @@ document.addEventListener('keydown',e=>{
   document.getElementById('eventsArea').innerHTML=Array.from({length:8}).map(()=>'<div class="skel skel-row"></div>').join('');
   fetchEvents();
   setInterval(fetchEvents,30*60*1000);
-  switchView('ai');                            // AI is the central landing page
-  if(new URLSearchParams(location.search).get('upgraded')==='1')setTimeout(()=>toast("You're on OrbitCast Pro ✦"),400);
 })();
 </script>
 </body>
