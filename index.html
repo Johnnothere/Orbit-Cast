@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ORBITCAST</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f3f2ef;--surface:#ffffff;--sf2:#f8f7f5;--border:#e5e4e0;--border2:#cfcec9;
+  --text:#18181b;--t2:#6b7280;--t3:#a3a3a3;--blue:#2563eb;
+  --ci:#0891b2;--cd:#b45309;--cc:#dc2626;--ct:#7c3aed;--ce:#059669;--cb:#ea580c;--cn:#6366f1;--ch:#8b5cf6;
+  --ok:#059669;--warn:#d97706;--dead:#dc2626;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{overflow-x:hidden;max-width:100vw;}
+body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',sans-serif;min-height:100vh;font-size:14px;line-height:1.5;}
+
+/* HEADER */
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;height:52px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:100;width:100%;}
+.logo{font-family:'IBM Plex Mono',monospace;font-weight:500;font-size:.9rem;color:var(--text);letter-spacing:.06em;display:flex;align-items:center;gap:8px;flex-shrink:0;cursor:pointer;user-select:none;transition:color .15s;}
+.logo:hover{color:var(--blue);}
+.logo-mark{width:7px;height:7px;border-radius:50%;background:var(--blue);}
+.search-wrap{flex:1;max-width:420px;position:relative;}
+.search-wrap input{width:100%;height:32px;border:1px solid var(--border);border-radius:4px;padding:0 10px 0 30px;font-family:'IBM Plex Sans',sans-serif;font-size:13px;background:var(--sf2);color:var(--text);outline:none;transition:border-color .15s;}
+.search-wrap input:focus{border-color:var(--blue);background:var(--surface);}
+.search-wrap input::placeholder{color:var(--t3);}
+.s-ico{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--t3);font-size:13px;pointer-events:none;font-style:normal;}
+.hd-meta{font-family:'IBM Plex Mono',monospace;font-size:.67rem;color:var(--t3);margin-left:auto;white-space:nowrap;}
+.new-badge{font-family:'IBM Plex Mono',monospace;font-size:.64rem;background:var(--blue);color:#fff;padding:3px 8px;border-radius:3px;cursor:pointer;flex-shrink:0;}
+.btn-sm{font-family:'IBM Plex Mono',monospace;font-size:.68rem;height:30px;padding:0 13px;border:1px solid var(--border2);border-radius:4px;background:var(--surface);color:var(--t2);cursor:pointer;transition:all .15s;white-space:nowrap;}
+.btn-sm:hover{border-color:var(--blue);color:var(--blue);}
+.btn-sm:disabled{opacity:.4;cursor:not-allowed;}
+.scraping-pulse{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--blue);margin-right:5px;animation:blink 1s infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+
+/* LAYOUT */
+.layout{display:grid;grid-template-columns:210px 1fr;min-height:calc(100vh - 52px);width:100%;overflow:hidden;}
+.sidebar{background:var(--surface);border-right:1px solid var(--border);padding:20px 0;position:sticky;top:52px;height:calc(100vh - 52px);overflow-y:auto;overflow-x:hidden;}
+.nav-section{margin-bottom:22px;}
+.nav-hd{font-family:'IBM Plex Mono',monospace;font-size:.59rem;color:var(--t3);text-transform:uppercase;letter-spacing:.12em;padding:0 16px 8px;}
+.cat-btn{display:flex;align-items:center;gap:8px;width:100%;padding:7px 16px;background:none;border:none;color:var(--t2);font-family:'IBM Plex Sans',sans-serif;font-size:13px;cursor:pointer;text-align:left;transition:color .13s;}
+.cat-btn:hover{color:var(--text);background:var(--sf2);}
+.cat-btn.active{color:var(--text);font-weight:500;background:var(--sf2);}
+.cat-btn.active .cat-lead{background:var(--blue);width:2px;height:14px;border-radius:1px;margin-left:-10px;}
+.cat-lead{width:0;height:14px;}
+.cat-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+.nav-div{height:1px;background:var(--border);margin:8px 16px 16px;}
+.ai-nav-btn{display:flex;align-items:center;gap:8px;width:calc(100% - 32px);margin:0 16px;padding:10px 14px;background:linear-gradient(135deg,rgba(37,99,235,.08),rgba(139,92,246,.08));border:1px solid rgba(37,99,235,.2);border-radius:8px;color:var(--blue);font-family:'IBM Plex Sans',sans-serif;font-size:13px;font-weight:500;cursor:pointer;transition:all .2s;text-align:left;}
+.ai-nav-btn:hover{background:linear-gradient(135deg,rgba(37,99,235,.14),rgba(139,92,246,.14));border-color:var(--blue);transform:translateY(-1px);box-shadow:0 2px 8px rgba(37,99,235,.15);}
+.hack-nav-btn{display:flex;align-items:center;gap:8px;width:calc(100% - 32px);margin:8px 16px 0;padding:10px 14px;background:linear-gradient(135deg,rgba(139,92,246,.08),rgba(99,102,241,.08));border:1px solid rgba(139,92,246,.25);border-radius:8px;color:#7c3aed;font-family:'IBM Plex Sans',sans-serif;font-size:13px;font-weight:500;cursor:pointer;transition:all .2s;text-align:left;}
+.hack-nav-btn:hover{background:linear-gradient(135deg,rgba(139,92,246,.14),rgba(99,102,241,.14));transform:translateY(-1px);}
+
+/* MAIN */
+.main{background:var(--bg);overflow:hidden;min-width:0;}
+.view-tabs{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;display:flex;gap:0;overflow-x:auto;}
+.view-tab{font-family:'IBM Plex Mono',monospace;font-size:.72rem;padding:12px 18px;border:none;background:none;color:var(--t2);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;font-weight:500;white-space:nowrap;flex-shrink:0;}
+.view-tab:hover{color:var(--text);}
+.view-tab.active{color:var(--blue);border-bottom-color:var(--blue);}
+
+/* CONTROLS */
+.controls{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 24px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.ctrl-label{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--t2);cursor:pointer;user-select:none;}
+.ctrl-label input{accent-color:var(--blue);cursor:pointer;}
+.ctrl-sep{width:1px;height:16px;background:var(--border);flex-shrink:0;}
+.ctrl-sel{font-family:'IBM Plex Sans',sans-serif;font-size:12px;border:1px solid var(--border);border-radius:3px;padding:4px 8px;background:var(--surface);color:var(--t2);cursor:pointer;outline:none;}
+.ctrl-right{margin-left:auto;display:flex;gap:8px;}
+.btn-tog{font-family:'IBM Plex Mono',monospace;font-size:.65rem;height:28px;padding:0 10px;border:1px solid var(--border);border-radius:3px;background:var(--surface);color:var(--t2);cursor:pointer;transition:all .13s;}
+.btn-tog.on,.btn-tog:hover{border-color:var(--blue);color:var(--blue);}
+.count-row{padding:12px 24px 8px;font-family:'IBM Plex Mono',monospace;font-size:.67rem;color:var(--t3);display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.count-n{color:var(--text);font-weight:500;}
+.kb-hint{margin-left:auto;font-size:.6rem;}
+.kb-hint kbd{background:var(--sf2);border:1px solid var(--border2);border-radius:3px;padding:1px 5px;font-family:inherit;}
+
+/* EVENTS */
+.events-area{padding:0 24px 48px;overflow-x:hidden;}
+.date-group{margin-bottom:4px;}
+.date-hd{display:flex;align-items:center;gap:10px;padding:14px 0 6px;}
+.date-hd-lbl{font-family:'IBM Plex Mono',monospace;font-size:.7rem;color:var(--t2);font-weight:500;text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;}
+.date-hd-today{font-family:'IBM Plex Mono',monospace;font-size:.6rem;color:var(--blue);background:rgba(37,99,235,.09);padding:2px 7px;border-radius:10px;}
+.date-hd-line{flex:1;height:1px;background:var(--border);}
+.tbd-hd{padding:22px 0 8px;display:flex;align-items:center;gap:10px;}
+.tbd-hd-lbl{font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;}
+.ev{display:flex;align-items:center;background:var(--surface);border:1px solid var(--border);border-left:2px solid var(--cat,var(--border));border-radius:4px;margin-bottom:3px;transition:box-shadow .13s,border-color .13s;overflow:hidden;}
+.ev:hover{border-color:var(--border2);box-shadow:0 1px 4px rgba(0,0,0,.05);}
+.ev.past{opacity:.42;}
+.ev-time{width:76px;padding:12px 8px;flex-shrink:0;border-right:1px solid var(--border);text-align:center;}
+.ev-time .soon{font-family:'IBM Plex Mono',monospace;font-size:.62rem;font-weight:500;display:block;white-space:nowrap;}
+.ev-time .soon.blue{color:var(--blue);}
+.ev-time .soon.gray{color:var(--t3);}
+.ev-time .dt{font-family:'IBM Plex Mono',monospace;font-size:.56rem;color:var(--t3);display:block;margin-top:2px;}
+.ev-time .tm{font-family:'IBM Plex Mono',monospace;font-size:.56rem;color:var(--t3);display:block;margin-top:1px;}
+.ev-body{flex:1;min-width:0;padding:11px 14px;}
+.ev-title{font-size:13px;font-weight:500;color:var(--text);text-decoration:none;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ev-title:hover{color:var(--blue);}
+.ev-src{font-size:11px;color:var(--t2);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ev-right{display:flex;align-items:center;gap:2px;padding:0 10px;flex-shrink:0;}
+.ic-btn{width:28px;height:28px;border:none;background:none;color:var(--t3);cursor:pointer;border-radius:3px;font-size:14px;display:flex;align-items:center;justify-content:center;transition:color .13s,background .13s;}
+.ic-btn:hover{color:var(--blue);background:var(--sf2);}
+.ic-btn.saved{color:var(--blue);}
+
+/* SKELETON */
+.skel{background:linear-gradient(90deg,var(--border) 25%,var(--sf2) 50%,var(--border) 75%);background-size:200% 100%;animation:sh 1.3s infinite;border-radius:4px;}
+@keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.skel-row{height:56px;margin-bottom:3px;}
+.empty{text-align:center;padding:60px 20px;color:var(--t2);}
+.empty h3{font-size:15px;font-weight:500;color:var(--text);margin-bottom:6px;}
+.error-banner{background:rgba(220,38,38,.07);border:1px solid rgba(220,38,38,.2);border-radius:4px;padding:10px 14px;font-size:13px;color:var(--dead);margin:12px 24px;}
+
+/* CALENDAR */
+.cal-view{display:none;padding:24px;}
+.cal-view.show{display:block;}
+.cal-hero{max-width:1100px;}
+.cal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px;}
+.cal-header-left{display:flex;align-items:baseline;gap:12px;}
+.cal-title{font-family:'IBM Plex Mono',monospace;font-size:2rem;font-weight:500;color:var(--text);}
+.cal-year{font-family:'IBM Plex Mono',monospace;font-size:1.2rem;color:var(--t3);}
+.cal-header-right{display:flex;gap:8px;}
+.cal-btn{font-family:'IBM Plex Mono',monospace;font-size:.7rem;padding:7px 14px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--t2);cursor:pointer;transition:all .13s;}
+.cal-btn:hover{border-color:var(--blue);color:var(--blue);}
+.cal-btn.today-btn{background:var(--blue);color:#fff;border-color:var(--blue);}
+.cal-btn.today-btn:hover{background:#1d4ed8;}
+.cal-weekdays{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;margin-bottom:4px;}
+.cal-wday{font-family:'IBM Plex Mono',monospace;font-size:.62rem;color:var(--t3);text-align:center;padding:4px 0;text-transform:uppercase;letter-spacing:.06em;}
+.cal-grid2{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:8px;overflow:hidden;}
+.cal-cell{background:var(--surface);min-height:90px;padding:6px;cursor:pointer;transition:background .1s;position:relative;}
+.cal-cell:hover{background:var(--sf2);}
+.cal-cell.other-month{background:#f9f8f6;opacity:.6;}
+.cal-cell.is-today{background:linear-gradient(135deg,rgba(37,99,235,.04),rgba(99,102,241,.04));border:1px solid rgba(37,99,235,.2);}
+.cal-cell.is-today .cal-num{background:var(--blue);color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;}
+.cal-cell.selected{background:rgba(37,99,235,.06);}
+.cal-num{font-family:'IBM Plex Mono',monospace;font-size:.7rem;color:var(--t2);display:flex;align-items:center;justify-content:center;width:24px;height:24px;margin-bottom:2px;}
+.cal-badge{position:absolute;top:4px;right:4px;font-family:'IBM Plex Mono',monospace;font-size:.56rem;background:var(--blue);color:#fff;border-radius:10px;padding:1px 5px;font-weight:600;}
+.cal-ev-pill{font-size:10px;padding:2px 5px;margin-bottom:2px;border-radius:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-left:2px solid var(--pill-c,var(--border2));background:var(--sf2);}
+.cal-ev-pill a{color:var(--text);text-decoration:none;display:block;overflow:hidden;text-overflow:ellipsis;}
+.cal-more{font-family:'IBM Plex Mono',monospace;font-size:.56rem;color:var(--t3);}
+.cal-day-panel{max-width:1100px;margin:16px auto 0;background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;max-height:0;opacity:0;transition:all .3s ease;}
+.cal-day-panel.open{max-height:600px;opacity:1;padding:20px 24px;}
+.cdp-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;}
+.cdp-title{font-family:'IBM Plex Mono',monospace;font-size:.85rem;color:var(--text);font-weight:500;}
+.cdp-count{font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--blue);background:rgba(37,99,235,.08);padding:3px 10px;border-radius:10px;}
+.cdp-close{background:none;border:none;font-size:1.1rem;color:var(--t3);cursor:pointer;padding:4px;}
+.cdp-close:hover{color:var(--text);}
+.cdp-events{display:flex;flex-direction:column;gap:10px;}
+.cdp-ev{display:flex;justify-content:space-between;align-items:flex-start;padding:12px;background:var(--sf2);border-radius:6px;border-left:3px solid var(--cdp-c,var(--border2));}
+.cdp-ev-title{font-size:13px;font-weight:500;color:var(--text);margin-bottom:4px;}
+.cdp-ev-meta{font-size:11px;color:var(--t2);display:flex;gap:8px;}
+.cdp-ev-time{font-family:'IBM Plex Mono',monospace;font-size:.65rem;color:var(--blue);margin-bottom:3px;}
+.cdp-ev-actions{display:flex;gap:8px;flex-shrink:0;margin-left:12px;}
+.cdp-link{font-family:'IBM Plex Mono',monospace;font-size:.65rem;color:var(--blue);cursor:pointer;text-decoration:none;white-space:nowrap;}
+.cdp-link:hover{text-decoration:underline;}
+
+/* HACKATHONS */
+.hack-view{display:none;padding:24px;}
+.hack-view.show{display:block;}
+.hack-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;}
+.hack-title{font-family:'IBM Plex Mono',monospace;font-size:1.1rem;color:var(--text);font-weight:500;display:flex;align-items:center;gap:10px;}
+.hack-badge{font-family:'IBM Plex Mono',monospace;font-size:.65rem;background:rgba(139,92,246,.12);color:#7c3aed;border:1px solid rgba(139,92,246,.25);padding:4px 10px;border-radius:10px;}
+.hack-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;}
+.hack-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;transition:box-shadow .15s,transform .15s;display:flex;flex-direction:column;}
+.hack-card:hover{box-shadow:0 4px 16px rgba(0,0,0,.08);transform:translateY(-2px);}
+.hack-card-top{padding:16px 16px 12px;border-bottom:1px solid var(--border);background:linear-gradient(135deg,rgba(139,92,246,.04),rgba(99,102,241,.04));}
+.hack-card-date{font-family:'IBM Plex Mono',monospace;font-size:.65rem;color:#7c3aed;margin-bottom:6px;display:flex;align-items:center;gap:8px;}
+.hack-card-date .hack-time{color:var(--t3);}
+.hack-card-title{font-size:14px;font-weight:600;color:var(--text);line-height:1.35;margin-bottom:8px;}
+.hack-card-prize{display:inline-flex;align-items:center;gap:4px;font-family:'IBM Plex Mono',monospace;font-size:.64rem;background:rgba(5,150,105,.1);color:var(--ok);border:1px solid rgba(5,150,105,.2);padding:3px 9px;border-radius:10px;}
+.hack-card-body{padding:12px 16px 16px;flex:1;display:flex;flex-direction:column;gap:10px;}
+.hack-card-desc{font-size:12px;color:var(--t2);line-height:1.5;}
+.hack-card-actions{display:flex;gap:8px;margin-top:auto;}
+.hack-link{font-family:'IBM Plex Mono',monospace;font-size:.68rem;padding:6px 12px;border:1px solid var(--border2);border-radius:4px;color:var(--t2);text-decoration:none;transition:all .13s;}
+.hack-link:hover{border-color:#7c3aed;color:#7c3aed;}
+.hack-link.primary{background:#7c3aed;color:#fff;border-color:#7c3aed;}
+.hack-link.primary:hover{background:#6d28d9;}
+.hack-soon{font-family:'IBM Plex Mono',monospace;font-size:.6rem;color:var(--blue);background:rgba(37,99,235,.08);padding:2px 7px;border-radius:8px;margin-left:auto;}
+.hack-past{opacity:.5;}
+
+/* AI VIEW */
+.ai-view{display:none;padding:32px 24px;max-width:860px;}
+.ai-view.show{display:block;}
+.ai-header{text-align:center;margin-bottom:36px;}
+.ai-orb-wrap{position:relative;width:64px;height:64px;margin:0 auto 16px;}
+.ai-orb{width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,var(--blue),#7c3aed);display:flex;align-items:center;justify-content:center;color:#fff;font-size:28px;box-shadow:0 8px 24px rgba(37,99,235,.3);animation:orb-float 4s ease-in-out infinite;}
+.ai-orb-ring{position:absolute;inset:-6px;border-radius:50%;border:1px solid rgba(37,99,235,.2);animation:ring-spin 8s linear infinite;}
+@keyframes orb-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+@keyframes ring-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+.ai-title{font-family:'IBM Plex Sans',sans-serif;font-size:1.6rem;font-weight:600;color:var(--text);margin-bottom:8px;letter-spacing:-.02em;}
+.ai-subtitle{font-size:14px;color:var(--t2);max-width:520px;margin:0 auto;line-height:1.6;}
+
+/* CV DROP ZONE */
+.cv-drop-zone{border:2px dashed var(--border2);border-radius:12px;padding:32px 24px;text-align:center;cursor:pointer;transition:all .2s;background:var(--sf2);margin-bottom:16px;position:relative;}
+.cv-drop-zone.active,.cv-drop-zone:hover{border-color:var(--blue);background:rgba(37,99,235,.03);}
+.cv-drop-zone.has-file{border-color:var(--ok);background:rgba(5,150,105,.04);border-style:solid;}
+.cv-icon{font-size:2rem;margin-bottom:10px;display:block;}
+.cv-zone-title{font-size:15px;font-weight:500;color:var(--text);margin-bottom:4px;}
+.cv-zone-sub{font-size:12px;color:var(--t3);margin-bottom:14px;}
+.cv-browse-btn{font-family:'IBM Plex Mono',monospace;font-size:.72rem;padding:7px 18px;background:var(--surface);border:1px solid var(--border2);border-radius:4px;color:var(--t2);cursor:pointer;transition:all .15s;display:inline-block;}
+.cv-browse-btn:hover{border-color:var(--blue);color:var(--blue);}
+.cv-file-info{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 14px;margin-top:12px;font-size:13px;}
+.cv-file-name{font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cv-file-clear{background:none;border:none;color:var(--t3);cursor:pointer;font-size:16px;padding:0 4px;}
+.cv-file-clear:hover{color:var(--dead);}
+.cv-divider{display:flex;align-items:center;gap:12px;margin:16px 0;color:var(--t3);font-size:12px;}
+.cv-divider::before,.cv-divider::after{content:'';flex:1;height:1px;background:var(--border);}
+
+/* AI FORM */
+.ai-form-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:24px;}
+.ai-form-label{font-family:'IBM Plex Mono',monospace;font-size:.65rem;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px;display:block;}
+.ai-textarea{width:100%;min-height:120px;border:1px solid var(--border);border-radius:8px;padding:14px;font-family:'IBM Plex Sans',sans-serif;font-size:14px;color:var(--text);resize:vertical;outline:none;transition:border-color .2s;background:var(--sf2);line-height:1.6;}
+.ai-textarea:focus{border-color:var(--blue);background:var(--surface);}
+.ai-textarea::placeholder{color:var(--t3);}
+.ai-tips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;}
+.ai-tip{font-size:11px;padding:5px 10px;background:var(--sf2);border:1px solid var(--border);border-radius:16px;color:var(--t2);cursor:pointer;transition:all .15s;}
+.ai-tip:hover{border-color:var(--blue);color:var(--blue);}
+.ai-form-footer{display:flex;align-items:center;justify-content:space-between;margin-top:16px;flex-wrap:wrap;gap:10px;}
+.ai-char-count{font-family:'IBM Plex Mono',monospace;font-size:.64rem;color:var(--t3);}
+.ai-submit{font-family:'IBM Plex Mono',monospace;font-size:.74rem;height:40px;padding:0 28px;background:linear-gradient(135deg,var(--blue),#7c3aed);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:500;transition:all .2s;display:flex;align-items:center;gap:8px;box-shadow:0 2px 8px rgba(37,99,235,.25);}
+.ai-submit:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(37,99,235,.35);}
+.ai-submit:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none;}
+.ai-submit .spinner{display:none;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;}
+.ai-submit.loading .spinner{display:inline-block;}
+.ai-submit.loading .btn-text{display:none;}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* AI RESULTS */
+.ai-profile-card{background:linear-gradient(135deg,rgba(37,99,235,.06),rgba(139,92,246,.06));border:1px solid rgba(37,99,235,.2);border-radius:12px;padding:20px;margin-bottom:20px;}
+.ai-profile-label{font-family:'IBM Plex Mono',monospace;font-size:.65rem;color:var(--blue);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;}
+.ai-profile-text{font-size:14px;color:var(--text);line-height:1.6;}
+.ai-revelations{margin-bottom:24px;}
+.ai-rev-hd{font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
+.ai-rev-hd::after{content:'';flex:1;height:1px;background:var(--border);}
+.ai-rev-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;}
+.ai-rev-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;position:relative;overflow:hidden;}
+.ai-rev-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--blue),#7c3aed);}
+.ai-rev-icon{font-size:1.2rem;margin-bottom:8px;}
+.ai-rev-title{font-size:12px;font-weight:600;color:var(--text);margin-bottom:4px;}
+.ai-rev-detail{font-size:11px;color:var(--t2);line-height:1.5;}
+.ai-recs-hd{font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
+.ai-recs-hd::after{content:'';flex:1;height:1px;background:var(--border);}
+.ai-result-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:12px;position:relative;overflow:hidden;transition:all .2s;}
+.ai-result-card:hover{border-color:rgba(37,99,235,.3);box-shadow:0 4px 16px rgba(0,0,0,.06);}
+.ai-result-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--blue),#7c3aed);}
+.ai-score{position:absolute;top:14px;right:16px;font-family:'IBM Plex Mono',monospace;font-size:.68rem;font-weight:600;color:var(--blue);background:rgba(37,99,235,.08);padding:4px 10px;border-radius:10px;}
+.ai-result-title{font-size:15px;font-weight:600;color:var(--text);margin-bottom:6px;padding-right:90px;}
+.ai-result-title a{color:inherit;text-decoration:none;}
+.ai-result-title a:hover{color:var(--blue);}
+.ai-result-meta{font-size:11px;color:var(--t2);margin-bottom:14px;display:flex;gap:10px;flex-wrap:wrap;}
+.ai-section{margin-bottom:10px;}
+.ai-section:last-child{margin-bottom:0;}
+.ai-section-label{font-family:'IBM Plex Mono',monospace;font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;color:var(--t3);margin-bottom:4px;}
+.ai-section-text{font-size:13px;color:var(--text);line-height:1.5;}
+
+/* MISC */
+#loadBar{position:fixed;top:0;left:0;height:2px;width:0;background:var(--blue);z-index:2000;opacity:0;transition:opacity .2s;}
+.toast-wrap{position:fixed;bottom:20px;right:20px;z-index:3000;display:flex;flex-direction:column;gap:8px;}
+.toast{font-family:'IBM Plex Mono',monospace;font-size:.7rem;background:var(--text);color:#fff;padding:9px 14px;border-radius:4px;animation:tIn .2s ease;}
+@keyframes tIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+
+@media(max-width:768px){
+  .layout{grid-template-columns:1fr}
+  .sidebar{display:none}
+  header{padding:0 14px}
+  .events-area,.controls,.count-row{padding-left:14px;padding-right:14px}
+  .hack-view,.ai-view{padding:16px}
+  .ai-rev-grid{grid-template-columns:1fr}
+  .hack-grid{grid-template-columns:1fr}
+}
+
+/* UPGRADE MODAL */
+.oc-scrim{position:fixed;inset:0;background:rgba(24,24,27,.5);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;z-index:5000;padding:20px;}
+.oc-scrim.show{display:flex;}
+.oc-modal{background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:380px;width:100%;padding:28px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.18);}
+.oc-orb{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,var(--blue),#7c3aed);color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;margin:0 auto 14px;}
+.oc-modal h3{font-size:1.2rem;font-weight:600;margin:0 0 6px;color:var(--text);letter-spacing:-.02em;}
+.oc-modal p{font-size:13px;color:var(--t2);margin:0 0 16px;line-height:1.45;}
+.oc-perks{text-align:left;list-style:none;margin:0 0 16px;padding:0;}
+.oc-perks li{font-size:13px;color:var(--text);padding-left:22px;position:relative;margin-bottom:8px;}
+.oc-perks li::before{content:'\2713';position:absolute;left:0;color:var(--ok);font-weight:700;}
+.oc-modal input{width:100%;height:38px;border:1px solid var(--border);border-radius:8px;padding:0 12px;font-family:'IBM Plex Sans',sans-serif;font-size:13px;margin-bottom:12px;outline:none;background:var(--sf2);box-sizing:border-box;}
+.oc-modal input:focus{border-color:var(--blue);background:var(--surface);}
+.oc-go{width:100%;height:40px;background:linear-gradient(135deg,var(--blue),#7c3aed);color:#fff;border:none;border-radius:8px;font-family:'IBM Plex Mono',monospace;font-size:.74rem;font-weight:500;cursor:pointer;}
+.oc-go:disabled{opacity:.6;cursor:default;}
+.oc-x{margin-top:12px;font-size:12px;color:var(--t3);cursor:pointer;}
+</style>
+</head>
+<body>
+<div id="loadBar"></div>
+
+<header>
+  <div class="logo" onclick="goHome()"><div class="logo-mark"></div>ORBITCAST</div>
+  <div class="search-wrap">
+    <i class="s-ico">&#x2315;</i>
+    <input id="search" type="text" placeholder="Search events, sources…" oninput="render()">
+  </div>
+  <span class="hd-meta" id="lastRunEl">—</span>
+  <span class="new-badge" id="newBadge" style="display:none" onclick="filterNew()"><span id="newCt">0</span> new</span>
+  <button class="btn-sm" id="refreshBtn" onclick="doRefresh()">↻ Refresh</button>
+  <button class="btn-sm" id="proBtn" onclick="openUpgrade()" style="border-color:#7c3aed;color:#7c3aed">✦ Pro</button>
+</header>
+
+<div class="layout">
+  <nav class="sidebar">
+    <div class="nav-section">
+      <div class="nav-hd">Category</div>
+      <div id="catList"></div>
+    </div>
+    <div class="nav-div"></div>
+    <div class="nav-section" style="padding:0 0 8px;">
+      <button class="hack-nav-btn" onclick="switchView('hackathons')">⚡ Hackathons</button>
+      <button class="ai-nav-btn" onclick="switchView('ai')" style="margin-top:8px;">✦ OrbitCast AI</button>
+    </div>
+  </nav>
+
+  <div class="main">
+    <div class="view-tabs">
+      <button class="view-tab active" id="tabEvents" onclick="switchView('events')">Events</button>
+      <button class="view-tab" id="tabCalendar" onclick="switchView('calendar')">Calendar</button>
+      <button class="view-tab" id="tabHackathons" onclick="switchView('hackathons')">⚡ Hackathons</button>
+      <button class="view-tab" id="tabAI" onclick="switchView('ai')">✦ OrbitCast AI</button>
+    </div>
+
+    <!-- EVENTS VIEW -->
+    <div id="eventsView">
+      <div class="controls">
+        <label class="ctrl-label"><input type="checkbox" id="cbUpcoming" checked onchange="render()"> Upcoming</label>
+        <div class="ctrl-sep"></div>
+        <label class="ctrl-label"><input type="checkbox" id="cbSaved" onchange="render()"> Saved</label>
+        <div class="ctrl-sep"></div>
+        <select class="ctrl-sel" id="dateRange" onchange="render()">
+          <option value="all">All dates</option>
+          <option value="today">Today</option>
+          <option value="week">This week</option>
+          <option value="month">This month</option>
+          <option value="30">Next 30 days</option>
+          <option value="90">Next 90 days</option>
+        </select>
+        <div class="ctrl-sep"></div>
+        <select class="ctrl-sel" id="sortSel" onchange="render()">
+          <option value="date">Sort: soonest</option>
+          <option value="source">Sort: by source</option>
+          <option value="alpha">Sort: A–Z</option>
+          <option value="category">Sort: by category</option>
+        </select>
+        <div class="ctrl-right">
+          <button class="btn-tog" onclick="exportAll()">↓ Export .ics</button>
+        </div>
+      </div>
+      <div class="count-row">
+        <span><span class="count-n" id="cntN">0</span> events</span>
+        <span id="cntMeta" style="color:var(--t3)"></span>
+        <span class="kb-hint">Press <kbd>/</kbd> to search · <kbd>C</kbd> calendar</span>
+      </div>
+      <div id="errorBanner" style="display:none" class="error-banner"></div>
+      <div class="events-area" id="eventsArea"></div>
+    </div>
+
+    <!-- CALENDAR VIEW -->
+    <div class="cal-view" id="calView">
+      <div class="cal-hero">
+        <div class="cal-header">
+          <div class="cal-header-left">
+            <span class="cal-title" id="calTitle">June</span>
+            <span class="cal-year" id="calYearLabel">2026</span>
+          </div>
+          <div class="cal-header-right">
+            <button class="cal-btn" onclick="calPrev()">← Prev</button>
+            <button class="cal-btn today-btn" onclick="calGoToday()">Today</button>
+            <button class="cal-btn" onclick="calNext()">Next →</button>
+          </div>
+        </div>
+        <div class="cal-weekdays">
+          <div class="cal-wday">Mon</div><div class="cal-wday">Tue</div><div class="cal-wday">Wed</div>
+          <div class="cal-wday">Thu</div><div class="cal-wday">Fri</div><div class="cal-wday">Sat</div><div class="cal-wday">Sun</div>
+        </div>
+        <div class="cal-grid2" id="calGrid2"></div>
+        <div class="cal-day-panel" id="calDayPanel"></div>
+      </div>
+    </div>
+
+    <!-- HACKATHONS VIEW -->
+    <div class="hack-view" id="hackathonsView">
+      <div class="hack-header">
+        <div class="hack-title">⚡ London Hackathons <span class="hack-badge" id="hackCount">0 upcoming</span></div>
+        <label class="ctrl-label"><input type="checkbox" id="cbHackUpcoming" checked onchange="renderHackathons()"> Upcoming only</label>
+      </div>
+      <div class="hack-grid" id="hackGrid"></div>
+    </div>
+
+    <!-- AI VIEW -->
+    <div class="ai-view" id="aiView">
+      <div class="ai-header">
+        <div class="ai-orb-wrap">
+          <div class="ai-orb-ring"></div>
+          <div class="ai-orb">✦</div>
+        </div>
+        <h1 class="ai-title">OrbitCast AI</h1>
+        <p class="ai-subtitle">Drop your CV. OrbitCast reads your real background and recommends the handful of events actually worth your time — honestly, including the gaps. Not everything, just what fits.</p>
+      </div>
+
+      <div class="ai-form-card">
+        <span class="ai-form-label">Step 1 — Upload your CV (optional)</span>
+        <div class="cv-drop-zone" id="cvDropZone"
+          ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleCVDrop(event)"
+          onclick="document.getElementById('cvFile').click()">
+          <span class="cv-icon">📄</span>
+          <div class="cv-zone-title">Drop your CV here</div>
+          <div class="cv-zone-sub">PDF, DOCX or TXT · Max 5MB</div>
+          <div class="cv-browse-btn">Browse files</div>
+          <input type="file" id="cvFile" accept=".pdf,.docx,.txt" style="display:none" onchange="handleCVFile(this)">
+        </div>
+        <div class="cv-file-info" id="cvFileInfo" style="display:none">
+          <span>📄</span>
+          <span class="cv-file-name" id="cvFileName"></span>
+          <button class="cv-file-clear" onclick="clearCV()" title="Remove">×</button>
+        </div>
+
+        <div class="cv-divider">or describe yourself</div>
+
+        <span class="ai-form-label">Step 2 — Tell us about yourself</span>
+        <textarea class="ai-textarea" id="aiInput" placeholder="I'm a software engineer with 5 years in fintech, now looking to transition into AI product management. Interested in defence tech and deep tech investing. Currently building a side project using LLMs..." oninput="updateCharCount()"></textarea>
+        <div class="ai-tips">
+          <span class="ai-tip" onclick="setAiTip('Software engineer with 3 years Python & ML experience, interested in AI/product roles')">🖥️ Tech & AI</span>
+          <span class="ai-tip" onclick="setAiTip('Business professional seeking networking with founders and investors in London')">💼 Business</span>
+          <span class="ai-tip" onclick="setAiTip('Cybersecurity analyst interested in threat intelligence and infosec conferences')">🔒 Security</span>
+          <span class="ai-tip" onclick="setAiTip('PhD student researching defence technology, geopolitics, and AI governance')">🎓 Research</span>
+          <span class="ai-tip" onclick="setAiTip('Founder looking for co-founders, investors and hackathons to build and ship fast')">🚀 Founder</span>
+        </div>
+        <div class="ai-form-footer">
+          <span class="ai-char-count" id="aiCharCount">0 / 5000</span>
+          <button class="ai-submit" id="aiSubmitBtn" onclick="submitAI()">
+            <span class="btn-text">Analyse & Recommend ✦</span>
+            <span class="spinner"></span>
+          </button>
+        </div>
+      </div>
+
+      <div id="aiResults"></div>
+    </div>
+
+  </div>
+</div>
+
+<div class="oc-scrim" id="ocScrim" onclick="if(event.target===this)closeUpgrade()">
+  <div class="oc-modal">
+    <div class="oc-orb">✦</div>
+    <h3 id="ocTitle">OrbitCast Pro</h3>
+    <p id="ocSub">Unlimited CV analyses and deeper prep for every event.</p>
+    <ul class="oc-perks">
+      <li>Unlimited CV analyses</li>
+      <li>Deeper, role-specific prep briefs</li>
+      <li>Weekly matched-events email</li>
+      <li>Saved profile across visits</li>
+    </ul>
+    <input type="email" id="ocEmail" placeholder="you@email.com" autocomplete="email">
+    <button class="oc-go" id="ocGo" onclick="upgrade()">Continue</button>
+    <div class="oc-x" onclick="closeUpgrade()">Maybe later</div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script>
+// ── CONFIG ───────────────────────────────────────────────
+const CAT_COLOR = {
+  'Intelligence & Security':'var(--ci)',
+  'Defence & Geopolitics':  'var(--cd)',
+  'Cyber & Infosec':        'var(--cc)',
+  'Tech & AI':              'var(--ct)',
+  'Education & Research':   'var(--ce)',
+  'Builder & Tech Community':'var(--cb)',
+  'Business & Networking':  'var(--cn)',
+  'Hackathons':             'var(--ch)',
+};
+const CAT_VAR = {
+  'Intelligence & Security':'--ci','Defence & Geopolitics':'--cd','Cyber & Infosec':'--cc',
+  'Tech & AI':'--ct','Education & Research':'--ce','Builder & Tech Community':'--cb','Business & Networking':'--cn',
+};
+
+const JUNK_PATHS=['/cart','/register','/registration','/login','/cookie','/privacy','/terms','/sitemap','/404'];
+function isLegit(e){
+  if(!e.title||!e.url)return false;
+  const u=e.url.toLowerCase();
+  if(JUNK_PATHS.some(p=>u.includes(p)))return false;
+  if(e.title.trim().length<5)return false;
+  return true;
+}
+
+// ── HACKATHONS DATA ──────────────────────────────────────
+const HACKATHONS=[
+  {title:'The Agent Economy Buildathon',date:'2026-06-01',endDate:'2026-06-06',prize:'$20k in bounties',url:'https://lnkd.in/enUFiCUU',desc:'Build the agent economy rails. 6 days. Superteam UK × PLUGGED.'},
+  {title:'Fullhouse — UK\'s first poker bot hackathon',date:'2026-06-01',endDate:'2026-06-04',prize:'£4k+ prize pool',url:'https://lnkd.in/eZKnwnGD',desc:'Texas Hold\'em algo comp vs top university bots.'},
+  {title:'Wayflyer × Fin | Build the future of eCommerce',date:'2026-06-03',endDate:'2026-06-05',prize:'',url:'https://lu.ma/v4bzvbka',desc:'3-day build at the Visionaries Summit. Best builders in London.'},
+  {title:'Pop The Bubble Hackathon',date:'2026-06-05',endDate:'2026-06-07',prize:'',url:'https://lu.ma/035ubxn3',desc:'36hrs. 80 builders. 12% acceptance rate. Real products only.'},
+  {title:'NVIDIA Hack for Impact — London',date:'2026-06-05',endDate:'2026-06-07',prize:'',url:'https://lnkd.in/ebmmXJ4E',desc:'Build autonomous systems that make a real-world impact.'},
+  {title:'AI Risk Content Hackathon',date:'2026-06-06',endDate:'2026-06-06',prize:'',url:'https://lnkd.in/eF5GSG7u',desc:'Create content that helps the world navigate AI risk. BlueDot Impact.'},
+  {title:'VibeHack London',date:'2026-06-06',endDate:'2026-06-06',prize:'£10k prize pool',url:'https://lu.ma/9ef4463s',desc:'24hrs at UCL. Best Vibe Coder wins.'},
+  {title:'Shared Futures Buildathon',date:'2026-06-07',endDate:'2026-06-07',prize:'',url:'https://lnkd.in/e7npuFaY',desc:'Build tech for social impact.'},
+  {title:'Move 37 | London Tech Week',date:'2026-06-09',endDate:'2026-06-09',prize:'',url:'https://lu.ma/v9ydosib',desc:'AI × finance student competition. Named after AlphaGo\'s legendary move.'},
+  {title:'Deploy by Antler @ Google London',date:'2026-06-10',endDate:'2026-06-10',prize:'',url:'https://lu.ma/j6wkjmkf',desc:'Antler takes over Google HQ. Build the agentic web.'},
+  {title:'London Initiative for Safe AI Hackathon',date:'2026-06-13',endDate:'2026-06-13',prize:'',url:'https://lnkd.in/erBNHS2b',desc:'AI safety focused hackathon by the London Initiative for Safe AI.'},
+  {title:'Model to Market: The Quantitative Hack',date:'2026-06-15',endDate:'2026-06-15',prize:'',url:'https://lu.ma/4j44j9l0',desc:'UK\'s first live AI-native trading competition.'},
+  {title:'Localhost: On-Device Agent Hackathon',date:'2026-06-20',endDate:'2026-06-20',prize:'',url:'https://lu.ma/8og1gx56',desc:'AI agents. Fully offline. No cloud. Pure on-device.'},
+  {title:'GTM Hackathon London',date:'2026-06-20',endDate:'2026-06-20',prize:'',url:'https://lu.ma/hxsfxyvb',desc:'For GTM professionals. By GTMengineer.dev.'},
+  {title:'Hands Off Hackathon',date:'2026-06-25',endDate:'2026-06-25',prize:'',url:'https://lu.ma/wl7a90xe',desc:'Build a self-running business powered by AI agents.'},
+  {title:'London Agentic AI Hack Night',date:'2026-06-25',endDate:'2026-06-25',prize:'',url:'https://lu.ma/dnoe595m',desc:'Live building. Agentic AI. London\'s best builders.'},
+  {title:'AI in Government Hackathon',date:'2026-06-25',endDate:'2026-06-26',prize:'',url:'https://lu.ma/1d7szvu5',desc:'By Incubator for Artificial Intelligence + ElevenLabs.'},
+  {title:'European Defense Tech Hackathon',date:'2026-06-26',endDate:'2026-06-28',prize:'',url:'https://lnkd.in/e5sW5yaK',desc:'200+ hackers. Accelerating European defense innovation.'},
+  {title:'ARIA + MaterialHack',date:'2026-06-26',endDate:'2026-06-28',prize:'',url:'https://lnkd.in/e2SVbwBs',desc:'Biomaterials × biomanufacturing. Nucleate UK × ARIA.'},
+];
+
+// ── STATE ────────────────────────────────────────────────
+const NOW=new Date();
+let allEvents=[],sourceSummary=[];
+let activeCat='all',activeSrc=null;
+const saved=new Set();
+let calY,calM,selDay=null;
+let lastRunTs=null,currentView='events';
+let cvFileData=null,cvText='';
+
+// ── UTILS ────────────────────────────────────────────────
+function esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function pad(n){return String(n).padStart(2,'0');}
+function parseDate(s){if(!s)return null;if(/^\d{4}-\d{2}-\d{2}$/.test(s))return new Date(s+'T12:00:00');return new Date(s);}
+function isUp(e){if(!e.date)return true;return e.date>=new Date(NOW.getFullYear(),NOW.getMonth(),NOW.getDate());}
+function isToday(e){if(!e.date)return false;return e.date.toDateString()===NOW.toDateString();}
+function fmtShort(dt){return dt.toLocaleDateString('en-GB',{day:'numeric',month:'short'});}
+function fmtFull(dt){return dt.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',year:'numeric'});}
+function timeAway(e){
+  if(!e.date)return{txt:'TBD',cls:'gray'};
+  const today=new Date(NOW.getFullYear(),NOW.getMonth(),NOW.getDate());
+  const evDay=new Date(e.date.getFullYear(),e.date.getMonth(),e.date.getDate());
+  const diff=Math.round((evDay-today)/86400000);
+  if(diff<0)return{txt:'Past',cls:'gray'};
+  if(diff===0)return{txt:'Today',cls:'blue'};
+  if(diff===1)return{txt:'Tomorrow',cls:'blue'};
+  if(diff<7)return{txt:'In '+diff+'d',cls:'blue'};
+  if(diff<14)return{txt:'Next wk',cls:''};
+  return{txt:fmtShort(e.date),cls:''};
+}
+function fmtDateGroup(dt){
+  const today=new Date(NOW.getFullYear(),NOW.getMonth(),NOW.getDate());
+  const evDay=new Date(dt.getFullYear(),dt.getMonth(),dt.getDate());
+  const diff=Math.round((evDay-today)/86400000);
+  if(diff===0)return{label:'Today',isToday:true};
+  if(diff===1)return{label:'Tomorrow',isToday:false};
+  return{label:dt.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'}),isToday:false};
+}
+
+// ── VIEW SWITCHING ───────────────────────────────────────
+function switchView(view){
+  currentView=view;
+  document.querySelectorAll('.view-tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('eventsView').style.display=view==='events'?'':'none';
+  document.getElementById('calView').classList.toggle('show',view==='calendar');
+  document.getElementById('hackathonsView').classList.toggle('show',view==='hackathons');
+  document.getElementById('aiView').classList.toggle('show',view==='ai');
+  const tabMap={events:'tabEvents',calendar:'tabCalendar',hackathons:'tabHackathons',ai:'tabAI'};
+  if(tabMap[view])document.getElementById(tabMap[view]).classList.add('active');
+  if(view==='calendar')renderCal();
+  if(view==='hackathons')renderHackathons();
+}
+function goHome(){switchView('ai');window.scrollTo({top:0,behavior:'smooth'});}
+
+// ── API ──────────────────────────────────────────────────
+async function fetchEvents(){
+  setLoad(true); hideError();
+  try{
+    const[evRes,sumRes]=await Promise.all([fetch('/api/events'),fetch('/api/summary')]);
+    if(!evRes.ok)throw new Error('Events API '+evRes.status);
+    const evData=await evRes.json();
+    const sumData=await sumRes.json();
+    allEvents=(evData.events||[]).filter(isLegit).map((e,i)=>({
+      id:'ev'+i,cat:e.category||'Tech & AI',src:e.source||'',
+      emoji:e.emoji||'',title:e.title||'',date:parseDate(e.date),
+      url:e.url||'#',hasDate:!!e.date,time:e.time||null,location:e.location||'',
+    }));
+    sourceSummary=sumData.summary||[];
+    lastRunTs=evData.last_run?new Date(evData.last_run):null;
+    const newN=allEvents.filter(e=>e.date&&isToday(e)).length;
+    if(newN){document.getElementById('newBadge').style.display='inline-block';document.getElementById('newCt').textContent=newN+' today';}
+    renderLastRun();
+    render();
+    renderSidebar();
+    if(currentView==='calendar')renderCal();
+  }catch(err){showError('Could not load events: '+err.message);}
+  finally{setLoad(false);}
+}
+
+async function doRefresh(){
+  const btn=document.getElementById('refreshBtn');
+  btn.disabled=true;btn.innerHTML='<span class="scraping-pulse"></span>Scanning…';
+  try{
+    await fetch('/api/refresh',{method:'POST'});
+    let attempts=0;
+    const poll=setInterval(async()=>{
+      attempts++;
+      try{
+        const r=await fetch('/api/status');const d=await r.json();
+        if(!d.scraping||attempts>60){clearInterval(poll);await fetchEvents();btn.disabled=false;btn.textContent='↻ Refresh';toast('Feed refreshed');}
+      }catch{clearInterval(poll);btn.disabled=false;btn.textContent='↻ Refresh';}
+    },2000);
+  }catch(err){btn.disabled=false;btn.textContent='↻ Refresh';showError('Refresh failed: '+err.message);}
+}
+
+// ── SIDEBAR (dynamic categories) ────────────────────────
+function renderSidebar(){
+  const catCounts={};
+  allEvents.forEach(e=>{catCounts[e.cat]=(catCounts[e.cat]||0)+1;});
+  const allCats=Object.entries(CAT_COLOR);
+  const activeCats=allCats.filter(([cat])=>catCounts[cat]>0);
+  let html='<button class="cat-btn '+(activeCat==='all'?'active':'')+'" onclick="setCat(\'all\',this)"><span class="cat-lead"></span>All events</button>';
+  activeCats.forEach(([cat,col])=>{
+    const varName=CAT_VAR[cat]||'--ct';
+    const label=cat.replace('&','&amp;').replace('Intelligence & Security','Intel & Security').replace('Builder & Tech Community','Builder & Tech').replace('Business & Networking','Business');
+    html+='<button class="cat-btn '+(activeCat===cat?'active':'')+'" onclick="setCat(\''+esc(cat)+'\',this)"><span class="cat-lead"></span><span class="cat-dot" style="background:var('+varName+')"></span>'+label+'</button>';
+  });
+  document.getElementById('catList').innerHTML=html;
+}
+
+// ── RENDER EVENTS ────────────────────────────────────────
+function getFiltered(){
+  const q=document.getElementById('search').value.toLowerCase().trim();
+  const upcomingOnly=document.getElementById('cbUpcoming').checked;
+  const savedOnly=document.getElementById('cbSaved').checked;
+  const dateRange=document.getElementById('dateRange').value;
+  let list=allEvents.filter(e=>{
+    if(activeCat!=='all'&&e.cat!==activeCat)return false;
+    if(activeSrc&&e.src!==activeSrc)return false;
+    if(upcomingOnly&&!isUp(e))return false;
+    if(savedOnly&&!saved.has(e.id))return false;
+    if(q&&![e.title,e.src,e.cat].join(' ').toLowerCase().includes(q))return false;
+    if(dateRange!=='all'&&e.date){
+      const today=new Date(NOW.getFullYear(),NOW.getMonth(),NOW.getDate());
+      const evDay=new Date(e.date.getFullYear(),e.date.getMonth(),e.date.getDate());
+      const diff=(evDay-today)/86400000;
+      if(dateRange==='today'&&diff!==0)return false;
+      if(dateRange==='week'&&(diff<0||diff>7))return false;
+      if(dateRange==='month'&&(e.date.getMonth()!==NOW.getMonth()||e.date.getFullYear()!==NOW.getFullYear()))return false;
+      if(dateRange==='30'&&(diff<0||diff>30))return false;
+      if(dateRange==='90'&&(diff<0||diff>90))return false;
+    }
+    return true;
+  });
+  const s=document.getElementById('sortSel').value;
+  if(s==='source')list.sort((a,b)=>a.src.localeCompare(b.src)||(a.date&&b.date?a.date-b.date:0));
+  else if(s==='alpha')list.sort((a,b)=>a.title.localeCompare(b.title));
+  else if(s==='category')list.sort((a,b)=>a.cat.localeCompare(b.cat)||(a.date&&b.date?a.date-b.date:0));
+  else list.sort((a,b)=>{if(!a.date&&!b.date)return 0;if(!a.date)return 1;if(!b.date)return -1;return a.date-b.date;});
+  return list;
+}
+
+function render(){
+  const list=getFiltered();
+  document.getElementById('cntN').textContent=list.length;
+  const meta=[];
+  if(activeSrc)meta.push(activeSrc);
+  if(activeCat!=='all')meta.push(activeCat);
+  document.getElementById('cntMeta').textContent=meta.length?'· '+meta.join(' · '):'';
+  const area=document.getElementById('eventsArea');
+  if(!list.length){area.innerHTML='<div class="empty"><h3>No events found</h3><p>Try widening your filters or hit Refresh.</p></div>';return;}
+  const dated=list.filter(e=>e.hasDate);
+  const undated=list.filter(e=>!e.hasDate);
+  const groups={};
+  dated.forEach(e=>{const k=e.date.toDateString();(groups[k]=groups[k]||{date:e.date,evs:[]}).evs.push(e);});
+  const sortedGroups=Object.values(groups).sort((a,b)=>a.date-b.date);
+  let html=sortedGroups.map(g=>{
+    const hd=fmtDateGroup(g.date);
+    return '<div class="date-group"><div class="date-hd"><span class="date-hd-lbl">'+esc(hd.label)+'</span>'+(hd.isToday?'<span class="date-hd-today">today</span>':'')+'<span class="date-hd-line"></span></div>'+g.evs.map(evRow).join('')+'</div>';
+  }).join('');
+  if(undated.length){
+    html+='<div class="tbd-hd"><span class="date-hd-line"></span><span class="tbd-hd-lbl">Date not confirmed ('+undated.length+')</span><span class="date-hd-line"></span></div>';
+    html+=undated.map(evRow).join('');
+  }
+  area.innerHTML=html;
+}
+
+function evRow(e){
+  const ta=timeAway(e);
+  const past=!isUp(e);
+  const catCol=CAT_COLOR[e.cat]||'var(--border2)';
+  const dt=e.date?fmtShort(e.date):'';
+  const tm=e.time?e.time:'All day';
+  return '<div class="ev'+(past?' past':'')+(e.hasDate?'':' ev-tbd')+'" style="--cat:'+catCol+'">'
+    +'<div class="ev-time"><span class="soon '+ta.cls+'">'+esc(ta.txt)+'</span>'+(dt?'<span class="dt">'+esc(dt)+'</span>':'')+'<span class="tm">'+esc(tm)+'</span></div>'
+    +'<div class="ev-body"><a class="ev-title" href="'+esc(e.url)+'" target="_blank" rel="noopener">'+esc(e.title)+'</a><div class="ev-src">'+esc(e.emoji)+' '+esc(e.src)+' · '+esc(e.cat)+'</div></div>'
+    +'<div class="ev-right"><button class="ic-btn" onclick="dlICS(\''+e.id+'\')" title="Add to calendar">📅</button><button class="ic-btn '+(saved.has(e.id)?'saved':'')+'" onclick="toggleStar(\''+e.id+'\',this)" title="Save">☆</button><button class="ic-btn" onclick="openLink(\''+esc(e.url)+'\')" title="View">↗</button></div>'
+    +'</div>';
+}
+
+// ── HACKATHONS ───────────────────────────────────────────
+function renderHackathons(){
+  const upcomingOnly=document.getElementById('cbHackUpcoming').checked;
+  const today=new Date(NOW.getFullYear(),NOW.getMonth(),NOW.getDate());
+  let hacks=[...HACKATHONS];
+  // Also pull from allEvents that look like hackathons
+  const hackKeywords=['hackathon','buildathon','hack night','hack for'];
+  const fromFeed=allEvents.filter(e=>hackKeywords.some(k=>e.title.toLowerCase().includes(k))).map(e=>({
+    title:e.title,date:e.date?e.date.toISOString().split('T')[0]:null,endDate:null,
+    prize:'',url:e.url,desc:e.src,fromFeed:true
+  }));
+  // Merge, avoid duplicates
+  fromFeed.forEach(f=>{
+    if(!hacks.some(h=>h.title.toLowerCase()===f.title.toLowerCase()))hacks.push(f);
+  });
+  hacks.sort((a,b)=>(a.date||'9999')>(b.date||'9999')?1:-1);
+  const upcoming=hacks.filter(h=>{
+    if(!h.date)return true;
+    const hEnd=h.endDate?parseDate(h.endDate):parseDate(h.date);
+    return hEnd>=today;
+  });
+  document.getElementById('hackCount').textContent=(upcomingOnly?upcoming.length:hacks.length)+' upcoming';
+  const list=upcomingOnly?upcoming:hacks;
+  if(!list.length){document.getElementById('hackGrid').innerHTML='<div class="empty"><h3>No hackathons found</h3></div>';return;}
+  document.getElementById('hackGrid').innerHTML=list.map(h=>{
+    const hDate=h.date?parseDate(h.date):null;
+    const hEnd=h.endDate?parseDate(h.endDate):hDate;
+    const isPast=hEnd&&hEnd<today;
+    const isSoon=hDate&&!isPast&&(hDate-today)/86400000<=3;
+    let dateStr='Date TBD';
+    if(hDate){
+      dateStr=fmtFull(hDate);
+      if(h.endDate&&h.endDate!==h.date)dateStr+=' – '+fmtShort(parseDate(h.endDate));
+    }
+    return '<div class="hack-card'+(isPast?' hack-past':'')+'"><div class="hack-card-top">'
+      +'<div class="hack-card-date">📅 '+esc(dateStr)+(isSoon?'<span class="hack-soon">This week</span>':'')+'</div>'
+      +'<div class="hack-card-title">'+esc(h.title)+'</div>'
+      +(h.prize?'<div class="hack-card-prize">🏆 '+esc(h.prize)+'</div>':'')
+      +'</div><div class="hack-card-body">'
+      +(h.desc?'<div class="hack-card-desc">'+esc(h.desc)+'</div>':'')
+      +'<div class="hack-card-actions"><a class="hack-link primary" href="'+esc(h.url)+'" target="_blank" rel="noopener">Register →</a>'
+      +'<button class="hack-link" onclick="addHackToCalendar(\''+esc(h.title)+'\',\''+esc(h.date)+'\',\''+esc(h.url)+'\')">+ Calendar</button></div>'
+      +'</div></div>';
+  }).join('');
+}
+function addHackToCalendar(title,dateStr,url){
+  if(!dateStr){toast('No date for this event');return;}
+  const dt=parseDate(dateStr);const end=new Date(dt.getTime()+86400000);
+  const lines=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//ORBITCAST//EN','BEGIN:VEVENT',
+    'UID:hack-'+Date.now()+'@orbitcast','DTSTAMP:'+icsDate(new Date()),
+    'DTSTART;VALUE=DATE:'+dateStr.replace(/-/g,''),
+    'SUMMARY:'+title.replace(/,/g,'\\,'),'URL:'+url,'END:VEVENT','END:VCALENDAR'].join('\r\n');
+  triggerDownload(lines,'hackathon.ics','text/calendar');toast('Calendar invite downloaded');
+}
+
+// ── INTERACTIONS ─────────────────────────────────────────
+function setCat(cat,btn){
+  activeCat=cat;activeSrc=null;
+  document.querySelectorAll('.cat-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  render();
+}
+function toggleStar(id,btn){
+  if(saved.has(id)){saved.delete(id);btn.classList.remove('saved');toast('Removed');}
+  else{saved.add(id);btn.classList.add('saved');toast('Saved');}
+  if(document.getElementById('cbSaved').checked)render();
+}
+function filterNew(){
+  document.getElementById('sortSel').value='date';document.getElementById('search').value='';
+  document.getElementById('dateRange').value='today';activeCat='all';activeSrc=null;
+  renderSidebar();render();toast('Today\'s events');
+}
+function openLink(url){if(url&&url!=='#')window.open(url,'_blank','noopener');}
+
+// ── CV HANDLING ──────────────────────────────────────────
+function handleDragOver(e){e.preventDefault();document.getElementById('cvDropZone').classList.add('active');}
+function handleDragLeave(e){document.getElementById('cvDropZone').classList.remove('active');}
+function handleCVDrop(e){
+  e.preventDefault();document.getElementById('cvDropZone').classList.remove('active');
+  const file=e.dataTransfer?.files?.[0];if(file)processFile(file);
+}
+function handleCVFile(input){const file=input.files?.[0];if(file)processFile(file);}
+function clearCV(){
+  cvText='';cvFileData=null;
+  document.getElementById('cvFileInfo').style.display='none';
+  document.getElementById('cvDropZone').classList.remove('has-file');
+  document.getElementById('cvFile').value='';
+}
+async function processFile(file){
+  if(file.size>5*1024*1024){toast('File too large — max 5MB');return;}
+  cvFileData=file;                              // send the real file to the server for extraction
+  document.getElementById('cvFileName').textContent=file.name;
+  document.getElementById('cvFileInfo').style.display='flex';
+  document.getElementById('cvDropZone').classList.add('has-file');
+  toast('CV loaded ✓');
+}
+async function extractPDFText(file){
+  const buf=await file.arrayBuffer();
+  const bytes=new Uint8Array(buf);
+  const raw=new TextDecoder('latin1').decode(bytes);
+  // Extract text between parentheses in PDF content streams
+  let text='';
+  const streamRe=/stream([\s\S]*?)endstream/g;
+  let sm;
+  while((sm=streamRe.exec(raw))!==null){
+    const chunk=sm[1];
+    const parens=chunk.match(/\(([^\)\\]|\\.){1,200}\)/g)||[];
+    parens.forEach(p=>{
+      const inner=p.slice(1,-1).replace(/\\n/g,' ').replace(/\\/g,'');
+      if(/[a-zA-Z]{2,}/.test(inner))text+=inner+' ';
+    });
+  }
+  return text.slice(0,5000).trim();
+}
+
+// ── AI FORM ──────────────────────────────────────────────
+function updateCharCount(){const l=document.getElementById('aiInput').value.length;document.getElementById('aiCharCount').textContent=l+' / 5000';}
+function setAiTip(t){document.getElementById('aiInput').value=t;updateCharCount();}
+
+// ── UPGRADE / PRIVACY ────────────────────────────────────
+function openUpgrade(limit){
+  const saved=localStorage.getItem('oc_email');if(saved)document.getElementById('ocEmail').value=saved;
+  if(limit){document.getElementById('ocTitle').textContent='You\'ve used your free analyses';document.getElementById('ocSub').textContent='Upgrade to OrbitCast Pro for unlimited matching.';}
+  document.getElementById('ocScrim').classList.add('show');
+}
+function closeUpgrade(){document.getElementById('ocScrim').classList.remove('show');}
+async function upgrade(){
+  const email=document.getElementById('ocEmail').value.trim();
+  if(!email){document.getElementById('ocEmail').focus();return;}
+  localStorage.setItem('oc_email',email);
+  const go=document.getElementById('ocGo');go.disabled=true;go.textContent='…';
+  try{
+    const res=await fetch('/api/upgrade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+    const data=await res.json();
+    if(data.url){window.location=data.url;return;}
+    document.getElementById('ocSub').textContent=data.error||"Pro isn't live yet — your email is saved, you'll be first to know.";
+  }catch(e){document.getElementById('ocSub').textContent='Could not start checkout.';}
+  finally{go.disabled=false;go.textContent='Continue';}
+}
+async function forgetData(){
+  if(!confirm('Delete all CV data OrbitCast holds for this browser?'))return;
+  const email=localStorage.getItem('oc_email')||'';
+  try{await fetch('/api/forget',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});}catch(e){}
+  localStorage.removeItem('oc_email');toast('Your data has been deleted');
+}
+
+async function submitAI(){
+  const input=document.getElementById('aiInput').value.trim();
+  if(!cvFileData && input.length<10){toast('Upload a CV or tell us a bit about yourself');return;}
+  const btn=document.getElementById('aiSubmitBtn');
+  btn.classList.add('loading');btn.disabled=true;
+  try{
+    const fd=new FormData();
+    if(cvFileData)fd.append('cv',cvFileData);
+    if(input)fd.append('profile',input);
+    const email=localStorage.getItem('oc_email');if(email)fd.append('email',email);
+    const res=await fetch('/api/ai/recommend',{method:'POST',body:fd});
+    const data=await res.json();
+    if(res.status===402){openUpgrade(true);return;}
+    if(!res.ok){toast(data.error||'Something went wrong');return;}
+    renderAIResults(data);
+  }catch(err){toast('Failed: '+err.message);}
+  finally{btn.classList.remove('loading');btn.disabled=false;}
+}
+
+function renderAIResults(data){
+  const container=document.getElementById('aiResults');
+
+  // Not a CV → say so, don't invent a profile.
+  if(data.is_cv===false){
+    container.innerHTML='<div class="ai-profile-card"><div class="ai-profile-label">✦ Not a CV</div><div class="ai-profile-text">'+esc(data.message||'That doesn\'t look like a CV. Paste a few lines about your background, or upload an actual CV.')+'</div></div>';
+    container.scrollIntoView({behavior:'smooth'});return;
+  }
+
+  const recs=data.recommendations||[];
+  let html='';
+
+  if(data.profile_summary)
+    html+='<div class="ai-profile-card"><div class="ai-profile-label">✦ What we read</div><div class="ai-profile-text">'+esc(data.profile_summary)+'</div></div>';
+
+  if(data.revelations&&data.revelations.length){
+    html+='<div class="ai-revelations"><div class="ai-rev-hd">Honest read</div><div class="ai-rev-grid">';
+    data.revelations.forEach(r=>{html+='<div class="ai-rev-card"><div class="ai-rev-icon">'+esc(r.icon||'•')+'</div><div class="ai-rev-title">'+esc(r.title||'')+'</div><div class="ai-rev-detail">'+esc(r.detail||'')+'</div></div>';});
+    html+='</div></div>';
+  }
+
+  if(!recs.length){
+    html+='<div class="empty"><h3>No strong matches right now</h3><p>'+esc(data.message||'Nothing currently tracked is a clear fit for your background — an honest read, not a bug. Check back as new events come in.')+'</p></div>';
+  }else{
+    html+='<div class="ai-recs-hd">'+recs.length+' event'+(recs.length>1?'s':'')+' worth your time</div>';
+    recs.forEach(r=>{
+      const catCol=CAT_COLOR[r.category]||'var(--border2)';
+      html+='<div class="ai-result-card">'
+        +'<div class="ai-score">'+(r.match_score||80)+'% match</div>'
+        +'<div class="ai-result-title"><a href="'+esc(r.url)+'" target="_blank" rel="noopener">'+esc(r.title)+'</a></div>'
+        +'<div class="ai-result-meta"><span style="color:'+catCol+'">● '+esc(r.category)+'</span><span>'+esc(r.emoji||'')+' '+esc(r.source)+'</span>'+(r.date?'<span>📅 '+esc(r.date)+'</span>':'')+'</div>'
+        +'<div class="ai-section"><div class="ai-section-label">Why you</div><div class="ai-section-text">'+esc(r.why)+'</div></div>'
+        +'<div class="ai-section"><div class="ai-section-label">How to prepare</div><div class="ai-section-text">'+esc(r.prepare)+'</div></div>'
+        +'<div class="ai-section"><div class="ai-section-label">What you\'ll get</div><div class="ai-section-text">'+esc(r.benefit)+'</div></div>'
+        +'</div>';
+    });
+  }
+
+  const m=data._meta||{};
+  if(m.premium)html+='<div class="ai-char-count" style="text-align:center;margin-top:16px">Pro · unlimited analyses</div>';
+  else if(m.remaining_free!=null)html+='<div class="ai-char-count" style="text-align:center;margin-top:16px">'+m.remaining_free+' free '+(m.remaining_free===1?'analysis':'analyses')+' left</div>';
+
+  html+='<div style="text-align:center;margin-top:16px"><span onclick="forgetData()" style="font-size:11px;color:var(--t3);cursor:pointer;text-decoration:underline;font-family:\'IBM Plex Mono\',monospace">Delete my CV data</span></div>';
+
+  container.innerHTML=html;
+  container.scrollIntoView({behavior:'smooth'});
+}
+
+// ── .ICS ────────────────────────────────────────────────
+function icsDate(dt){return dt.getUTCFullYear()+pad(dt.getUTCMonth()+1)+pad(dt.getUTCDate())+'T'+pad(dt.getUTCHours())+pad(dt.getUTCMinutes())+'00Z';}
+function buildICS(evs){
+  const lines=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//ORBITCAST//EN','CALSCALE:GREGORIAN'];
+  evs.forEach(e=>{
+    if(!e.date)return;
+    const end=new Date(e.date.getTime()+3600000);
+    lines.push('BEGIN:VEVENT','UID:'+e.id+'@orbitcast','DTSTAMP:'+icsDate(new Date()),
+      'DTSTART:'+icsDate(e.date),'DTEND:'+icsDate(end),
+      'SUMMARY:'+e.title.replace(/,/g,'\\,').replace(/\n/g,'\\n'),
+      'URL:'+e.url,'END:VEVENT');
+  });
+  lines.push('END:VCALENDAR');return lines.join('\r\n');
+}
+function triggerDownload(content,filename,type){
+  try{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type}));a.download=filename;document.body.appendChild(a);a.click();a.remove();}
+  catch{toast('Download ready');}
+}
+function dlICS(id){const e=allEvents.find(x=>x.id===id);if(!e||!e.date){toast('No date for this event');return;}triggerDownload(buildICS([e]),e.title.replace(/[^a-z0-9]+/gi,'_').slice(0,40)+'.ics','text/calendar');toast('Calendar invite downloaded');}
+function exportAll(){const list=getFiltered().filter(e=>e.hasDate&&isUp(e));if(!list.length){toast('No dated upcoming events to export');return;}triggerDownload(buildICS(list),'orbitcast-events.ics','text/calendar');toast(list.length+' events exported');}
+
+// ── LOADING / STATUS ────────────────────────────────────
+let loadInterval=null;
+function setLoad(on){
+  const b=document.getElementById('loadBar');
+  if(on){b.style.opacity='1';b.style.width='0';let w=0;loadInterval=setInterval(()=>{w+=6;b.style.width=Math.min(w,82)+'%';if(w>=82)clearInterval(loadInterval);},70);}
+  else{clearInterval(loadInterval);b.style.width='100%';setTimeout(()=>{b.style.opacity='0';setTimeout(()=>b.style.width='0',300);},250);}
+}
+function showError(msg){const el=document.getElementById('errorBanner');el.textContent=msg;el.style.display='block';}
+function hideError(){document.getElementById('errorBanner').style.display='none';}
+function renderLastRun(){if(!lastRunTs)return;const m=Math.floor((new Date()-lastRunTs)/60000);const ago=m<1?'just now':m<60?m+'m ago':Math.floor(m/60)+'h ago';document.getElementById('lastRunEl').textContent='Updated '+ago;}
+setInterval(renderLastRun,60000);
+function toast(msg){const w=document.getElementById('toastWrap');const t=document.createElement('div');t.className='toast';t.textContent=msg;w.appendChild(t);setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),320);},2200);}
+
+// ── CALENDAR ────────────────────────────────────────────
+const MN=['January','February','March','April','May','June','July','August','September','October','November','December'];
+function calIdx(){const idx={};allEvents.filter(e=>e.hasDate).forEach(e=>{const k=e.date.getFullYear()+'-'+e.date.getMonth()+'-'+e.date.getDate();(idx[k]=idx[k]||[]).push(e);});return idx;}
+function renderCal(){
+  if(calY===undefined){calY=NOW.getFullYear();calM=NOW.getMonth();}
+  document.getElementById('calTitle').textContent=MN[calM];
+  document.getElementById('calYearLabel').textContent=calY;
+  const idx=calIdx();
+  const fd=new Date(calY,calM,1).getDay();
+  const dim=new Date(calY,calM+1,0).getDate();
+  const dip=new Date(calY,calM,0).getDate();
+  const off=(fd+6)%7;
+  const total=Math.ceil((off+dim)/7)*7;
+  let html='';
+  for(let i=0;i<total;i++){
+    let day,mo=0;
+    if(i<off){day=dip-off+i+1;mo=-1;}
+    else if(i>=off+dim){day=i-off-dim+1;mo=1;}
+    else day=i-off+1;
+    const cell=new Date(calY,calM+mo,day);
+    const isT=cell.toDateString()===NOW.toDateString();
+    const k=cell.getFullYear()+'-'+cell.getMonth()+'-'+cell.getDate();
+    const evs=idx[k]||[];
+    const dk=cell.getFullYear()+'-'+pad(cell.getMonth()+1)+'-'+pad(cell.getDate());
+    let cls='cal-cell';
+    if(mo!==0)cls+=' other-month';
+    if(isT)cls+=' is-today';
+    if(evs.length)cls+=' has-events';
+    if(selDay===dk)cls+=' selected';
+    let pills='';
+    evs.slice(0,3).forEach(e=>{const col=CAT_COLOR[e.cat]||'var(--border2)';pills+='<div class="cal-ev-pill" style="--pill-c:'+col+'"><a href="'+esc(e.url)+'" target="_blank" rel="noopener" title="'+esc(e.title)+'" onclick="event.stopPropagation()">'+esc(e.title.substring(0,30))+'</a></div>';});
+    if(evs.length>3)pills+='<span class="cal-more">+'+(evs.length-3)+' more</span>';
+    const badge=evs.length>0?'<span class="cal-badge">'+evs.length+'</span>':'';
+    html+='<div class="'+cls+'" onclick="showCalDay(\''+dk+'\')"><span class="cal-num">'+day+'</span>'+badge+'<div class="cal-dots">'+pills+'</div></div>';
+  }
+  document.getElementById('calGrid2').innerHTML=html;
+}
+function showCalDay(dk){
+  const[y,m,dy]=dk.split('-').map(Number);
+  const k=y+'-'+(m-1)+'-'+dy;
+  const evs=calIdx()[k]||[];
+  const panel=document.getElementById('calDayPanel');
+  if(selDay===dk&&panel.classList.contains('open')){panel.classList.remove('open');selDay=null;renderCal();return;}
+  selDay=dk;renderCal();
+  if(!evs.length){panel.classList.remove('open');return;}
+  const mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const dayNames=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const dateObj=new Date(y,m-1,dy);
+  panel.innerHTML='<div class="cdp-header"><div style="display:flex;align-items:center;gap:12px;"><span class="cdp-title">'+dayNames[dateObj.getDay()]+', '+dy+' '+mn[m-1]+' '+y+'</span><span class="cdp-count">'+evs.length+' event'+(evs.length>1?'s':'')+'</span></div><button class="cdp-close" onclick="closeCalPanel()">×</button></div><div class="cdp-events">'+evs.map(e=>{const col=CAT_COLOR[e.cat]||'var(--border2)';const tm=e.time||'All day';return'<div class="cdp-ev" style="--cdp-c:'+col+'"><div class="cdp-ev-info"><div class="cdp-ev-time">'+esc(tm)+'</div><div class="cdp-ev-title">'+esc(e.title)+'</div><div class="cdp-ev-meta"><span>'+esc(e.emoji)+' '+esc(e.src)+'</span><span>'+esc(e.cat)+'</span></div></div><div class="cdp-ev-actions"><a class="cdp-link" onclick="dlICS(\''+e.id+'\')">+ Calendar</a><a class="cdp-link" href="'+esc(e.url)+'" target="_blank" rel="noopener">View →</a></div></div>';}).join('')+'</div>';
+  panel.classList.add('open');
+  setTimeout(()=>panel.scrollIntoView({behavior:'smooth',block:'nearest'}),50);
+}
+function closeCalPanel(){document.getElementById('calDayPanel').classList.remove('open');selDay=null;renderCal();}
+function calPrev(){if(--calM<0){calM=11;calY--;}selDay=null;closeCalPanel();renderCal();}
+function calNext(){if(++calM>11){calM=0;calY++;}selDay=null;closeCalPanel();renderCal();}
+function calGoToday(){calY=NOW.getFullYear();calM=NOW.getMonth();selDay=null;closeCalPanel();renderCal();}
+
+// ── KEYBOARD ────────────────────────────────────────────
+document.addEventListener('keydown',e=>{
+  if(e.key==='/'&&document.activeElement.tagName!=='INPUT'&&document.activeElement.tagName!=='TEXTAREA'){e.preventDefault();document.getElementById('search').focus();}
+  if(e.key==='Escape'){document.getElementById('search').blur();document.getElementById('search').value='';render();}
+  if((e.key==='c'||e.key==='C')&&document.activeElement.tagName!=='INPUT'&&document.activeElement.tagName!=='TEXTAREA'){switchView(currentView==='calendar'?'events':'calendar');}
+});
+
+// ── BOOT ────────────────────────────────────────────────
+(function boot(){
+  document.getElementById('eventsArea').innerHTML=Array.from({length:8}).map(()=>'<div class="skel skel-row"></div>').join('');
+  fetchEvents();
+  setInterval(fetchEvents,30*60*1000);
+  switchView('ai');                            // AI is the central landing page
+  if(new URLSearchParams(location.search).get('upgraded')==='1')setTimeout(()=>toast("You're on OrbitCast Pro ✦"),400);
+})();
+</script>
+</body>
+</html>
