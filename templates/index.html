@@ -19,6 +19,7 @@ body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',sans-ser
 
 /* HEADER */
 header{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;height:52px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:100;width:100%;}
+.header-browse-chrome{display:flex;align-items:center;gap:16px;flex:1;min-width:0;}
 .logo{font-family:'IBM Plex Mono',monospace;font-weight:500;font-size:.9rem;color:var(--text);letter-spacing:.06em;display:flex;align-items:center;gap:8px;flex-shrink:0;cursor:pointer;user-select:none;transition:color .15s;}
 .logo:hover{color:var(--blue);}
 .logo-mark{width:7px;height:7px;border-radius:50%;background:var(--blue);}
@@ -37,6 +38,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
 
 /* LAYOUT */
 .layout{display:grid;grid-template-columns:210px 1fr;min-height:calc(100vh - 52px);width:100%;overflow:hidden;}
+.layout.full-width{grid-template-columns:1fr;}
 .sidebar{background:var(--surface);border-right:1px solid var(--border);padding:20px 0;position:sticky;top:52px;height:calc(100vh - 52px);overflow-y:auto;overflow-x:hidden;}
 .nav-section{margin-bottom:22px;}
 .nav-hd{font-family:'IBM Plex Mono',monospace;font-size:.59rem;color:var(--t3);text-transform:uppercase;letter-spacing:.12em;padding:0 16px 8px;}
@@ -46,18 +48,19 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
 .cat-btn.active .cat-lead{background:var(--blue);width:2px;height:14px;border-radius:1px;margin-left:-10px;}
 .cat-lead{width:0;height:14px;}
 .cat-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
-.nav-div{height:1px;background:var(--border);margin:8px 16px 16px;}
-.ai-nav-btn{display:flex;align-items:center;gap:8px;width:calc(100% - 32px);margin:0 16px;padding:10px 14px;background:linear-gradient(135deg,rgba(37,99,235,.08),rgba(139,92,246,.08));border:1px solid rgba(37,99,235,.2);border-radius:8px;color:var(--blue);font-family:'IBM Plex Sans',sans-serif;font-size:13px;font-weight:500;cursor:pointer;transition:all .2s;text-align:left;}
-.ai-nav-btn:hover{background:linear-gradient(135deg,rgba(37,99,235,.14),rgba(139,92,246,.14));border-color:var(--blue);transform:translateY(-1px);box-shadow:0 2px 8px rgba(37,99,235,.15);}
-.hack-nav-btn{display:flex;align-items:center;gap:8px;width:calc(100% - 32px);margin:8px 16px 0;padding:10px 14px;background:linear-gradient(135deg,rgba(139,92,246,.08),rgba(99,102,241,.08));border:1px solid rgba(139,92,246,.25);border-radius:8px;color:#7c3aed;font-family:'IBM Plex Sans',sans-serif;font-size:13px;font-weight:500;cursor:pointer;transition:all .2s;text-align:left;}
-.hack-nav-btn:hover{background:linear-gradient(135deg,rgba(139,92,246,.14),rgba(99,102,241,.14));transform:translateY(-1px);}
 
 /* MAIN */
 .main{background:var(--bg);overflow:hidden;min-width:0;}
-.view-tabs{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;display:flex;gap:0;overflow-x:auto;}
-.view-tab{font-family:'IBM Plex Mono',monospace;font-size:.72rem;padding:12px 18px;border:none;background:none;color:var(--t2);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;font-weight:500;white-space:nowrap;flex-shrink:0;}
+.view-tabs{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 24px;display:flex;align-items:center;gap:10px;overflow-x:auto;}
+.ai-primary-tab{font-family:'IBM Plex Sans',sans-serif;font-size:.8rem;font-weight:600;padding:9px 18px;border:none;border-radius:9px;cursor:pointer;white-space:nowrap;flex-shrink:0;color:var(--t2);background:var(--sf2);transition:all .18s;}
+.ai-primary-tab.active{color:#fff;background:linear-gradient(135deg,var(--blue),#8b5cf6);box-shadow:0 4px 14px -4px rgba(37,99,235,.55);}
+.ai-primary-tab:hover:not(.active){color:var(--blue);}
+.tabs-sep{width:1px;height:20px;background:var(--border);flex-shrink:0;}
+.browse-group{display:flex;gap:2px;background:var(--sf2);border-radius:8px;padding:3px;flex-shrink:0;}
+.browse-label{font-family:'IBM Plex Mono',monospace;font-size:.6rem;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-right:2px;align-self:center;}
+.view-tab{font-family:'IBM Plex Mono',monospace;font-size:.66rem;padding:7px 12px;border:none;border-radius:6px;background:none;color:var(--t2);cursor:pointer;transition:all .15s;font-weight:500;white-space:nowrap;flex-shrink:0;}
 .view-tab:hover{color:var(--text);}
-.view-tab.active{color:var(--blue);border-bottom-color:var(--blue);}
+.view-tab.active{color:var(--text);background:var(--surface);box-shadow:0 1px 3px rgba(0,0,0,.08);}
 
 /* CONTROLS */
 .controls{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 24px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
@@ -344,34 +347,35 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
 
 <header>
   <div class="logo" onclick="goHome()"><div class="logo-mark"></div>ORBITCAST</div>
-  <div class="search-wrap">
-    <i class="s-ico">&#x2315;</i>
-    <input id="search" type="text" placeholder="Search events, sources…" oninput="render()">
+  <div class="header-browse-chrome" id="headerBrowseChrome" style="display:none">
+    <div class="search-wrap">
+      <i class="s-ico">&#x2315;</i>
+      <input id="search" type="text" placeholder="Search events, sources…" oninput="render()">
+    </div>
+    <span class="hd-meta" id="lastRunEl">—</span>
+    <span class="new-badge" id="newBadge" style="display:none" onclick="filterNew()"><span id="newCt">0</span> new</span>
+    <button class="btn-sm" id="refreshBtn" onclick="doRefresh()">↻ Refresh</button>
   </div>
-  <span class="hd-meta" id="lastRunEl">—</span>
-  <span class="new-badge" id="newBadge" style="display:none" onclick="filterNew()"><span id="newCt">0</span> new</span>
-  <button class="btn-sm" id="refreshBtn" onclick="doRefresh()">↻ Refresh</button>
 </header>
 
-<div class="layout">
-  <nav class="sidebar">
+<div class="layout full-width" id="layoutRoot">
+  <nav class="sidebar" id="sidebar" style="display:none">
     <div class="nav-section">
       <div class="nav-hd">Category</div>
       <div id="catList"></div>
-    </div>
-    <div class="nav-div"></div>
-    <div class="nav-section" style="padding:0 0 8px;">
-      <button class="hack-nav-btn" onclick="switchView('hackathons')">⚡ Hackathons</button>
-      <button class="ai-nav-btn" onclick="switchView('ai')" style="margin-top:8px;">✦ OrbitCast AI</button>
     </div>
   </nav>
 
   <div class="main">
     <div class="view-tabs">
-      <button class="view-tab" id="tabEvents" onclick="switchView('events')">Events</button>
-      <button class="view-tab" id="tabCalendar" onclick="switchView('calendar')">Calendar</button>
-      <button class="view-tab" id="tabHackathons" onclick="switchView('hackathons')">⚡ Hackathons</button>
-      <button class="view-tab active" id="tabAI" onclick="switchView('ai')">✦ OrbitCast AI</button>
+      <button class="ai-primary-tab active" id="tabAI" onclick="switchView('ai')">&#10022; OrbitCast AI</button>
+      <div class="tabs-sep"></div>
+      <span class="browse-label">Browse</span>
+      <div class="browse-group">
+        <button class="view-tab" id="tabEvents" onclick="switchView('events')">Events</button>
+        <button class="view-tab" id="tabCalendar" onclick="switchView('calendar')">Calendar</button>
+        <button class="view-tab" id="tabHackathons" onclick="switchView('hackathons')">⚡ Hackathons</button>
+      </div>
     </div>
 
     <!-- EVENTS VIEW -->
@@ -592,8 +596,15 @@ function switchView(view){
   document.getElementById('calView').classList.toggle('show',view==='calendar');
   document.getElementById('hackathonsView').classList.toggle('show',view==='hackathons');
   document.getElementById('aiView').classList.toggle('show',view==='ai');
-  const tabMap={events:'tabEvents',calendar:'tabCalendar',hackathons:'tabHackathons',ai:'tabAI'};
+  document.getElementById('tabAI').classList.toggle('active',view==='ai');
+  const tabMap={events:'tabEvents',calendar:'tabCalendar',hackathons:'tabHackathons'};
   if(tabMap[view])document.getElementById(tabMap[view]).classList.add('active');
+  // AI is the front door - Browse chrome (sidebar filters, search, refresh) only
+  // matters once you're actually browsing events, so keep it out of the way.
+  const isBrowse=view!=='ai';
+  document.getElementById('sidebar').style.display=isBrowse?'':'none';
+  document.getElementById('headerBrowseChrome').style.display=isBrowse?'':'none';
+  document.getElementById('layoutRoot').classList.toggle('full-width',!isBrowse);
   if(view==='calendar')renderCal();
   if(view==='hackathons')renderHackathons();
 }
