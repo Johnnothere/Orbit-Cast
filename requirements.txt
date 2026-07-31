@@ -1,6 +1,6 @@
 flask==3.0.3
 gunicorn==22.0.0
-anthropic==0.40.0
+anthropic==0.120.2
 pdfplumber==0.11.4
 python-docx==1.1.2
 psycopg2-binary==2.9.9
