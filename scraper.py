@@ -4,13 +4,18 @@ ORBITCAST — Event Scraper
 Scrapes 20+ sources across Tech, Defence, Intelligence, Business, Education & Hackathons.
 """
 
-import os, json, time, hashlib, logging, requests, feedparser
+import os, json, re, time, hashlib, logging, requests, feedparser
 from datetime import datetime, timezone
 from bs4 import BeautifulSoup
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("event-radar")
+
+# Used to auto-tag any scraped event as "Hackathons" regardless of which
+# source found it, instead of relying on a hand-maintained list that goes
+# stale the moment nobody updates it.
+HACKATHON_RE = re.compile(r"\b(hackathon|buildathon|hack\s?night|hack\s?day)\b", re.IGNORECASE)
 
 TELEGRAM_TOKEN   = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -124,39 +129,6 @@ def source(name, emoji, category):
         SOURCES.append({"name": name, "emoji": emoji, "category": category, "fn": fn})
         return fn
     return decorator
-
-# ─────────────────────────────────────────────
-# HACKATHONS  (hardcoded — reliable, curated)
-# ─────────────────────────────────────────────
-
-@source("London Hackathons", "⚡", "Hackathons")
-def scrape_london_hackathons():
-    # NOTE: this curated list is hand-maintained, not scraped - it goes stale.
-    # Every entry below is now in the past (last checked 2026-07-31) and gets
-    # filtered out of AI recommendations by ai_engine's date guard, but it
-    # still clutters the Hackathons browse tab. Needs a real content refresh.
-    raw = [
-        {"title": "The Agent Economy Buildathon", "date": "2026-06-01", "url": "https://lnkd.in/enUFiCUU"},
-        {"title": "Fullhouse — UK's first poker bot hackathon", "date": "2026-06-01", "url": "https://lnkd.in/eZKnwnGD"},
-        {"title": "Wayflyer × Fin | Build the future of eCommerce", "date": "2026-06-03", "url": "https://lu.ma/v4bzvbka"},
-        {"title": "Pop The Bubble Hackathon", "date": "2026-06-05", "url": "https://lu.ma/035ubxn3"},
-        {"title": "NVIDIA Hack for Impact — London", "date": "2026-06-05", "url": "https://lnkd.in/ebmmXJ4E"},
-        {"title": "AI Risk Content Hackathon — BlueDot Impact", "date": "2026-06-06", "url": "https://lnkd.in/eF5GSG7u"},
-        {"title": "VibeHack London — £10k prize pool @ UCL", "date": "2026-06-06", "url": "https://lu.ma/9ef4463s"},
-        {"title": "Shared Futures Buildathon", "date": "2026-06-07", "url": "https://lnkd.in/e7npuFaY"},
-        {"title": "Move 37 | London Tech Week — AI × Finance", "date": "2026-06-09", "url": "https://lu.ma/v9ydosib"},
-        {"title": "Deploy by Antler @ Google London", "date": "2026-06-10", "url": "https://lu.ma/j6wkjmkf"},
-        {"title": "London Initiative for Safe AI Hackathon", "date": "2026-06-13", "url": "https://lnkd.in/erBNHS2b"},
-        {"title": "Model to Market: The Quantitative Hack", "date": "2026-06-15", "url": "https://lu.ma/4j44j9l0"},
-        {"title": "Localhost: On-Device Agent Hackathon", "date": "2026-06-20", "url": "https://lu.ma/8og1gx56"},
-        {"title": "GTM Hackathon London", "date": "2026-06-20", "url": "https://lu.ma/hxsfxyvb"},
-        {"title": "Hands Off Hackathon — AI-powered autonomous business", "date": "2026-06-25", "url": "https://lu.ma/wl7a90xe"},
-        {"title": "London Agentic AI Hack Night", "date": "2026-06-25", "url": "https://lu.ma/dnoe595m"},
-        {"title": "AI in Government Hackathon — ElevenLabs × IAI", "date": "2026-06-25", "url": "https://lu.ma/1d7szvu5"},
-        {"title": "European Defense Tech Hackathon — 200+ hackers", "date": "2026-06-26", "url": "https://lnkd.in/e5sW5yaK"},
-        {"title": "ARIA + MaterialHack — Biomaterials × Biomanufacturing", "date": "2026-06-26", "url": "https://lnkd.in/e2SVbwBs"},
-    ]
-    return [{**ev, "source": "London Hackathons"} for ev in raw]
 
 # ─────────────────────────────────────────────
 # INTELLIGENCE & SECURITY

@@ -61,15 +61,21 @@ def run_scrape_background():
             return
         _scraping = True
     try:
-        from scraper import SOURCES, event_id
+        from scraper import SOURCES, event_id, HACKATHON_RE
         all_events, summary_data = [], []
         lock = threading.Lock()
 
         def scrape_one(src):
             try:
-                events   = src["fn"]()
-                enriched = [{**ev, "id": event_id(ev.get("title", ""), ev.get("url", "")),
-                             "emoji": src["emoji"], "category": src["category"]} for ev in events]
+                events = src["fn"]()
+                enriched = []
+                for ev in events:
+                    # Auto-tag hackathons from title, regardless of source -
+                    # keeps the category live instead of relying on a
+                    # hand-maintained list that goes stale.
+                    category = "Hackathons" if HACKATHON_RE.search(ev.get("title", "")) else src["category"]
+                    enriched.append({**ev, "id": event_id(ev.get("title", ""), ev.get("url", "")),
+                                      "emoji": src["emoji"], "category": category})
                 summary  = {"source": src["name"], "emoji": src["emoji"],
                             "category": src["category"], "count": len(events)}
                 return enriched, summary
