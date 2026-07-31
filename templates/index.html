@@ -224,25 +224,31 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
 .ai-progress{margin-top:12px;font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--t2);text-align:right;transition:opacity .2s;}
 
 /* AI RESULTS */
-.ai-profile-card{background:linear-gradient(135deg,rgba(37,99,235,.06),rgba(139,92,246,.06));border:1px solid rgba(37,99,235,.2);border-radius:12px;padding:20px;margin-bottom:20px;}
+.ai-profile-card{background:linear-gradient(135deg,rgba(37,99,235,.06),rgba(139,92,246,.06));border:1px solid rgba(37,99,235,.2);border-radius:12px;padding:20px;margin-bottom:20px;
+  animation:aiRise .45s ease both;}
 .ai-profile-label{font-family:'IBM Plex Mono',monospace;font-size:.65rem;color:var(--blue);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;}
 .ai-profile-text{font-size:14px;color:var(--text);line-height:1.6;}
 .ai-revelations{margin-bottom:24px;}
 .ai-rev-hd{font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
 .ai-rev-hd::after{content:'';flex:1;height:1px;background:var(--border);}
 .ai-rev-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;}
-.ai-rev-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;position:relative;overflow:hidden;}
-.ai-rev-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--blue),#7c3aed);}
+.ai-rev-card{background:var(--surface);border:1px solid var(--border);border-top:3px solid var(--ok);border-radius:8px;padding:14px;position:relative;overflow:hidden;
+  animation:aiRise .45s ease both;}
+.ai-rev-card.gap{border-top-color:var(--warn);}
 .ai-rev-icon{font-size:1.2rem;margin-bottom:8px;}
 .ai-rev-title{font-size:12px;font-weight:600;color:var(--text);margin-bottom:4px;}
 .ai-rev-detail{font-size:11px;color:var(--t2);line-height:1.5;}
 .ai-recs-hd{font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
 .ai-recs-hd::after{content:'';flex:1;height:1px;background:var(--border);}
-.ai-result-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:12px;position:relative;overflow:hidden;transition:all .2s;}
+.ai-result-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:12px;position:relative;overflow:hidden;transition:border-color .2s,box-shadow .2s;
+  animation:aiRise .45s ease both;}
 .ai-result-card:hover{border-color:rgba(37,99,235,.3);box-shadow:0 4px 16px rgba(0,0,0,.06);}
 .ai-result-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--blue),#7c3aed);}
-.ai-score{position:absolute;top:14px;right:16px;font-family:'IBM Plex Mono',monospace;font-size:.68rem;font-weight:600;color:var(--blue);background:rgba(37,99,235,.08);padding:4px 10px;border-radius:10px;}
-.ai-result-title{font-size:15px;font-weight:600;color:var(--text);margin-bottom:6px;padding-right:90px;}
+.ai-meter{position:absolute;top:16px;right:16px;display:flex;align-items:center;gap:7px;}
+.ai-meter-bar{width:52px;height:5px;border-radius:3px;background:var(--border2);overflow:hidden;}
+.ai-meter-bar i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--blue),#7c3aed);}
+.ai-meter b{font-family:'IBM Plex Mono',monospace;font-size:.68rem;font-weight:600;color:var(--blue);white-space:nowrap;}
+.ai-result-title{font-size:15px;font-weight:600;color:var(--text);margin-bottom:6px;padding-right:100px;}
 .ai-result-title a{color:inherit;text-decoration:none;}
 .ai-result-title a:hover{color:var(--blue);}
 .ai-result-meta{font-size:11px;color:var(--t2);margin-bottom:14px;display:flex;gap:10px;flex-wrap:wrap;}
@@ -250,6 +256,11 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
 .ai-section:last-child{margin-bottom:0;}
 .ai-section-label{font-family:'IBM Plex Mono',monospace;font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;color:var(--t3);margin-bottom:4px;}
 .ai-section-text{font-size:13px;color:var(--text);line-height:1.5;}
+
+@keyframes aiRise{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+@media(prefers-reduced-motion:reduce){
+  .ai-profile-card,.ai-rev-card,.ai-result-card{animation:none;}
+}
 
 /* MISC */
 #loadBar{position:fixed;top:0;left:0;height:2px;width:0;background:var(--blue);z-index:2000;opacity:0;transition:opacity .2s;}
@@ -780,13 +791,14 @@ function renderAIResults(data){
   html+='<div class="ai-profile-card"><div class="ai-profile-label">✦ Profile Analysis'+(p.seniority?' · '+esc(p.seniority):'')+'</div><div class="ai-profile-text">'+esc(p.summary||'')+'</div></div>';
 
   if(p.trajectory){
-    html+='<div class="ai-profile-card"><div class="ai-profile-label">↗ Where you\'re headed</div><div class="ai-profile-text">'+esc(p.trajectory)+'</div></div>';
+    html+='<div class="ai-profile-card" style="animation-delay:70ms"><div class="ai-profile-label">↗ Where you\'re headed</div><div class="ai-profile-text">'+esc(p.trajectory)+'</div></div>';
   }
 
   if((p.strengths&&p.strengths.length)||(p.gaps&&p.gaps.length)){
+    let card=0;
     html+='<div class="ai-revelations"><div class="ai-rev-hd">Honest Read</div><div class="ai-rev-grid">';
-    (p.strengths||[]).forEach(s=>{html+='<div class="ai-rev-card"><div class="ai-rev-icon">✓</div><div class="ai-rev-title">Strength</div><div class="ai-rev-detail">'+esc(s)+'</div></div>';});
-    (p.gaps||[]).forEach(g=>{html+='<div class="ai-rev-card"><div class="ai-rev-icon">△</div><div class="ai-rev-title">Gap</div><div class="ai-rev-detail">'+esc(g)+'</div></div>';});
+    (p.strengths||[]).forEach(s=>{html+='<div class="ai-rev-card" style="animation-delay:'+(card++*50)+'ms"><div class="ai-rev-icon">✓</div><div class="ai-rev-title">Strength</div><div class="ai-rev-detail">'+esc(s)+'</div></div>';});
+    (p.gaps||[]).forEach(g=>{html+='<div class="ai-rev-card gap" style="animation-delay:'+(card++*50)+'ms"><div class="ai-rev-icon">△</div><div class="ai-rev-title">Gap</div><div class="ai-rev-detail">'+esc(g)+'</div></div>';});
     html+='</div></div>';
   }
 
@@ -798,10 +810,11 @@ function renderAIResults(data){
   }
 
   html+='<div class="ai-recs-hd">Recommended Events ('+recs.length+')</div>';
-  recs.forEach(r=>{
+  recs.forEach((r,i)=>{
     const catCol=CAT_COLOR[r.category]||'var(--border2)';
-    html+='<div class="ai-result-card">'
-      +'<div class="ai-score">'+(r.fit_score||0)+'% fit</div>'
+    const fit=r.fit_score||0;
+    html+='<div class="ai-result-card" style="animation-delay:'+(i*70)+'ms">'
+      +'<div class="ai-meter"><div class="ai-meter-bar"><i style="width:'+fit+'%"></i></div><b>'+fit+'%</b></div>'
       +'<div class="ai-result-title"><a href="'+esc(r.url)+'" target="_blank" rel="noopener">'+esc(r.title)+'</a></div>'
       +'<div class="ai-result-meta"><span style="color:'+catCol+'">● '+esc(r.category)+'</span><span>'+esc(r.emoji||'')+' '+esc(r.source)+'</span>'+(r.format?'<span>'+esc(r.format)+'</span>':'')+(r.date?'<span>📅 '+esc(r.date)+'</span>':'')+'</div>'
       +'<div class="ai-section"><div class="ai-section-label">Why attend</div><div class="ai-section-text">'+esc(r.why)+'</div></div>'
