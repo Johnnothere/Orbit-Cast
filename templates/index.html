@@ -377,7 +377,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
           <div class="ai-orb">✦</div>
         </div>
         <h1 class="ai-title">OrbitCast AI</h1>
-        <p class="ai-subtitle">Drop your CV and we'll analyse your background to reveal strategic insights and recommend exactly the right events for your career.</p>
+        <p class="ai-subtitle">Drop your CV and we'll give you an honest read of your background — strengths and gaps — plus the handful of events that genuinely fit where you're headed.</p>
       </div>
 
       <div class="ai-form-card">
@@ -387,9 +387,9 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
           onclick="document.getElementById('cvFile').click()">
           <span class="cv-icon">📄</span>
           <div class="cv-zone-title">Drop your CV here</div>
-          <div class="cv-zone-sub">PDF or TXT · Max 5MB</div>
+          <div class="cv-zone-sub">PDF, DOCX or TXT · Max 5MB</div>
           <div class="cv-browse-btn">Browse files</div>
-          <input type="file" id="cvFile" accept=".pdf,.txt" style="display:none" onchange="handleCVFile(this)">
+          <input type="file" id="cvFile" accept=".pdf,.docx,.txt" style="display:none" onchange="handleCVFile(this)">
         </div>
         <div class="cv-file-info" id="cvFileInfo" style="display:none">
           <span>📄</span>
@@ -481,7 +481,7 @@ let activeCat='all',activeSrc=null;
 const saved=new Set();
 let calY,calM,selDay=null;
 let lastRunTs=null,currentView='events';
-let cvFileData=null,cvText='';
+let cvFileData=null;
 
 // ── UTILS ────────────────────────────────────────────────
 function esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -736,41 +736,18 @@ function handleCVDrop(e){
 }
 function handleCVFile(input){const file=input.files?.[0];if(file)processFile(file);}
 function clearCV(){
-  cvText='';cvFileData=null;
+  cvFileData=null;
   document.getElementById('cvFileInfo').style.display='none';
   document.getElementById('cvDropZone').classList.remove('has-file');
   document.getElementById('cvFile').value='';
 }
-async function processFile(file){
+function processFile(file){
   if(file.size>5*1024*1024){toast('File too large — max 5MB');return;}
+  cvFileData=file;
   document.getElementById('cvFileName').textContent=file.name;
   document.getElementById('cvFileInfo').style.display='flex';
   document.getElementById('cvDropZone').classList.add('has-file');
-  if(file.type==='text/plain'){
-    cvText=await file.text();toast('CV loaded ✓');
-  }else if(file.type==='application/pdf'){
-    cvText=await extractPDFText(file);
-    if(cvText.trim().length<20){toast('Could not read PDF text — try saving as TXT');cvText='';}
-    else toast('CV loaded ✓ ('+cvText.length+' chars)');
-  }
-}
-async function extractPDFText(file){
-  const buf=await file.arrayBuffer();
-  const bytes=new Uint8Array(buf);
-  const raw=new TextDecoder('latin1').decode(bytes);
-  // Extract text between parentheses in PDF content streams
-  let text='';
-  const streamRe=/stream([\s\S]*?)endstream/g;
-  let sm;
-  while((sm=streamRe.exec(raw))!==null){
-    const chunk=sm[1];
-    const parens=chunk.match(/\(([^\)\\]|\\.){1,200}\)/g)||[];
-    parens.forEach(p=>{
-      const inner=p.slice(1,-1).replace(/\\n/g,' ').replace(/\\/g,'');
-      if(/[a-zA-Z]{2,}/.test(inner))text+=inner+' ';
-    });
-  }
-  return text.slice(0,5000).trim();
+  toast('CV loaded ✓');
 }
 
 // ── AI FORM ──────────────────────────────────────────────
@@ -779,48 +756,63 @@ function setAiTip(t){document.getElementById('aiInput').value=t;updateCharCount(
 
 async function submitAI(){
   const input=document.getElementById('aiInput').value.trim();
-  const profile=(cvText?'[CV CONTENT]\n'+cvText+'\n\n[ADDITIONAL CONTEXT]\n':'')+input;
-  if(profile.trim().length<10){toast('Tell us a bit more about yourself');return;}
+  if(!cvFileData&&input.length<10){toast('Upload a CV or tell us a bit about yourself');return;}
   const btn=document.getElementById('aiSubmitBtn');
   btn.classList.add('loading');btn.disabled=true;
   try{
-    const res=await fetch('/api/ai/recommend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile})});
+    const form=new FormData();
+    if(cvFileData)form.append('file',cvFileData);
+    if(input)form.append('text',input);
+    const res=await fetch('/api/analyze',{method:'POST',body:form});
     const data=await res.json();
     if(!res.ok){toast(data.error||'Something went wrong');return;}
-    renderAIResults(data,profile);
+    renderAIResults(data);
   }catch(err){toast('Failed: '+err.message);}
   finally{btn.classList.remove('loading');btn.disabled=false;}
 }
 
-function renderAIResults(data,profile){
+function renderAIResults(data){
   const container=document.getElementById('aiResults');
-  const recs=data.recommendations||[];
-  if(!recs.length){container.innerHTML='<div class="empty"><h3>No recommendations found</h3><p>Try adding more details about your background and goals.</p></div>';return;}
 
-  // Use backend revelations if available (Claude), otherwise generate client-side
-  const cats=[...new Set(recs.map(r=>r.category))];
-  const revelations=data.revelations&&data.revelations.length?data.revelations:[
-    {icon:'🎯',title:'Your Strategic Focus',detail:'Based on your profile, you align strongly with '+cats.slice(0,2).join(' and ')+' — fields where your background creates immediate leverage.'},
-    {icon:'🌐',title:'Network Opportunity',detail:'Attending '+recs.length+' curated events puts you in contact with decision-makers and peers shaping the landscape you\'re moving into.'},
-    {icon:'⚡',title:'Acceleration Window',detail:'London\'s current event density is unusually high right now. Acting on these recommendations compounds your positioning.'},
-    {icon:'🔑',title:'Differentiation Edge',detail:'Your combination of skills maps to '+recs[0]?.category+' — a space where authentic technical voices are rare and highly valued.'},
-  ];
-  const profileSummary=data.profile_summary||('Based on your background, you\'re positioned at the intersection of '+cats.join(', ')+'. OrbitCast has identified '+recs.length+' high-priority events for your trajectory.');
+  if(!data.is_cv){
+    container.innerHTML='<div class="empty"><h3>That doesn\'t look like a CV</h3><p>'+esc(data.message_if_not_cv||'Try uploading a CV or resume — PDF, DOCX, or TXT.')+'</p></div>';
+    container.scrollIntoView({behavior:'smooth'});
+    return;
+  }
+
+  const p=data.profile||{};
+  const recs=data.recommendations||[];
 
   let html='';
-  html+='<div class="ai-profile-card"><div class="ai-profile-label">✦ Profile Analysis</div><div class="ai-profile-text">'+esc(profileSummary)+'</div></div>';
-  html+='<div class="ai-revelations"><div class="ai-rev-hd">Strategic Revelations</div><div class="ai-rev-grid">';
-  revelations.forEach(r=>{html+='<div class="ai-rev-card"><div class="ai-rev-icon">'+r.icon+'</div><div class="ai-rev-title">'+esc(r.title)+'</div><div class="ai-rev-detail">'+esc(r.detail)+'</div></div>';});
-  html+='</div></div>';
-  // Recommendations
+  html+='<div class="ai-profile-card"><div class="ai-profile-label">✦ Profile Analysis'+(p.seniority?' · '+esc(p.seniority):'')+'</div><div class="ai-profile-text">'+esc(p.summary||'')+'</div></div>';
+
+  if(p.trajectory){
+    html+='<div class="ai-profile-card"><div class="ai-profile-label">↗ Where you\'re headed</div><div class="ai-profile-text">'+esc(p.trajectory)+'</div></div>';
+  }
+
+  if((p.strengths&&p.strengths.length)||(p.gaps&&p.gaps.length)){
+    html+='<div class="ai-revelations"><div class="ai-rev-hd">Honest Read</div><div class="ai-rev-grid">';
+    (p.strengths||[]).forEach(s=>{html+='<div class="ai-rev-card"><div class="ai-rev-icon">✓</div><div class="ai-rev-title">Strength</div><div class="ai-rev-detail">'+esc(s)+'</div></div>';});
+    (p.gaps||[]).forEach(g=>{html+='<div class="ai-rev-card"><div class="ai-rev-icon">△</div><div class="ai-rev-title">Gap</div><div class="ai-rev-detail">'+esc(g)+'</div></div>';});
+    html+='</div></div>';
+  }
+
+  if(!recs.length){
+    html+='<div class="empty"><h3>No strong matches right now</h3><p>Nothing in the current catalog cleared our fit bar for you — that\'s an honest result, not an error. Check back after the next refresh.</p></div>';
+    container.innerHTML=html;
+    container.scrollIntoView({behavior:'smooth'});
+    return;
+  }
+
   html+='<div class="ai-recs-hd">Recommended Events ('+recs.length+')</div>';
   recs.forEach(r=>{
     const catCol=CAT_COLOR[r.category]||'var(--border2)';
     html+='<div class="ai-result-card">'
-      +'<div class="ai-score">'+(r.match_score||80)+'% match</div>'
+      +'<div class="ai-score">'+(r.fit_score||0)+'% fit</div>'
       +'<div class="ai-result-title"><a href="'+esc(r.url)+'" target="_blank" rel="noopener">'+esc(r.title)+'</a></div>'
-      +'<div class="ai-result-meta"><span style="color:'+catCol+'">● '+esc(r.category)+'</span><span>'+esc(r.emoji||'')+' '+esc(r.source)+'</span>'+(r.date?'<span>📅 '+esc(r.date)+'</span>':'')+'</div>'
+      +'<div class="ai-result-meta"><span style="color:'+catCol+'">● '+esc(r.category)+'</span><span>'+esc(r.emoji||'')+' '+esc(r.source)+'</span>'+(r.format?'<span>'+esc(r.format)+'</span>':'')+(r.date?'<span>📅 '+esc(r.date)+'</span>':'')+'</div>'
       +'<div class="ai-section"><div class="ai-section-label">Why attend</div><div class="ai-section-text">'+esc(r.why)+'</div></div>'
+      +(r.why_now?'<div class="ai-section"><div class="ai-section-label">Why now</div><div class="ai-section-text">'+esc(r.why_now)+'</div></div>':'')
       +'<div class="ai-section"><div class="ai-section-label">How to prepare</div><div class="ai-section-text">'+esc(r.prepare)+'</div></div>'
       +'<div class="ai-section"><div class="ai-section-label">Career benefit</div><div class="ai-section-text">'+esc(r.benefit)+'</div></div>'
       +'</div>';
