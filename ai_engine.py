@@ -20,7 +20,7 @@ import re
 
 from anthropic import Anthropic
 
-MODEL = "claude-sonnet-4-20250514"   # matches your current model
+MODEL = "claude-sonnet-5"             # current Sonnet model id
 FIT_THRESHOLD = 65                   # only surface events scoring this or higher
 MAX_RECOMMENDATIONS = 4              # honesty rule: 2-4 strong matches, not a list
 
