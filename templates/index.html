@@ -175,91 +175,152 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
 .hack-soon{font-family:'IBM Plex Mono',monospace;font-size:.6rem;color:var(--blue);background:rgba(37,99,235,.08);padding:2px 7px;border-radius:8px;margin-left:auto;}
 .hack-past{opacity:.5;}
 
-/* AI VIEW */
-.ai-view{display:none;padding:32px 24px;max-width:860px;}
+/* AI VIEW — futuristic minimalist glass, on top of an ambient gradient field */
+.ai-view{display:none;position:relative;padding:48px 24px 80px;}
 .ai-view.show{display:block;}
-.ai-header{text-align:center;margin-bottom:36px;}
-.ai-orb-wrap{position:relative;width:64px;height:64px;margin:0 auto 16px;}
-.ai-orb{width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,var(--blue),#7c3aed);display:flex;align-items:center;justify-content:center;color:#fff;font-size:28px;box-shadow:0 8px 24px rgba(37,99,235,.3);animation:orb-float 4s ease-in-out infinite;}
-.ai-orb-ring{position:absolute;inset:-6px;border-radius:50%;border:1px solid rgba(37,99,235,.2);animation:ring-spin 8s linear infinite;}
-@keyframes orb-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
-@keyframes ring-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
-.ai-title{font-family:'IBM Plex Sans',sans-serif;font-size:1.6rem;font-weight:600;color:var(--text);margin-bottom:8px;letter-spacing:-.02em;}
-.ai-subtitle{font-size:14px;color:var(--t2);max-width:520px;margin:0 auto;line-height:1.6;}
+.ai-wrap{position:relative;z-index:1;max-width:680px;margin:0 auto;}
 
-/* CV DROP ZONE */
-.cv-drop-zone{border:2px dashed var(--border2);border-radius:12px;padding:32px 24px;text-align:center;cursor:pointer;transition:all .2s;background:var(--sf2);margin-bottom:16px;position:relative;}
-.cv-drop-zone.active,.cv-drop-zone:hover{border-color:var(--blue);background:rgba(37,99,235,.03);}
-.cv-drop-zone.has-file{border-color:var(--ok);background:rgba(5,150,105,.04);border-style:solid;}
-.cv-icon{font-size:2rem;margin-bottom:10px;display:block;}
-.cv-zone-title{font-size:15px;font-weight:500;color:var(--text);margin-bottom:4px;}
-.cv-zone-sub{font-size:12px;color:var(--t3);margin-bottom:14px;}
-.cv-browse-btn{font-family:'IBM Plex Mono',monospace;font-size:.72rem;padding:7px 18px;background:var(--surface);border:1px solid var(--border2);border-radius:4px;color:var(--t2);cursor:pointer;transition:all .15s;display:inline-block;}
-.cv-browse-btn:hover{border-color:var(--blue);color:var(--blue);}
-.cv-file-info{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 14px;margin-top:12px;font-size:13px;}
+.ai-bg{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none;}
+.ai-blob{position:absolute;border-radius:50%;filter:blur(90px);}
+.ai-blob-1{width:480px;height:480px;top:-160px;left:6%;background:radial-gradient(circle,rgba(37,99,235,.30),transparent 70%);animation:blobDrift1 17s ease-in-out infinite;translate:calc(var(--px,0px) * 1.3) calc(var(--py,0px) * 1.3);}
+.ai-blob-2{width:420px;height:420px;top:100px;right:2%;background:radial-gradient(circle,rgba(139,92,246,.24),transparent 70%);animation:blobDrift2 21s ease-in-out infinite;translate:calc(var(--px,0px) * -1) calc(var(--py,0px) * -1);}
+.ai-blob-3{width:360px;height:360px;bottom:8%;left:28%;background:radial-gradient(circle,rgba(56,189,248,.18),transparent 70%);animation:blobDrift3 24s ease-in-out infinite;translate:calc(var(--px,0px) * .6) calc(var(--py,0px) * .6);}
+@keyframes blobDrift1{0%,100%{transform:translate(0,0)}50%{transform:translate(30px,40px)}}
+@keyframes blobDrift2{0%,100%{transform:translate(0,0)}50%{transform:translate(-35px,-20px)}}
+@keyframes blobDrift3{0%,100%{transform:translate(0,0)}50%{transform:translate(20px,-30px)}}
+.ai-grain{position:absolute;inset:-10%;opacity:.05;mix-blend-mode:overlay;filter:url(#aiGrainFilter);}
+
+.ai-glass{position:relative;overflow:hidden;background:rgba(255,255,255,.55);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);border:1px solid rgba(255,255,255,.65);box-shadow:0 8px 32px rgba(31,41,55,.08),0 1px 2px rgba(31,41,55,.04);transition:box-shadow .25s,transform .25s;}
+.ai-glass::before{content:'';position:absolute;inset:0;z-index:0;opacity:0;transition:opacity .35s;pointer-events:none;
+  background:radial-gradient(circle 220px at var(--mx,50%) var(--my,50%),rgba(255,255,255,.55),transparent 70%);}
+.ai-glass:hover::before{opacity:1;}
+.ai-glass > *{position:relative;z-index:1;}
+
+.ai-hero{text-align:center;margin-bottom:36px;}
+.ai-brandmark{width:52px;height:52px;margin:0 auto 18px;border-radius:16px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;
+  background:linear-gradient(135deg,var(--blue),#8b5cf6);box-shadow:0 8px 28px -6px rgba(37,99,235,.55);animation:markFloat 5s ease-in-out infinite;}
+@keyframes markFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+.ai-title{font-family:'IBM Plex Sans',sans-serif;font-size:2.3rem;line-height:1.1;font-weight:700;color:var(--text);letter-spacing:-.03em;}
+.ai-title .accent{background:linear-gradient(100deg,var(--blue),#8b5cf6,#38bdf8,var(--blue));background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:accentShift 6s ease-in-out infinite;}
+@keyframes accentShift{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
+.ai-tagline{font-size:1.05rem;font-weight:500;color:var(--text);margin-top:10px;letter-spacing:-.01em;}
+.ai-subtitle{font-size:14px;color:var(--t2);max-width:440px;margin:10px auto 0;line-height:1.6;}
+
+/* upload */
+.cv-drop-zone{border:1.5px dashed rgba(37,99,235,.35);border-radius:18px;padding:38px 24px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s,transform .2s;margin-bottom:14px;}
+.cv-drop-zone.active,.cv-drop-zone:hover{border-color:var(--blue);transform:translateY(-1px);}
+.cv-drop-zone.active{border-style:solid;}
+.cv-drop-zone.has-file{border-color:var(--blue);border-style:solid;}
+.cv-icon{width:46px;height:46px;margin:0 auto 14px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;
+  background:linear-gradient(135deg,var(--blue),#8b5cf6);box-shadow:0 6px 18px -4px rgba(37,99,235,.5);}
+.cv-icon svg{width:20px;height:20px;}
+.cv-zone-title{font-size:14px;font-weight:500;color:var(--text);margin-bottom:5px;}
+.cv-zone-sub{font-size:12px;color:var(--t3);}
+.cv-file-info{display:flex;align-items:center;gap:10px;border-radius:12px;padding:10px 14px;margin-bottom:14px;font-size:13px;}
+.cv-file-info svg{width:16px;height:16px;color:var(--blue);flex-shrink:0;}
 .cv-file-name{font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .cv-file-clear{background:none;border:none;color:var(--t3);cursor:pointer;font-size:16px;padding:0 4px;}
 .cv-file-clear:hover{color:var(--dead);}
-.cv-divider{display:flex;align-items:center;gap:12px;margin:16px 0;color:var(--t3);font-size:12px;}
-.cv-divider::before,.cv-divider::after{content:'';flex:1;height:1px;background:var(--border);}
+.ai-or{display:flex;align-items:center;gap:12px;margin:18px 0 16px;color:var(--t3);font-size:12px;}
+.ai-or::before,.ai-or::after{content:'';flex:1;height:1px;background:rgba(37,99,235,.15);}
 
-/* AI FORM */
-.ai-form-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:24px;}
-.ai-form-label{font-family:'IBM Plex Mono',monospace;font-size:.65rem;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px;display:block;}
-.ai-textarea{width:100%;min-height:120px;border:1px solid var(--border);border-radius:8px;padding:14px;font-family:'IBM Plex Sans',sans-serif;font-size:14px;color:var(--text);resize:vertical;outline:none;transition:border-color .2s;background:var(--sf2);line-height:1.6;}
-.ai-textarea:focus{border-color:var(--blue);background:var(--surface);}
+/* form */
+.ai-textarea{width:100%;min-height:96px;border:1px solid rgba(37,99,235,.18);border-radius:14px;padding:14px;font-family:'IBM Plex Sans',sans-serif;font-size:14px;color:var(--text);resize:vertical;outline:none;transition:border-color .2s;background:rgba(255,255,255,.5);line-height:1.6;}
+.ai-textarea:focus{border-color:var(--blue);background:rgba(255,255,255,.75);}
 .ai-textarea::placeholder{color:var(--t3);}
 .ai-tips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;}
-.ai-tip{font-size:11px;padding:5px 10px;background:var(--sf2);border:1px solid var(--border);border-radius:16px;color:var(--t2);cursor:pointer;transition:all .15s;}
-.ai-tip:hover{border-color:var(--blue);color:var(--blue);}
-.ai-form-footer{display:flex;align-items:center;justify-content:space-between;margin-top:16px;flex-wrap:wrap;gap:10px;}
+.ai-tip{font-size:11px;padding:5px 12px;background:rgba(255,255,255,.5);border:1px solid rgba(37,99,235,.15);border-radius:999px;color:var(--t2);cursor:pointer;transition:all .15s;backdrop-filter:blur(8px);}
+.ai-tip:hover{border-color:var(--blue);color:var(--blue);background:rgba(255,255,255,.8);}
+.ai-actionrow{display:flex;align-items:center;justify-content:space-between;margin-top:20px;flex-wrap:wrap;gap:12px;}
 .ai-char-count{font-family:'IBM Plex Mono',monospace;font-size:.64rem;color:var(--t3);}
-.ai-submit{font-family:'IBM Plex Mono',monospace;font-size:.74rem;height:40px;padding:0 28px;background:linear-gradient(135deg,var(--blue),#7c3aed);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:500;transition:all .2s;display:flex;align-items:center;gap:8px;box-shadow:0 2px 8px rgba(37,99,235,.25);}
-.ai-submit:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(37,99,235,.35);}
-.ai-submit:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none;}
-.ai-submit .spinner{display:none;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;}
-.ai-submit.loading .spinner{display:inline-block;}
+.ai-submit{position:relative;overflow:hidden;font-family:'IBM Plex Sans',sans-serif;font-size:.86rem;height:44px;padding:0 24px;color:#fff;border:none;border-radius:12px;cursor:pointer;font-weight:600;transition:transform .15s,box-shadow .15s;display:inline-flex;align-items:center;gap:8px;margin-left:auto;
+  background:linear-gradient(135deg,var(--blue),#8b5cf6);box-shadow:0 6px 20px -4px rgba(37,99,235,.5);}
+.ai-submit::after{content:'';position:absolute;top:0;left:-60%;width:40%;height:100%;background:linear-gradient(120deg,transparent,rgba(255,255,255,.4),transparent);transform:skewX(-20deg);transition:left .6s ease;}
+.ai-submit:hover::after{left:130%;}
+.ai-submit:hover{transform:translateY(-1px);box-shadow:0 8px 26px -4px rgba(37,99,235,.65);}
+.ai-submit:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none;}
+.ai-submit .btn-text{display:inline-flex;align-items:center;gap:8px;}
+.ai-submit .btn-loading{display:none;align-items:center;gap:8px;}
 .ai-submit.loading .btn-text{display:none;}
+.ai-submit.loading .btn-loading{display:inline-flex;}
+.ic-spin{animation:spin .8s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg)}}
-.ai-progress{margin-top:12px;font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--t2);text-align:right;transition:opacity .2s;}
+.ai-progress{margin-top:10px;font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--t2);text-align:right;transition:opacity .2s;}
 
-/* AI RESULTS */
-.ai-profile-card{background:linear-gradient(135deg,rgba(37,99,235,.06),rgba(139,92,246,.06));border:1px solid rgba(37,99,235,.2);border-radius:12px;padding:20px;margin-bottom:20px;
-  animation:aiRise .45s ease both;}
-.ai-profile-label{font-family:'IBM Plex Mono',monospace;font-size:.65rem;color:var(--blue);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;}
-.ai-profile-text{font-size:14px;color:var(--text);line-height:1.6;}
-.ai-revelations{margin-bottom:24px;}
-.ai-rev-hd{font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
-.ai-rev-hd::after{content:'';flex:1;height:1px;background:var(--border);}
-.ai-rev-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;}
-.ai-rev-card{background:var(--surface);border:1px solid var(--border);border-top:3px solid var(--ok);border-radius:8px;padding:14px;position:relative;overflow:hidden;
-  animation:aiRise .45s ease both;}
-.ai-rev-card.gap{border-top-color:var(--warn);}
-.ai-rev-icon{font-size:1.2rem;margin-bottom:8px;}
-.ai-rev-title{font-size:12px;font-weight:600;color:var(--text);margin-bottom:4px;}
-.ai-rev-detail{font-size:11px;color:var(--t2);line-height:1.5;}
-.ai-recs-hd{font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
-.ai-recs-hd::after{content:'';flex:1;height:1px;background:var(--border);}
-.ai-result-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:12px;position:relative;overflow:hidden;transition:border-color .2s,box-shadow .2s;
-  animation:aiRise .45s ease both;}
-.ai-result-card:hover{border-color:rgba(37,99,235,.3);box-shadow:0 4px 16px rgba(0,0,0,.06);}
-.ai-result-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--blue),#7c3aed);}
-.ai-meter{position:absolute;top:16px;right:16px;display:flex;align-items:center;gap:7px;}
-.ai-meter-bar{width:52px;height:5px;border-radius:3px;background:var(--border2);overflow:hidden;}
-.ai-meter-bar i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--blue),#7c3aed);}
-.ai-meter b{font-family:'IBM Plex Mono',monospace;font-size:.68rem;font-weight:600;color:var(--blue);white-space:nowrap;}
-.ai-result-title{font-size:15px;font-weight:600;color:var(--text);margin-bottom:6px;padding-right:100px;}
-.ai-result-title a{color:inherit;text-decoration:none;}
-.ai-result-title a:hover{color:var(--blue);}
-.ai-result-meta{font-size:11px;color:var(--t2);margin-bottom:14px;display:flex;gap:10px;flex-wrap:wrap;}
-.ai-section{margin-bottom:10px;}
-.ai-section:last-child{margin-bottom:0;}
-.ai-section-label{font-family:'IBM Plex Mono',monospace;font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;color:var(--t3);margin-bottom:4px;}
-.ai-section-text{font-size:13px;color:var(--text);line-height:1.5;}
+.ai-submit:focus-visible,.ai-tip:focus-visible,.cv-drop-zone:focus-visible,.ai-textarea:focus-visible{outline:2px solid var(--blue);outline-offset:3px;}
 
-@keyframes aiRise{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+/* how it works */
+.ai-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:44px;}
+.ai-step{border-radius:16px;padding:18px;}
+.ai-step-n{font-family:'IBM Plex Mono',monospace;font-size:.72rem;background:linear-gradient(135deg,var(--blue),#8b5cf6);-webkit-background-clip:text;background-clip:text;color:transparent;font-weight:700;}
+.ai-step h3{font-size:13px;font-weight:600;color:var(--text);margin:8px 0 5px;}
+.ai-step p{font-size:12px;color:var(--t2);line-height:1.55;}
+
+/* results skeleton */
+.ai-skel-row{height:14px;border-radius:6px;margin-bottom:10px;}
+.ai-skel-card{border-radius:18px;padding:20px;margin-top:16px;}
+.ai-skel-card .skel{height:12px;border-radius:6px;margin-bottom:10px;}
+.ai-skel-row.skel,.ai-skel-card .skel{background:linear-gradient(90deg,rgba(37,99,235,.1) 25%,rgba(139,92,246,.2) 50%,rgba(37,99,235,.1) 75%);background-size:200% 100%;}
+
+/* results */
+.ai-empty{border-radius:18px;padding:36px 24px;text-align:center;}
+.ai-empty.dashed{border-style:dashed;border-color:rgba(37,99,235,.3);}
+.ai-empty-icon{width:44px;height:44px;margin:0 auto 16px;border-radius:50%;background:linear-gradient(135deg,var(--t3),var(--t2));color:#fff;display:flex;align-items:center;justify-content:center;}
+.ai-empty-icon svg{width:20px;height:20px;}
+.ai-empty h2{font-size:16px;font-weight:600;color:var(--text);margin-bottom:8px;}
+.ai-empty p{font-size:13px;color:var(--t2);line-height:1.6;max-width:38ch;margin:0 auto;}
+.ai-empty p.strong{font-weight:500;color:var(--text);margin-bottom:6px;}
+.ai-empty-foot{font-family:'IBM Plex Mono',monospace;font-size:.65rem;color:var(--t3);margin-top:14px;}
+
+.ai-mono-tag{font-family:'IBM Plex Mono',monospace;font-size:.65rem;color:var(--t3);white-space:nowrap;}
+
+.ai-profile{border-radius:18px;padding:24px;margin-bottom:16px;animation:aiRise .5s ease both;}
+.ai-profile-hd{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+.ai-profile-hd h2{font-size:16px;font-weight:600;color:var(--text);}
+.ai-profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:18px;}
+.ai-profile-lbl{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--text);margin-bottom:10px;}
+.ai-profile-lbl .dot{width:8px;height:8px;border-radius:50%;}
+.ai-profile-lbl .dot.primary{background:linear-gradient(135deg,var(--blue),#8b5cf6);box-shadow:0 0 8px rgba(37,99,235,.6);}
+.ai-profile-lbl .dot.muted{background:var(--t3);opacity:.5;}
+.ai-profile ul{list-style:none;display:grid;gap:8px;}
+.ai-profile li{font-size:13px;line-height:1.55;color:var(--text);}
+.ai-profile-grid > div:last-child li{color:var(--t2);}
+.ai-trajectory{margin-top:18px;padding-top:18px;border-top:1px solid rgba(37,99,235,.15);}
+.ai-trajectory .ai-mono-tag{display:block;margin-bottom:8px;}
+.ai-trajectory p{font-size:13px;color:var(--text);line-height:1.6;}
+
+.ai-matches-hd{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;}
+.ai-matches-hd h2{font-size:16px;font-weight:600;color:var(--text);}
+
+.ai-match{border-radius:18px;padding:20px 22px;margin-bottom:12px;transition:transform .2s,box-shadow .2s;animation:aiRise .5s ease both;}
+.ai-match:hover{transform:translateY(-2px);box-shadow:0 14px 36px rgba(31,41,55,.12),0 1px 2px rgba(31,41,55,.04);}
+.ai-match-row{display:flex;justify-content:space-between;align-items:center;gap:16px;}
+.ai-match-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;}
+.ai-chip{font-family:'IBM Plex Mono',monospace;font-size:.66rem;background:rgba(37,99,235,.08);color:var(--blue);border-radius:6px;padding:2px 8px;}
+.ai-match-title{font-size:15px;font-weight:600;color:var(--text);line-height:1.4;}
+.ai-ring{position:relative;width:60px;height:60px;flex-shrink:0;}
+.ai-ring svg{width:100%;height:100%;transform:rotate(-90deg);}
+.ai-ring circle{fill:none;stroke-width:5;}
+.ai-ring .ring-bg{stroke:rgba(37,99,235,.12);}
+.ai-ring .ring-fg{stroke:url(#aiRingGrad);stroke-linecap:round;filter:drop-shadow(0 0 3px rgba(37,99,235,.45));transition:stroke-dashoffset .7s ease;}
+.ai-ring b{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:.92rem;font-weight:700;color:var(--text);}
+.ai-match-tier{font-family:'IBM Plex Mono',monospace;font-size:.64rem;text-align:center;color:var(--t3);margin-top:4px;}
+.ai-match-why{font-size:13.5px;color:var(--text);line-height:1.6;margin-top:14px;}
+.ai-match-details{margin-top:12px;padding-top:12px;border-top:1px solid rgba(37,99,235,.15);display:grid;gap:7px;}
+.ai-match-detail{font-size:12px;line-height:1.6;color:var(--t2);}
+.ai-match-detail b{font-family:'IBM Plex Mono',monospace;font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;color:var(--blue);font-weight:600;margin-right:7px;}
+.ai-match-link{display:inline-flex;align-items:center;gap:5px;margin-top:14px;font-size:12.5px;font-weight:600;color:var(--blue);text-decoration:none;}
+.ai-match-link:hover{opacity:.75;}
+.ai-match-link svg{width:12px;height:12px;}
+
+@keyframes aiRise{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
 @media(prefers-reduced-motion:reduce){
-  .ai-profile-card,.ai-rev-card,.ai-result-card{animation:none;}
+  .ai-profile,.ai-match,.ai-brandmark{animation:none;}
+  .ic-spin,.ai-blob,.ai-title .accent{animation:none;}
+}
+@media(max-width:640px){
+  .ai-profile-grid{grid-template-columns:1fr;}
+  .ai-steps{grid-template-columns:1fr;}
 }
 
 /* MISC */
@@ -274,7 +335,6 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
   header{padding:0 14px}
   .events-area,.controls,.count-row{padding-left:14px;padding-right:14px}
   .hack-view,.ai-view{padding:16px}
-  .ai-rev-grid{grid-template-columns:1fr}
   .hack-grid{grid-template-columns:1fr}
 }
 </style>
@@ -383,54 +443,72 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
 
     <!-- AI VIEW -->
     <div class="ai-view show" id="aiView">
-      <div class="ai-header">
-        <div class="ai-orb-wrap">
-          <div class="ai-orb-ring"></div>
-          <div class="ai-orb">✦</div>
-        </div>
-        <h1 class="ai-title">OrbitCast AI</h1>
-        <p class="ai-subtitle">Drop your CV and we'll give you an honest read of your background — strengths and gaps — plus the handful of events that genuinely fit where you're headed.</p>
+      <div class="ai-bg" aria-hidden="true">
+        <div class="ai-blob ai-blob-1"></div>
+        <div class="ai-blob ai-blob-2"></div>
+        <div class="ai-blob ai-blob-3"></div>
+        <div class="ai-grain"></div>
       </div>
+      <svg width="0" height="0" style="position:absolute">
+        <defs>
+          <linearGradient id="aiRingGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="var(--blue)"/><stop offset="100%" stop-color="#8b5cf6"/>
+          </linearGradient>
+          <filter id="aiGrainFilter"><feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter>
+        </defs>
+      </svg>
 
-      <div class="ai-form-card">
-        <span class="ai-form-label">Step 1 — Upload your CV (optional)</span>
-        <div class="cv-drop-zone" id="cvDropZone"
+      <div class="ai-wrap">
+
+        <div class="ai-hero">
+          <div class="ai-brandmark">&#10022;</div>
+          <h1 class="ai-title">OrbitCast<span class="accent">AI</span></h1>
+          <p class="ai-tagline">Make network into networth.</p>
+          <p class="ai-subtitle">Drop your CV &mdash; we'll match you to the events in London actually worth your time.</p>
+        </div>
+
+        <div class="cv-drop-zone ai-glass" id="cvDropZone" tabindex="0" role="button" aria-label="Upload your CV"
           ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleCVDrop(event)"
-          onclick="document.getElementById('cvFile').click()">
-          <span class="cv-icon">📄</span>
-          <div class="cv-zone-title">Drop your CV here</div>
-          <div class="cv-zone-sub">PDF, DOCX or TXT · Max 5MB</div>
-          <div class="cv-browse-btn">Browse files</div>
+          onclick="document.getElementById('cvFile').click()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('cvFile').click();}">
           <input type="file" id="cvFile" accept=".pdf,.docx,.txt" style="display:none" onchange="handleCVFile(this)">
+          <div class="cv-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M5 11l7-7 7 7M4 20h16"/></svg></div>
+          <div class="cv-zone-title">Drop your CV here, or click to browse</div>
+          <div class="cv-zone-sub">PDF, DOCX, or TXT &middot; Max 5MB &middot; only extracted text is stored</div>
         </div>
-        <div class="cv-file-info" id="cvFileInfo" style="display:none">
-          <span>📄</span>
+        <div class="cv-file-info ai-glass" id="cvFileInfo" style="display:none">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M9 13h6M9 17h6"/></svg>
           <span class="cv-file-name" id="cvFileName"></span>
-          <button class="cv-file-clear" onclick="clearCV()" title="Remove">×</button>
+          <button class="cv-file-clear" onclick="clearCV()" title="Remove">&times;</button>
         </div>
 
-        <div class="cv-divider">or describe yourself</div>
+        <div class="ai-or">or describe yourself</div>
 
-        <span class="ai-form-label">Step 2 — Tell us about yourself</span>
         <textarea class="ai-textarea" id="aiInput" placeholder="I'm a software engineer with 5 years in fintech, now looking to transition into AI product management. Interested in defence tech and deep tech investing. Currently building a side project using LLMs..." oninput="updateCharCount()"></textarea>
         <div class="ai-tips">
-          <span class="ai-tip" onclick="setAiTip('Software engineer with 3 years Python & ML experience, interested in AI/product roles')">🖥️ Tech & AI</span>
-          <span class="ai-tip" onclick="setAiTip('Business professional seeking networking with founders and investors in London')">💼 Business</span>
-          <span class="ai-tip" onclick="setAiTip('Cybersecurity analyst interested in threat intelligence and infosec conferences')">🔒 Security</span>
-          <span class="ai-tip" onclick="setAiTip('PhD student researching defence technology, geopolitics, and AI governance')">🎓 Research</span>
-          <span class="ai-tip" onclick="setAiTip('Founder looking for co-founders, investors and hackathons to build and ship fast')">🚀 Founder</span>
+          <span class="ai-tip" tabindex="0" role="button" onclick="setAiTip('Software engineer with 3 years Python & ML experience, interested in AI/product roles')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">Tech &amp; AI</span>
+          <span class="ai-tip" tabindex="0" role="button" onclick="setAiTip('Business professional seeking networking with founders and investors in London')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">Business</span>
+          <span class="ai-tip" tabindex="0" role="button" onclick="setAiTip('Cybersecurity analyst interested in threat intelligence and infosec conferences')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">Security</span>
+          <span class="ai-tip" tabindex="0" role="button" onclick="setAiTip('PhD student researching defence technology, geopolitics, and AI governance')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">Research</span>
+          <span class="ai-tip" tabindex="0" role="button" onclick="setAiTip('Founder looking for co-founders, investors and hackathons to build and ship fast')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">Founder</span>
         </div>
-        <div class="ai-form-footer">
+
+        <div class="ai-actionrow">
           <span class="ai-char-count" id="aiCharCount">0 / 5000</span>
           <button class="ai-submit" id="aiSubmitBtn" onclick="submitAI()">
-            <span class="btn-text">Analyse & Recommend ✦</span>
-            <span class="spinner"></span>
+            <span class="btn-text">Analyze my CV <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+            <span class="btn-loading"><svg class="ic-spin" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle opacity=".3" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"/></svg>Reading your CV&hellip;</span>
           </button>
         </div>
         <div class="ai-progress" id="aiProgress" style="display:none"></div>
-      </div>
 
-      <div id="aiResults"></div>
+        <div class="ai-steps" id="aiSteps">
+          <div class="ai-step ai-glass"><span class="ai-step-n">01</span><h3>Classify</h3><p>First: is this actually a CV? If not, it stops and tells you.</p></div>
+          <div class="ai-step ai-glass"><span class="ai-step-n">02</span><h3>Read</h3><p>Extract real roles, projects, and skills &mdash; with evidence, not titles.</p></div>
+          <div class="ai-step ai-glass"><span class="ai-step-n">03</span><h3>Match &amp; audit</h3><p>Score each event 0&ndash;100 honestly. Only 65+ survives, in code &mdash; then a final pass drops generic reasoning.</p></div>
+        </div>
+
+        <div id="aiResults"></div>
+      </div>
     </div>
 
   </div>
@@ -440,6 +518,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
 
 <script>
 // ── CONFIG ───────────────────────────────────────────────
+const REDUCE_MOTION = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const CAT_COLOR = {
   'Intelligence & Security':'var(--ci)',
   'Defence & Geopolitics':  'var(--cd)',
@@ -745,11 +824,32 @@ const AI_PROGRESS_STEPS=[
   'Matching against the event catalog…',
   'Auditing recommendations for generic flattery…',
 ];
+function aiSkeleton(){
+  return '<div class="ai-skel-row skel" style="width:33%"></div>'
+    +'<div class="ai-skel-row skel" style="width:100%"></div>'
+    +'<div class="ai-skel-row skel" style="width:80%"></div>'
+    +'<div class="ai-skel-card ai-glass"><div class="skel" style="width:25%"></div><div class="skel" style="width:100%"></div><div class="skel" style="width:65%;margin-bottom:0"></div></div>'
+    +'<div class="ai-skel-card ai-glass"><div class="skel" style="width:25%"></div><div class="skel" style="width:100%"></div><div class="skel" style="width:65%;margin-bottom:0"></div></div>';
+}
+function tierFor(score){
+  if(score>=85)return 'Should attend';
+  if(score>=75)return 'Solid match';
+  return 'Fit';
+}
+function ringSvg(fit){
+  const c=170;
+  return '<div class="ai-ring" data-fit="'+fit+'"><svg viewBox="0 0 64 64">'
+    +'<circle class="ring-bg" cx="32" cy="32" r="27"></circle>'
+    +'<circle class="ring-fg" cx="32" cy="32" r="27" stroke-dasharray="'+c+'" stroke-dashoffset="'+c+'"></circle>'
+    +'</svg><b>0</b></div>';
+}
 async function submitAI(){
   const input=document.getElementById('aiInput').value.trim();
   if(!cvFileData&&input.length<10){toast('Upload a CV or tell us a bit about yourself');return;}
   const btn=document.getElementById('aiSubmitBtn');
   const progress=document.getElementById('aiProgress');
+  document.getElementById('aiSteps').style.display='none';
+  document.getElementById('aiResults').innerHTML=aiSkeleton();
   btn.classList.add('loading');btn.disabled=true;
   progress.style.display='block';progress.style.opacity='1';
   let step=0;
@@ -764,9 +864,9 @@ async function submitAI(){
     if(input)form.append('text',input);
     const res=await fetch('/api/analyze',{method:'POST',body:form});
     const data=await res.json();
-    if(!res.ok){toast(data.error||'Something went wrong');return;}
+    if(!res.ok){toast(data.error||'Something went wrong');document.getElementById('aiResults').innerHTML='';return;}
     renderAIResults(data);
-  }catch(err){toast('Failed: '+err.message);}
+  }catch(err){toast('Failed: '+err.message);document.getElementById('aiResults').innerHTML='';}
   finally{
     clearInterval(stepTimer);
     btn.classList.remove('loading');btn.disabled=false;
@@ -779,7 +879,12 @@ function renderAIResults(data){
   const container=document.getElementById('aiResults');
 
   if(!data.is_cv){
-    container.innerHTML='<div class="empty"><h3>That doesn\'t look like a CV</h3><p>'+esc(data.message_if_not_cv||'Try uploading a CV or resume — PDF, DOCX, or TXT.')+'</p></div>';
+    container.innerHTML='<div class="ai-empty ai-glass">'
+      +'<div class="ai-empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></svg></div>'
+      +'<h2>This doesn\'t look like a CV</h2>'
+      +'<p>'+esc(data.message_if_not_cv||'Try uploading a CV or resume — PDF, DOCX, or TXT.')+'</p>'
+      +'<p class="ai-empty-foot">stopped at classification &middot; no profile generated</p>'
+      +'</div>';
     container.scrollIntoView({behavior:'smooth'});
     return;
   }
@@ -787,44 +892,62 @@ function renderAIResults(data){
   const p=data.profile||{};
   const recs=data.recommendations||[];
 
-  let html='';
-  html+='<div class="ai-profile-card"><div class="ai-profile-label">✦ Profile Analysis'+(p.seniority?' · '+esc(p.seniority):'')+'</div><div class="ai-profile-text">'+esc(p.summary||'')+'</div></div>';
-
-  if(p.trajectory){
-    html+='<div class="ai-profile-card" style="animation-delay:70ms"><div class="ai-profile-label">↗ Where you\'re headed</div><div class="ai-profile-text">'+esc(p.trajectory)+'</div></div>';
-  }
-
-  if((p.strengths&&p.strengths.length)||(p.gaps&&p.gaps.length)){
-    let card=0;
-    html+='<div class="ai-revelations"><div class="ai-rev-hd">Honest Read</div><div class="ai-rev-grid">';
-    (p.strengths||[]).forEach(s=>{html+='<div class="ai-rev-card" style="animation-delay:'+(card++*50)+'ms"><div class="ai-rev-icon">✓</div><div class="ai-rev-title">Strength</div><div class="ai-rev-detail">'+esc(s)+'</div></div>';});
-    (p.gaps||[]).forEach(g=>{html+='<div class="ai-rev-card gap" style="animation-delay:'+(card++*50)+'ms"><div class="ai-rev-icon">△</div><div class="ai-rev-title">Gap</div><div class="ai-rev-detail">'+esc(g)+'</div></div>';});
-    html+='</div></div>';
-  }
+  let html='<div class="ai-profile ai-glass">'
+    +'<div class="ai-profile-hd"><h2>Your profile'+(p.seniority?' · '+esc(p.seniority):'')+'</h2><span class="ai-mono-tag">grounded in CV evidence</span></div>'
+    +'<div class="ai-profile-grid">'
+    +'<div><div class="ai-profile-lbl"><span class="dot primary"></span>Strong in</div><ul>'
+    +((p.strengths&&p.strengths.length)?p.strengths.map(s=>'<li>'+esc(s)+'</li>').join(''):'<li>No specific strengths surfaced.</li>')
+    +'</ul></div>'
+    +'<div><div class="ai-profile-lbl"><span class="dot muted"></span>Thin on</div><ul>'
+    +((p.gaps&&p.gaps.length)?p.gaps.map(g=>'<li>'+esc(g)+'</li>').join(''):'<li>No notable gaps detected.</li>')
+    +'</ul></div>'
+    +'</div>'
+    +(p.trajectory?'<div class="ai-trajectory"><span class="ai-mono-tag">Where you\'re headed</span><p>'+esc(p.trajectory)+'</p></div>':'')
+    +'</div>';
 
   if(!recs.length){
-    html+='<div class="empty"><h3>No strong matches right now</h3><p>Nothing in the current catalog cleared our fit bar for you — that\'s an honest result, not an error. Check back after the next refresh.</p></div>';
+    html+='<div class="ai-matches-hd"><h2>No matches</h2><span class="ai-mono-tag">scored 0&ndash;100 &middot; only 65+ shown</span></div>'
+      +'<div class="ai-empty ai-glass dashed"><p class="strong">No strong matches right now.</p>'
+      +'<p>That\'s an honest result, not a failure. Nothing in the current catalog crossed the 65 threshold against your CV. Check back after the next refresh.</p></div>';
     container.innerHTML=html;
     container.scrollIntoView({behavior:'smooth'});
     return;
   }
 
-  html+='<div class="ai-recs-hd">Recommended Events ('+recs.length+')</div>';
+  html+='<div class="ai-matches-hd"><h2>'+recs.length+' match'+(recs.length===1?'':'es')+'</h2><span class="ai-mono-tag">scored 0&ndash;100 &middot; only 65+ shown</span></div>';
   recs.forEach((r,i)=>{
-    const catCol=CAT_COLOR[r.category]||'var(--border2)';
     const fit=r.fit_score||0;
-    html+='<div class="ai-result-card" style="animation-delay:'+(i*70)+'ms">'
-      +'<div class="ai-meter"><div class="ai-meter-bar"><i style="width:'+fit+'%"></i></div><b>'+fit+'%</b></div>'
-      +'<div class="ai-result-title"><a href="'+esc(r.url)+'" target="_blank" rel="noopener">'+esc(r.title)+'</a></div>'
-      +'<div class="ai-result-meta"><span style="color:'+catCol+'">● '+esc(r.category)+'</span><span>'+esc(r.emoji||'')+' '+esc(r.source)+'</span>'+(r.format?'<span>'+esc(r.format)+'</span>':'')+(r.date?'<span>📅 '+esc(r.date)+'</span>':'')+'</div>'
-      +'<div class="ai-section"><div class="ai-section-label">Why attend</div><div class="ai-section-text">'+esc(r.why)+'</div></div>'
-      +(r.why_now?'<div class="ai-section"><div class="ai-section-label">Why now</div><div class="ai-section-text">'+esc(r.why_now)+'</div></div>':'')
-      +'<div class="ai-section"><div class="ai-section-label">How to prepare</div><div class="ai-section-text">'+esc(r.prepare)+'</div></div>'
-      +'<div class="ai-section"><div class="ai-section-label">Career benefit</div><div class="ai-section-text">'+esc(r.benefit)+'</div></div>'
+    const extras=[
+      r.why_now?['Why now',r.why_now]:null,
+      r.prepare?['Prepare',r.prepare]:null,
+      r.benefit?['Benefit',r.benefit]:null,
+    ].filter(Boolean);
+    html+='<div class="ai-match ai-glass" style="animation-delay:'+(i*70)+'ms">'
+      +'<div class="ai-match-row">'
+      +'<div><div class="ai-match-meta"><span class="ai-chip">'+esc(r.category)+'</span><span class="ai-mono-tag">'+esc(r.date||'')+'</span></div>'
+      +'<h3 class="ai-match-title"><a href="'+esc(r.url)+'" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">'+esc(r.title)+'</a></h3></div>'
+      +'<div>'+ringSvg(fit)+'<p class="ai-match-tier">'+tierFor(fit)+'</p></div>'
+      +'</div>'
+      +'<p class="ai-match-why">'+esc(r.why)+'</p>'
+      +(extras.length?'<div class="ai-match-details">'+extras.map(([k,v])=>'<div class="ai-match-detail"><b>'+k+'</b>'+esc(v)+'</div>').join('')+'</div>':'')
+      +(r.url?'<a class="ai-match-link" href="'+esc(r.url)+'" target="_blank" rel="noopener">View event <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></a>':'')
       +'</div>';
   });
   container.innerHTML=html;
   container.scrollIntoView({behavior:'smooth'});
+  container.querySelectorAll('.ai-ring').forEach(el=>animateRing(el,parseInt(el.dataset.fit,10)));
+}
+
+function animateRing(el,target){
+  if(REDUCE_MOTION){el.querySelector('b').textContent=target;el.querySelector('.ring-fg').style.strokeDashoffset=170-(170*target/100);return;}
+  const b=el.querySelector('b'),fg=el.querySelector('.ring-fg'),c=170,dur=900,start=performance.now();
+  function tick(now){
+    const p=Math.min(1,(now-start)/dur),eased=1-Math.pow(1-p,3),val=Math.round(target*eased);
+    b.textContent=val;
+    fg.style.strokeDashoffset=c-(c*val/100);
+    if(p<1)requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
 }
 
 // ── .ICS ────────────────────────────────────────────────
@@ -924,6 +1047,25 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){document.getElementById('search').blur();document.getElementById('search').value='';render();}
   if((e.key==='c'||e.key==='C')&&document.activeElement.tagName!=='INPUT'&&document.activeElement.tagName!=='TEXTAREA'){switchView(currentView==='calendar'?'events':'calendar');}
 });
+
+// ── AI PANEL: glass spotlight + blob parallax ────────────
+if(!REDUCE_MOTION){
+  document.addEventListener('mousemove',e=>{
+    const view=document.getElementById('aiView');
+    if(!view||!view.classList.contains('show'))return;
+    const card=e.target.closest&&e.target.closest('.ai-glass');
+    if(card){
+      const r=card.getBoundingClientRect();
+      card.style.setProperty('--mx',(e.clientX-r.left)+'px');
+      card.style.setProperty('--my',(e.clientY-r.top)+'px');
+    }
+    const bg=view.querySelector('.ai-bg');
+    if(bg){
+      bg.style.setProperty('--px',((e.clientX/window.innerWidth-.5)*24)+'px');
+      bg.style.setProperty('--py',((e.clientY/window.innerHeight-.5)*24)+'px');
+    }
+  });
+}
 
 // ── BOOT ────────────────────────────────────────────────
 (function boot(){
