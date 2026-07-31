@@ -297,14 +297,14 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
 
   <div class="main">
     <div class="view-tabs">
-      <button class="view-tab active" id="tabEvents" onclick="switchView('events')">Events</button>
+      <button class="view-tab" id="tabEvents" onclick="switchView('events')">Events</button>
       <button class="view-tab" id="tabCalendar" onclick="switchView('calendar')">Calendar</button>
       <button class="view-tab" id="tabHackathons" onclick="switchView('hackathons')">⚡ Hackathons</button>
-      <button class="view-tab" id="tabAI" onclick="switchView('ai')">✦ OrbitCast AI</button>
+      <button class="view-tab active" id="tabAI" onclick="switchView('ai')">✦ OrbitCast AI</button>
     </div>
 
     <!-- EVENTS VIEW -->
-    <div id="eventsView">
+    <div id="eventsView" style="display:none">
       <div class="controls">
         <label class="ctrl-label"><input type="checkbox" id="cbUpcoming" checked onchange="render()"> Upcoming</label>
         <div class="ctrl-sep"></div>
@@ -371,7 +371,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
     </div>
 
     <!-- AI VIEW -->
-    <div class="ai-view" id="aiView">
+    <div class="ai-view show" id="aiView">
       <div class="ai-header">
         <div class="ai-orb-wrap">
           <div class="ai-orb-ring"></div>
@@ -462,7 +462,7 @@ function loadSaved(){try{return new Set(JSON.parse(localStorage.getItem('oc_save
 function persistSaved(){try{localStorage.setItem('oc_saved',JSON.stringify([...saved]));}catch{}}
 const saved=loadSaved();
 let calY,calM,selDay=null;
-let lastRunTs=null,currentView='events';
+let lastRunTs=null,currentView='ai';
 let cvFileData=null;
 
 // ── UTILS ────────────────────────────────────────────────
@@ -507,7 +507,7 @@ function switchView(view){
   if(view==='calendar')renderCal();
   if(view==='hackathons')renderHackathons();
 }
-function goHome(){switchView('events');window.scrollTo({top:0,behavior:'smooth'});}
+function goHome(){switchView('ai');window.scrollTo({top:0,behavior:'smooth'});}
 
 // ── API ──────────────────────────────────────────────────
 async function fetchEvents(){
