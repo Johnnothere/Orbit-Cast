@@ -80,6 +80,10 @@ def init_security(app):
     def rate_limited(e):
         return jsonify(error="too many requests — slow down"), 429
 
+    @app.errorhandler(413)
+    def too_large(e):
+        return jsonify(error="file too large — max 5MB"), 413
+
     @app.errorhandler(500)
     def server_error(e):
         app.logger.exception("Internal error")
