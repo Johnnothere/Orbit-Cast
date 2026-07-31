@@ -61,14 +61,15 @@ def run_scrape_background():
             return
         _scraping = True
     try:
-        from scraper import SOURCES
+        from scraper import SOURCES, event_id
         all_events, summary_data = [], []
         lock = threading.Lock()
 
         def scrape_one(src):
             try:
                 events   = src["fn"]()
-                enriched = [{**ev, "emoji": src["emoji"], "category": src["category"]} for ev in events]
+                enriched = [{**ev, "id": event_id(ev.get("title", ""), ev.get("url", "")),
+                             "emoji": src["emoji"], "category": src["category"]} for ev in events]
                 summary  = {"source": src["name"], "emoji": src["emoji"],
                             "category": src["category"], "count": len(events)}
                 return enriched, summary

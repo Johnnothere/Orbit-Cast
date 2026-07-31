@@ -15,10 +15,13 @@ Deps used on demand:  anthropic, pdfplumber, python-docx
 
 import io
 import json
+import logging
 import os
 import re
 
 from anthropic import Anthropic
+
+log = logging.getLogger("orbitcast.ai")
 
 MODEL = "claude-sonnet-5"             # current Sonnet model id
 FIT_THRESHOLD = 65                   # only surface events scoring this or higher
@@ -36,6 +39,23 @@ def _get_client():
     return _client
 
 
+def _extract_json_object(raw: str) -> str:
+    """Models are told to return bare JSON, but sometimes wrap it in a code
+    fence or add a stray line of commentary anyway. Strip a fence if present,
+    then fall back to slicing from the first '{' to the last '}' so a wrapper
+    sentence doesn't sink an otherwise-valid response."""
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw[3:]
+        if raw.lower().startswith("json"):
+            raw = raw[4:]
+        raw = raw.rsplit("```", 1)[0].strip()
+    start, end = raw.find("{"), raw.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return raw[start:end + 1]
+    return raw
+
+
 def _call(system, user_content, max_tokens=1500):
     resp = _get_client().messages.create(
         model=MODEL,
@@ -44,12 +64,15 @@ def _call(system, user_content, max_tokens=1500):
         messages=[{"role": "user", "content": user_content}],
     )
     raw = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
-    if raw.startswith("```"):
-        raw = raw[3:]
-        if raw.lower().startswith("json"):
-            raw = raw[4:]
-        raw = raw.rsplit("```", 1)[0].strip()
-    return json.loads(raw)
+    candidate = _extract_json_object(raw)
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        log.warning(
+            "Non-JSON model response (stop_reason=%s, %d chars): %r",
+            getattr(resp, "stop_reason", None), len(raw), raw[:800],
+        )
+        raise
 
 
 # --------------------------------------------------------------------------
@@ -173,7 +196,7 @@ def _empty_result(message: str) -> dict:
 
 def extract_profile(file_text: str) -> dict:
     user_content = f"DOCUMENT TEXT:\n{file_text[:12000]}"
-    data = _call(PROFILE_SYSTEM_PROMPT, user_content, max_tokens=1200)
+    data = _call(PROFILE_SYSTEM_PROMPT, user_content, max_tokens=1600)
     data.setdefault("recommendations", [])
     return data
 
@@ -237,7 +260,7 @@ def score_events(profile: dict, compact_events: list) -> list:
         "EVENT CATALOG (JSON array):\n"
         f"{json.dumps(compact_events, ensure_ascii=False)}"
     )
-    data = _call(SCORING_SYSTEM_PROMPT, user_content, max_tokens=1800)
+    data = _call(SCORING_SYSTEM_PROMPT, user_content, max_tokens=2200)
     valid_ids = {e["id"] for e in compact_events}
     recs = [
         r for r in data.get("recommendations", [])
@@ -287,10 +310,11 @@ def critique_recommendations(profile: dict, recommendations: list) -> list:
         f"{json.dumps(recommendations, ensure_ascii=False)}"
     )
     try:
-        data = _call(CRITIQUE_SYSTEM_PROMPT, user_content, max_tokens=800)
-    except Exception:
+        data = _call(CRITIQUE_SYSTEM_PROMPT, user_content, max_tokens=1000)
+    except Exception as exc:
         # Critique failing shouldn't sink the whole analysis - fall back to
         # the unaudited (but already threshold-enforced) recommendations.
+        log.warning(f"Critique pass failed, keeping unaudited recommendations: {exc}")
         return recommendations
 
     keep_ids = {
@@ -315,6 +339,7 @@ def analyze_upload(file_text: str, events: list) -> dict:
     except json.JSONDecodeError:
         return _empty_result("I couldn't read that file clearly. Try a PDF or DOCX CV.")
     except Exception as exc:  # network / API failure - never 500 the route
+        log.warning(f"extract_profile failed: {exc}")
         return _empty_result(f"Analysis is temporarily unavailable. ({exc})")
 
     if not data.get("is_cv"):
@@ -326,9 +351,8 @@ def analyze_upload(file_text: str, events: list) -> dict:
     try:
         recs = score_events(data["profile"], compact_events)
         recs = critique_recommendations(data["profile"], recs)
-    except json.JSONDecodeError:
-        recs = []
-    except Exception:
+    except Exception as exc:
+        log.warning(f"score_events failed, returning profile with no recommendations: {exc}")
         recs = []
 
     # Enrich with the real event object and cap at the honesty-rule max.
