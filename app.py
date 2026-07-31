@@ -173,9 +173,15 @@ def api_analyze():
 # STARTUP
 # ─────────────────────────────────────────────
 
+# Runs on import, not just under `python app.py` - gunicorn imports this
+# module directly and never hits the __main__ guard below. Without this,
+# every deploy boots with an empty cache (Railway's filesystem is
+# ephemeral) and nothing repopulates it until someone manually hits
+# Refresh. Safe to run unconditionally: single gunicorn worker process,
+# so this fires exactly once.
+logging.basicConfig(level=logging.INFO)
+threading.Thread(target=run_scrape_background, daemon=True).start()
+
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    t = threading.Thread(target=run_scrape_background, daemon=True)
-    t.start()
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
