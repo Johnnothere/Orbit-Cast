@@ -27,6 +27,10 @@ log = logging.getLogger("orbitcast.ai")
 MODEL = "claude-sonnet-5"             # current Sonnet model id
 FIT_THRESHOLD = 65                   # only surface events scoring this or higher
 MAX_RECOMMENDATIONS = 4              # honesty rule: 2-4 strong matches, not a list
+MAX_CATALOG_SIZE = 100                # cap events sent to scoring - the live catalog
+                                       # has grown past 200; a huge input made responses
+                                       # more likely to truncate before finishing valid
+                                       # JSON. Soonest-first is a reasonable priority cut.
 
 _client = None
 
@@ -280,15 +284,20 @@ Return ONLY valid JSON - no markdown, no backticks, no preamble - in EXACTLY thi
 
 
 def score_events(profile: dict, compact_events: list) -> list:
+    # Soonest first, capped - a smaller, closer-dated candidate pool is both a more
+    # useful set to recommend from and a smaller prompt, which made truncation less
+    # likely in practice (confirmed via stop_reason=max_tokens on the full catalog).
+    catalog = sorted(compact_events, key=lambda e: e.get("date") or "9999-99-99")[:MAX_CATALOG_SIZE]
+
     user_content = (
         f"TODAY'S DATE: {date.today().isoformat()}\n\n"
         "PERSON PROFILE (JSON):\n"
         f"{json.dumps(profile, ensure_ascii=False)}\n\n"
         "EVENT CATALOG (JSON array):\n"
-        f"{json.dumps(compact_events, ensure_ascii=False)}"
+        f"{json.dumps(catalog, ensure_ascii=False)}"
     )
-    data = _call(SCORING_SYSTEM_PROMPT, user_content, max_tokens=3200)
-    valid_ids = {e["id"] for e in compact_events}
+    data = _call(SCORING_SYSTEM_PROMPT, user_content, max_tokens=4096)
+    valid_ids = {e["id"] for e in catalog}
     recs = [
         r for r in data.get("recommendations", [])
         if isinstance(r, dict)
