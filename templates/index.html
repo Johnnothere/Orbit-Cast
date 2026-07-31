@@ -453,28 +453,6 @@ function isLegit(e){
   return true;
 }
 
-// ── HACKATHONS DATA ──────────────────────────────────────
-const HACKATHONS=[
-  {title:'The Agent Economy Buildathon',date:'2026-06-01',endDate:'2026-06-06',prize:'$20k in bounties',url:'https://lnkd.in/enUFiCUU',desc:'Build the agent economy rails. 6 days. Superteam UK × PLUGGED.'},
-  {title:'Fullhouse — UK\'s first poker bot hackathon',date:'2026-06-01',endDate:'2026-06-04',prize:'£4k+ prize pool',url:'https://lnkd.in/eZKnwnGD',desc:'Texas Hold\'em algo comp vs top university bots.'},
-  {title:'Wayflyer × Fin | Build the future of eCommerce',date:'2026-06-03',endDate:'2026-06-05',prize:'',url:'https://lu.ma/v4bzvbka',desc:'3-day build at the Visionaries Summit. Best builders in London.'},
-  {title:'Pop The Bubble Hackathon',date:'2026-06-05',endDate:'2026-06-07',prize:'',url:'https://lu.ma/035ubxn3',desc:'36hrs. 80 builders. 12% acceptance rate. Real products only.'},
-  {title:'NVIDIA Hack for Impact — London',date:'2026-06-05',endDate:'2026-06-07',prize:'',url:'https://lnkd.in/ebmmXJ4E',desc:'Build autonomous systems that make a real-world impact.'},
-  {title:'AI Risk Content Hackathon',date:'2026-06-06',endDate:'2026-06-06',prize:'',url:'https://lnkd.in/eF5GSG7u',desc:'Create content that helps the world navigate AI risk. BlueDot Impact.'},
-  {title:'VibeHack London',date:'2026-06-06',endDate:'2026-06-06',prize:'£10k prize pool',url:'https://lu.ma/9ef4463s',desc:'24hrs at UCL. Best Vibe Coder wins.'},
-  {title:'Shared Futures Buildathon',date:'2026-06-07',endDate:'2026-06-07',prize:'',url:'https://lnkd.in/e7npuFaY',desc:'Build tech for social impact.'},
-  {title:'Move 37 | London Tech Week',date:'2026-06-09',endDate:'2026-06-09',prize:'',url:'https://lu.ma/v9ydosib',desc:'AI × finance student competition. Named after AlphaGo\'s legendary move.'},
-  {title:'Deploy by Antler @ Google London',date:'2026-06-10',endDate:'2026-06-10',prize:'',url:'https://lu.ma/j6wkjmkf',desc:'Antler takes over Google HQ. Build the agentic web.'},
-  {title:'London Initiative for Safe AI Hackathon',date:'2026-06-13',endDate:'2026-06-13',prize:'',url:'https://lnkd.in/erBNHS2b',desc:'AI safety focused hackathon by the London Initiative for Safe AI.'},
-  {title:'Model to Market: The Quantitative Hack',date:'2026-06-15',endDate:'2026-06-15',prize:'',url:'https://lu.ma/4j44j9l0',desc:'UK\'s first live AI-native trading competition.'},
-  {title:'Localhost: On-Device Agent Hackathon',date:'2026-06-20',endDate:'2026-06-20',prize:'',url:'https://lu.ma/8og1gx56',desc:'AI agents. Fully offline. No cloud. Pure on-device.'},
-  {title:'GTM Hackathon London',date:'2026-06-20',endDate:'2026-06-20',prize:'',url:'https://lu.ma/hxsfxyvb',desc:'For GTM professionals. By GTMengineer.dev.'},
-  {title:'Hands Off Hackathon',date:'2026-06-25',endDate:'2026-06-25',prize:'',url:'https://lu.ma/wl7a90xe',desc:'Build a self-running business powered by AI agents.'},
-  {title:'London Agentic AI Hack Night',date:'2026-06-25',endDate:'2026-06-25',prize:'',url:'https://lu.ma/dnoe595m',desc:'Live building. Agentic AI. London\'s best builders.'},
-  {title:'AI in Government Hackathon',date:'2026-06-25',endDate:'2026-06-26',prize:'',url:'https://lu.ma/1d7szvu5',desc:'By Incubator for Artificial Intelligence + ElevenLabs.'},
-  {title:'European Defense Tech Hackathon',date:'2026-06-26',endDate:'2026-06-28',prize:'',url:'https://lnkd.in/e5sW5yaK',desc:'200+ hackers. Accelerating European defense innovation.'},
-  {title:'ARIA + MaterialHack',date:'2026-06-26',endDate:'2026-06-28',prize:'',url:'https://lnkd.in/e2SVbwBs',desc:'Biomaterials × biomanufacturing. Nucleate UK × ARIA.'},
-];
 
 // ── STATE ────────────────────────────────────────────────
 const NOW=new Date();
@@ -667,44 +645,29 @@ function evRow(e){
 function renderHackathons(){
   const upcomingOnly=document.getElementById('cbHackUpcoming').checked;
   const today=new Date(NOW.getFullYear(),NOW.getMonth(),NOW.getDate());
-  let hacks=[...HACKATHONS];
-  // Also pull from allEvents that look like hackathons
-  const hackKeywords=['hackathon','buildathon','hack night','hack for'];
-  const fromFeed=allEvents.filter(e=>hackKeywords.some(k=>e.title.toLowerCase().includes(k))).map(e=>({
-    title:e.title,date:e.date?e.date.toISOString().split('T')[0]:null,endDate:null,
-    prize:'',url:e.url,desc:e.src,fromFeed:true
+  // Sourced live from the scrape feed (server tags any title matching
+  // hackathon/buildathon/hack-night as category 'Hackathons') - no
+  // hand-maintained list to go stale.
+  let hacks=allEvents.filter(e=>e.cat==='Hackathons').map(e=>({
+    title:e.title,date:e.date,url:e.url,desc:e.src,
   }));
-  // Merge, avoid duplicates
-  fromFeed.forEach(f=>{
-    if(!hacks.some(h=>h.title.toLowerCase()===f.title.toLowerCase()))hacks.push(f);
-  });
-  hacks.sort((a,b)=>(a.date||'9999')>(b.date||'9999')?1:-1);
-  const upcoming=hacks.filter(h=>{
-    if(!h.date)return true;
-    const hEnd=h.endDate?parseDate(h.endDate):parseDate(h.date);
-    return hEnd>=today;
-  });
+  hacks.sort((a,b)=>{if(!a.date&&!b.date)return 0;if(!a.date)return 1;if(!b.date)return -1;return a.date-b.date;});
+  const upcoming=hacks.filter(h=>!h.date||h.date>=today);
   document.getElementById('hackCount').textContent=(upcomingOnly?upcoming.length:hacks.length)+' upcoming';
   const list=upcomingOnly?upcoming:hacks;
-  if(!list.length){document.getElementById('hackGrid').innerHTML='<div class="empty"><h3>No hackathons found</h3></div>';return;}
+  if(!list.length){document.getElementById('hackGrid').innerHTML='<div class="empty"><h3>No hackathons found</h3><p>New ones are picked up automatically as sources are scraped — try Refresh, or check back later.</p></div>';return;}
   document.getElementById('hackGrid').innerHTML=list.map(h=>{
-    const hDate=h.date?parseDate(h.date):null;
-    const hEnd=h.endDate?parseDate(h.endDate):hDate;
-    const isPast=hEnd&&hEnd<today;
-    const isSoon=hDate&&!isPast&&(hDate-today)/86400000<=3;
-    let dateStr='Date TBD';
-    if(hDate){
-      dateStr=fmtFull(hDate);
-      if(h.endDate&&h.endDate!==h.date)dateStr+=' – '+fmtShort(parseDate(h.endDate));
-    }
+    const isPast=h.date&&h.date<today;
+    const isSoon=h.date&&!isPast&&(h.date-today)/86400000<=3;
+    const dateStr=h.date?fmtFull(h.date):'Date TBD';
+    const dateISO=h.date?h.date.toISOString().split('T')[0]:'';
     return '<div class="hack-card'+(isPast?' hack-past':'')+'"><div class="hack-card-top">'
       +'<div class="hack-card-date">📅 '+esc(dateStr)+(isSoon?'<span class="hack-soon">This week</span>':'')+'</div>'
       +'<div class="hack-card-title">'+esc(h.title)+'</div>'
-      +(h.prize?'<div class="hack-card-prize">🏆 '+esc(h.prize)+'</div>':'')
       +'</div><div class="hack-card-body">'
       +(h.desc?'<div class="hack-card-desc">'+esc(h.desc)+'</div>':'')
       +'<div class="hack-card-actions"><a class="hack-link primary" href="'+esc(h.url)+'" target="_blank" rel="noopener">Register →</a>'
-      +'<button class="hack-link" onclick="addHackToCalendar(\''+esc(h.title)+'\',\''+esc(h.date)+'\',\''+esc(h.url)+'\')">+ Calendar</button></div>'
+      +'<button class="hack-link" onclick="addHackToCalendar(\''+esc(h.title)+'\',\''+esc(dateISO)+'\',\''+esc(h.url)+'\')">+ Calendar</button></div>'
       +'</div></div>';
   }).join('');
 }
