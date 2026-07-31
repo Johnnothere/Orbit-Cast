@@ -221,6 +221,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
 .ai-submit.loading .spinner{display:inline-block;}
 .ai-submit.loading .btn-text{display:none;}
 @keyframes spin{to{transform:rotate(360deg)}}
+.ai-progress{margin-top:12px;font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--t2);text-align:right;transition:opacity .2s;}
 
 /* AI RESULTS */
 .ai-profile-card{background:linear-gradient(135deg,rgba(37,99,235,.06),rgba(139,92,246,.06));border:1px solid rgba(37,99,235,.2);border-radius:12px;padding:20px;margin-bottom:20px;}
@@ -415,6 +416,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
             <span class="spinner"></span>
           </button>
         </div>
+        <div class="ai-progress" id="aiProgress" style="display:none"></div>
       </div>
 
       <div id="aiResults"></div>
@@ -478,7 +480,9 @@ const HACKATHONS=[
 const NOW=new Date();
 let allEvents=[],sourceSummary=[];
 let activeCat='all',activeSrc=null;
-const saved=new Set();
+function loadSaved(){try{return new Set(JSON.parse(localStorage.getItem('oc_saved')||'[]'));}catch{return new Set();}}
+function persistSaved(){try{localStorage.setItem('oc_saved',JSON.stringify([...saved]));}catch{}}
+const saved=loadSaved();
 let calY,calM,selDay=null;
 let lastRunTs=null,currentView='events';
 let cvFileData=null;
@@ -556,7 +560,13 @@ async function doRefresh(){
   const btn=document.getElementById('refreshBtn');
   btn.disabled=true;btn.innerHTML='<span class="scraping-pulse"></span>Scanning…';
   try{
-    await fetch('/api/refresh',{method:'POST'});
+    const res=await fetch('/api/refresh',{method:'POST'});
+    if(!res.ok){
+      const d=await res.json().catch(()=>({}));
+      btn.disabled=false;btn.textContent='↻ Refresh';
+      toast(d.error||'Refresh failed ('+res.status+')');
+      return;
+    }
     let attempts=0;
     const poll=setInterval(async()=>{
       attempts++;
@@ -718,6 +728,7 @@ function setCat(cat,btn){
 function toggleStar(id,btn){
   if(saved.has(id)){saved.delete(id);btn.classList.remove('saved');toast('Removed');}
   else{saved.add(id);btn.classList.add('saved');toast('Saved');}
+  persistSaved();
   if(document.getElementById('cbSaved').checked)render();
 }
 function filterNew(){
@@ -754,11 +765,25 @@ function processFile(file){
 function updateCharCount(){const l=document.getElementById('aiInput').value.length;document.getElementById('aiCharCount').textContent=l+' / 5000';}
 function setAiTip(t){document.getElementById('aiInput').value=t;updateCharCount();}
 
+const AI_PROGRESS_STEPS=[
+  'Reading your background…',
+  'Checking honesty on strengths & gaps…',
+  'Matching against the event catalog…',
+  'Auditing recommendations for generic flattery…',
+];
 async function submitAI(){
   const input=document.getElementById('aiInput').value.trim();
   if(!cvFileData&&input.length<10){toast('Upload a CV or tell us a bit about yourself');return;}
   const btn=document.getElementById('aiSubmitBtn');
+  const progress=document.getElementById('aiProgress');
   btn.classList.add('loading');btn.disabled=true;
+  progress.style.display='block';progress.style.opacity='1';
+  let step=0;
+  progress.textContent=AI_PROGRESS_STEPS[0];
+  const stepTimer=setInterval(()=>{
+    step=Math.min(step+1,AI_PROGRESS_STEPS.length-1);
+    progress.textContent=AI_PROGRESS_STEPS[step];
+  },12000);
   try{
     const form=new FormData();
     if(cvFileData)form.append('file',cvFileData);
@@ -768,7 +793,12 @@ async function submitAI(){
     if(!res.ok){toast(data.error||'Something went wrong');return;}
     renderAIResults(data);
   }catch(err){toast('Failed: '+err.message);}
-  finally{btn.classList.remove('loading');btn.disabled=false;}
+  finally{
+    clearInterval(stepTimer);
+    btn.classList.remove('loading');btn.disabled=false;
+    progress.style.opacity='0';
+    setTimeout(()=>{progress.style.display='none';},250);
+  }
 }
 
 function renderAIResults(data){
