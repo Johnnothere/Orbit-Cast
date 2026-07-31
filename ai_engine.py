@@ -163,6 +163,9 @@ STEP 2 - If and only if it IS a CV, read the actual person:
   to two recent ML-adjacent projects" - not "seems ambitious"). If there's no clear \
   trajectory signal, leave it empty rather than inventing one.
 
+Keep strengths/gaps/interests items and the trajectory read to ONE tight sentence \
+each. Specific beats long.
+
 Return ONLY valid JSON - no markdown, no backticks, no preamble - in EXACTLY this schema:
 {
   "is_cv": boolean,
@@ -196,7 +199,7 @@ def _empty_result(message: str) -> dict:
 
 def extract_profile(file_text: str) -> dict:
     user_content = f"DOCUMENT TEXT:\n{file_text[:12000]}"
-    data = _call(PROFILE_SYSTEM_PROMPT, user_content, max_tokens=1600)
+    data = _call(PROFILE_SYSTEM_PROMPT, user_content, max_tokens=2000)
     data.setdefault("recommendations", [])
     return data
 
@@ -209,9 +212,9 @@ already-built profile of a person (from a separate reading step) and a catalog o
 real events. Your ONE job: score honest fit and explain it.
 
 HONESTY RULES - this is the entire point of the product:
-- Be selective. Most events will NOT be a strong fit. Returning 2-4 strong \
-  recommendations is correct and expected, not 15. If nothing fits well, return an \
-  empty list.
+- Be selective. Most events will NOT be a strong fit. Return AT MOST 4 \
+  recommendations - 2-4 strong ones is correct and expected, not 15. If nothing fits \
+  well, return an empty list.
 - Score fit honestly on 0-100. Do not inflate. 60 is a real "maybe", 90 means this \
   person should clearly go. Only include events scoring 65 or above.
 - Never recommend an event that is not in the provided catalog. Use the exact \
@@ -235,6 +238,9 @@ A "maybe, not a yes": if the fit is real but thin, score it in the low 65-72 ran
 and say so honestly, e.g. "Their background is mostly non-technical, but they've \
 started a data analytics course - this is a reasonable stretch event, not a clear \
 fit. Worth attending, but not central to where they're headed."
+
+Keep every text field to ONE tight sentence, two at most. Specific and evidence-tied \
+beats long - a sharp one-sentence "why" is worth more than a paragraph.
 
 Return ONLY valid JSON - no markdown, no backticks, no preamble - in EXACTLY this schema:
 {
@@ -260,7 +266,7 @@ def score_events(profile: dict, compact_events: list) -> list:
         "EVENT CATALOG (JSON array):\n"
         f"{json.dumps(compact_events, ensure_ascii=False)}"
     )
-    data = _call(SCORING_SYSTEM_PROMPT, user_content, max_tokens=2200)
+    data = _call(SCORING_SYSTEM_PROMPT, user_content, max_tokens=3200)
     valid_ids = {e["id"] for e in compact_events}
     recs = [
         r for r in data.get("recommendations", [])
