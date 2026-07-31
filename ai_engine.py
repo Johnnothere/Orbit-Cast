@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+from datetime import date
 
 from anthropic import Anthropic
 
@@ -117,8 +118,23 @@ def _infer_format(title: str) -> str:
     return "event"
 
 
+def _is_past(date_str: str) -> bool:
+    """Best-effort only: some sources scrape a clean ISO date, others scrape
+    arbitrary text we can't parse. Only exclude an event when we can
+    confidently confirm it's already happened - an unparseable date passes
+    through rather than risk dropping a real future event."""
+    if not date_str:
+        return False
+    try:
+        return date.fromisoformat(str(date_str)[:10]) < date.today()
+    except ValueError:
+        return False
+
+
 def build_compact_events(events: list) -> list:
-    """Shared shape passed to both scoring and (eventually) the frontend."""
+    """Shared shape passed to both scoring and (eventually) the frontend.
+    Drops events we can confirm already happened - recommending a past event
+    is the kind of thing the honesty rules exist to prevent."""
     return [
         {
             "id": str(e.get("id") or e.get("url") or e.get("title", "")),
@@ -132,6 +148,7 @@ def build_compact_events(events: list) -> list:
             "description": (e.get("description", "") or "")[:400],
         }
         for e in events
+        if not _is_past(e.get("date"))
     ]
 
 
@@ -219,6 +236,9 @@ HONESTY RULES - this is the entire point of the product:
   person should clearly go. Only include events scoring 65 or above.
 - Never recommend an event that is not in the provided catalog. Use the exact \
   event_id from the catalog.
+- You are told today's date below. Never recommend an event whose date has \
+  already passed - if a date looks past or ambiguous, treat it with suspicion \
+  rather than recommending it anyway.
 - Reason about TRAJECTORY, not just topic overlap. The profile includes where this \
   person seems to be headed (a pivot, a new skill, a gap they're closing). An event \
   that matches their trajectory forward is worth more than one that just echoes their \
@@ -261,6 +281,7 @@ Return ONLY valid JSON - no markdown, no backticks, no preamble - in EXACTLY thi
 
 def score_events(profile: dict, compact_events: list) -> list:
     user_content = (
+        f"TODAY'S DATE: {date.today().isoformat()}\n\n"
         "PERSON PROFILE (JSON):\n"
         f"{json.dumps(profile, ensure_ascii=False)}\n\n"
         "EVENT CATALOG (JSON array):\n"

@@ -131,7 +131,11 @@ def source(name, emoji, category):
 
 @source("London Hackathons", "⚡", "Hackathons")
 def scrape_london_hackathons():
-    return [
+    # NOTE: this curated list is hand-maintained, not scraped - it goes stale.
+    # Every entry below is now in the past (last checked 2026-07-31) and gets
+    # filtered out of AI recommendations by ai_engine's date guard, but it
+    # still clutters the Hackathons browse tab. Needs a real content refresh.
+    raw = [
         {"title": "The Agent Economy Buildathon", "date": "2026-06-01", "url": "https://lnkd.in/enUFiCUU"},
         {"title": "Fullhouse — UK's first poker bot hackathon", "date": "2026-06-01", "url": "https://lnkd.in/eZKnwnGD"},
         {"title": "Wayflyer × Fin | Build the future of eCommerce", "date": "2026-06-03", "url": "https://lu.ma/v4bzvbka"},
@@ -152,6 +156,7 @@ def scrape_london_hackathons():
         {"title": "European Defense Tech Hackathon — 200+ hackers", "date": "2026-06-26", "url": "https://lnkd.in/e5sW5yaK"},
         {"title": "ARIA + MaterialHack — Biomaterials × Biomanufacturing", "date": "2026-06-26", "url": "https://lnkd.in/e2SVbwBs"},
     ]
+    return [{**ev, "source": "London Hackathons"} for ev in raw]
 
 # ─────────────────────────────────────────────
 # INTELLIGENCE & SECURITY
