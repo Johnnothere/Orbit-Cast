@@ -536,7 +536,7 @@ async function fetchEvents(){
     const evData=await evRes.json();
     const sumData=await sumRes.json();
     allEvents=(evData.events||[]).filter(isLegit).map((e,i)=>({
-      id:'ev'+i,cat:e.category||'Tech & AI',src:e.source||'',
+      id:e.id||('ev'+i),cat:e.category||'Tech & AI',src:e.source||'',
       emoji:e.emoji||'',title:e.title||'',date:parseDate(e.date),
       url:e.url||'#',hasDate:!!e.date,time:e.time||null,location:e.location||'',
     }));
