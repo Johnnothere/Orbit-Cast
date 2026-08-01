@@ -945,11 +945,17 @@ function renderAIResults(data){
   const container=document.getElementById('aiResults');
 
   if(!data.is_cv){
+    // analysis_failed means the pipeline broke, NOT that the document failed
+    // classification. Never tell someone their valid CV "doesn't look like a
+    // CV" because our API call fell over.
+    const broke=!!data.analysis_failed;
     container.innerHTML='<div class="ai-empty ai-glass">'
-      +'<div class="ai-empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></svg></div>'
-      +'<h2>This doesn\'t look like a CV</h2>'
+      +'<div class="ai-empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+      +(broke?'<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>':'<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>')
+      +'</svg></div>'
+      +'<h2>'+(broke?'We couldn\'t finish':'This doesn\'t look like a CV')+'</h2>'
       +'<p>'+esc(data.message_if_not_cv||'Try uploading a CV or resume — PDF, DOCX, or TXT.')+'</p>'
-      +'<p class="ai-empty-foot">stopped at classification &middot; no profile generated</p>'
+      +'<p class="ai-empty-foot">'+(broke?'analysis failed &middot; your CV was not rejected':'stopped at classification &middot; no profile generated')+'</p>'
       +'</div>';
     container.scrollIntoView({behavior:'smooth'});
     return;
