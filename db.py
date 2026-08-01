@@ -242,3 +242,90 @@ def search_labeled_examples(embedding: list, k: int = 3, judgment: str = None):
     except Exception as exc:
         log.warning(f"search_labeled_examples failed: {exc}")
         return []
+
+
+def list_labeled_examples(limit: int = 200):
+    """Admin dashboard listing - newest first, embedding vector omitted
+    (it's 1024 floats and useless to render)."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return []
+            cur.execute(
+                """
+                select id, source, profile_summary, event_context, judgment,
+                       ideal_why, reviewed_by, created_at
+                from labeled_examples
+                order by created_at desc
+                limit %s
+                """,
+                (limit,),
+            )
+            cols = ["id", "source", "profile_summary", "event_context", "judgment",
+                    "ideal_why", "reviewed_by", "created_at"]
+            return [dict(zip(cols, row)) for row in cur.fetchall()]
+    except Exception as exc:
+        log.warning(f"list_labeled_examples failed: {exc}")
+        return []
+
+
+def delete_labeled_example(example_id: int) -> bool:
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute("delete from labeled_examples where id = %s", (example_id,))
+            return cur.rowcount > 0
+    except Exception as exc:
+        log.warning(f"delete_labeled_example failed: {exc}")
+        return False
+
+
+# --------------------------------------------------------------------------
+# Admin config (key/value overrides, e.g. custom scoring rules)
+# --------------------------------------------------------------------------
+def get_config(key: str):
+    """Returns the stored value for `key`, or None if unset/unconfigured."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute("select value from ai_config where key = %s", (key,))
+            row = cur.fetchone()
+            return row[0] if row else None
+    except Exception as exc:
+        log.warning(f"get_config failed: {exc}")
+        return None
+
+
+def set_config(key: str, value: str) -> bool:
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                """
+                insert into ai_config (key, value, updated_at)
+                values (%s, %s, now())
+                on conflict (key) do update
+                  set value = excluded.value, updated_at = now()
+                """,
+                (key, value),
+            )
+            return True
+    except Exception as exc:
+        log.warning(f"set_config failed: {exc}")
+        return False
+
+
+def delete_config(key: str) -> bool:
+    """Removes an override so the caller's hardcoded default takes over again."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute("delete from ai_config where key = %s", (key,))
+            return True
+    except Exception as exc:
+        log.warning(f"delete_config failed: {exc}")
+        return False
