@@ -376,12 +376,17 @@ Return ONLY valid JSON - no markdown, no backticks, no preamble - in EXACTLY thi
 If is_cv is false, profile fields are empty strings/lists."""
 
 
-def _empty_result(message: str) -> dict:
+def _empty_result(message: str, failed: bool = False) -> dict:
+    """`failed=True` means WE broke, not that the document isn't a CV. The two
+    must stay distinguishable: rendering a transient API error as "this doesn't
+    look like a CV" tells the user their perfectly good CV is unreadable, which
+    is both false and the single most damaging thing this product can say."""
     return {
         "is_cv": False,
         "confidence": 0.0,
         "document_type": "unknown",
         "message_if_not_cv": message,
+        "analysis_failed": failed,
         "profile": {"summary": "", "strengths": [], "gaps": [], "interests": [],
                     "seniority": "", "trajectory": ""},
         "recommendations": [],
@@ -583,13 +588,31 @@ def analyze_upload(file_text: str, events: list) -> dict:
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return _empty_result("AI analysis isn't configured yet (no API key set).")
 
-    try:
-        data = extract_profile(file_text)
-    except json.JSONDecodeError:
-        return _empty_result("I couldn't read that file clearly. Try a PDF or DOCX CV.")
-    except Exception as exc:  # network / API failure - never 500 the route
-        log.warning(f"extract_profile failed: {exc}")
-        return _empty_result(f"Analysis is temporarily unavailable. ({exc})")
+    # Profile extraction is a model call and fails transiently the same way
+    # scoring does. Retry once, and if it still fails say so as a FAILURE -
+    # the old code funnelled every exception into _empty_result(), whose
+    # is_cv=False the frontend renders as "This doesn't look like a CV",
+    # telling people with perfectly valid CVs that their CV is unreadable.
+    data, last_exc = None, None
+    for attempt in (1, 2):
+        try:
+            data = extract_profile(file_text)
+            last_exc = None
+            break
+        except Exception as exc:
+            last_exc = exc
+            log.warning(f"extract_profile failed (attempt {attempt}/2): {exc}")
+
+    if data is None:
+        if isinstance(last_exc, json.JSONDecodeError):
+            return _empty_result(
+                "We couldn't finish reading that file - this is a failure on our "
+                "side, not a verdict on your CV. Please try again.", failed=True)
+        return _empty_result(
+            "Analysis is temporarily unavailable - please try again in a moment. "
+            "This is a failure on our side, not a verdict on your CV.", failed=True)
+
+    data.setdefault("analysis_failed", False)
 
     if not data.get("is_cv"):
         data["recommendations"] = []
