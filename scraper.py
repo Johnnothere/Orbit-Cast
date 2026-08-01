@@ -246,22 +246,11 @@ def scrape_infosec_europe():
 # TECH & AI
 # ─────────────────────────────────────────────
 
-@source("Critical Communications World", "📡", "Tech & AI")
-def scrape_ccw():
-    events = []
-    soup = fetch("https://www.critical-communications-world.com/")
-    if not soup:
-        return events
-    for art in soup.select("article, [class*=card]"):
-        h     = art.select_one("h2, h3, h4")
-        a     = art.select_one("a[href]")
-        d     = art.select_one("time, .date, [class*=date]")
-        title = h.get_text(strip=True) if h else None
-        url   = fix_url(a["href"] if a else "", "https://www.critical-communications-world.com")
-        date  = d.get_text(strip=True) if d else None
-        if is_valid_event(title) and is_valid_url(url):
-            events.append({"title": title, "date": date, "url": url, "source": "Critical Communications World"})
-    return events[:10]
+# RETIRED: Critical Communications World. The site is alive (HTTP 200) but the
+# event it advertises is "11-13 May 2027, RAI Amsterdam, Netherlands" - it's a
+# travelling conference not currently in London, so it's out of scope for a
+# London aggregator. It returned 0 usable events on every run; keeping it only
+# cost an HTTP request per scrape and showed a misleading "0" in the dashboard.
 
 @source("Digital Government", "🏛️", "Tech & AI")
 def scrape_digital_gov():
@@ -281,22 +270,12 @@ def scrape_digital_gov():
             events.append({"title": title, "date": date, "url": url, "source": "Digital Government"})
     return events[:10]
 
-@source("AI Expo Global", "🤖", "Tech & AI")
-def scrape_ai_expo():
-    events = []
-    soup = fetch("https://www.ai-expo.net/global/")
-    if not soup:
-        return events
-    for el in soup.select("article, [class*=session], [class*=speaker], [class*=card]"):
-        h     = el.select_one("h2, h3, h4, .title")
-        a     = el.select_one("a[href]")
-        d     = el.select_one("time, .date, [class*=date]")
-        title = h.get_text(strip=True) if h else None
-        url   = fix_url(a["href"] if a else "", "https://www.ai-expo.net")
-        date  = d.get_text(strip=True) if d else None
-        if is_valid_event(title) and is_valid_url(url):
-            events.append({"title": title, "date": date, "url": url, "source": "AI Expo Global"})
-    return events[:10]
+# RETIRED: AI Expo Global. The site is alive but it is a single-conference
+# landing page ("AI & Big Data Expo Global, 3-4 February 2027, Olympia
+# London"), not an event listing - it has no article/card/session elements for
+# the scraper to walk, which is why it returned 0. That one conference is
+# already picked up via AllEvents as "AI & Big Data Expo Global 2027", so
+# scraping it separately would only add a duplicate.
 
 # ─────────────────────────────────────────────
 # EVENTBRITE
@@ -416,6 +395,124 @@ _SECURITY_SEARCHES = [
 ]
 
 
+# ─────────────────────────────────────────────
+# TECHNICAL SECURITY COMMUNITIES
+# ─────────────────────────────────────────────
+# The listing-site searches above surface real security events, but they skew
+# heavily toward conferences and business-networking breakfasts. The deep
+# technical community - OWASP chapter meetups, BSides, DEF CON groups - only
+# publishes on its own sites, so a senior offensive-security profile would
+# otherwise never see anything hands-on. These are low-volume by nature (a
+# chapter announces one meetup at a time), so expect small counts; the value
+# is relevance, not quantity.
+
+_DOW_DATE_RE = re.compile(
+    r"\b(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day,\s*"
+    r"(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\s+(\d{4})", re.IGNORECASE)
+
+_LOOSE_DATE_RE = re.compile(
+    r"\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\s+(\d{4})\b", re.IGNORECASE)
+
+_MONTH_LOOKUP = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+                 "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
+
+
+def _iso_from_match(m):
+    """Turn a (day, month-word, year) regex match into an ISO date string,
+    or None if the month word isn't a real month."""
+    try:
+        day, mon_word, year = int(m.group(1)), m.group(2).lower()[:3], int(m.group(3))
+        month = _MONTH_LOOKUP.get(mon_word)
+        if not month:
+            return None
+        return f"{year:04d}-{month:02d}-{day:02d}"
+    except (ValueError, AttributeError):
+        return None
+
+
+def _is_future(iso_date):
+    if not iso_date:
+        return False
+    try:
+        return datetime.strptime(iso_date, "%Y-%m-%d").date() >= datetime.now(timezone.utc).date()
+    except ValueError:
+        return False
+
+
+@source("OWASP London", "🛡️", "Cyber & Infosec")
+def scrape_owasp_london():
+    """OWASP London chapter meetups. The page lists meetups newest-first as
+    <h4> date headings; we keep only ones still in the future, so this is
+    legitimately empty between announcements rather than padded with past
+    meetups."""
+    events = []
+    soup = fetch("https://owasp.org/www-chapter-london/")
+    if not soup:
+        return events
+    for h in soup.select("h4"):
+        text = h.get_text(" ", strip=True)
+        m = _DOW_DATE_RE.search(text)
+        if not m:
+            continue
+        iso = _iso_from_match(m)
+        if not _is_future(iso):
+            continue
+        events.append({
+            "title": "OWASP London Chapter Meetup",
+            "date": iso,
+            "url": "https://owasp.org/www-chapter-london/",
+            "source": "OWASP London",
+            "location": "London",
+        })
+    return events[:6]
+
+
+@source("BSides London", "🔓", "Cyber & Infosec")
+def scrape_bsides_london():
+    """BSides London - community-run technical security conference."""
+    events = []
+    soup = fetch("https://bsides.london/")
+    if not soup:
+        return events
+    text = soup.get_text(" ", strip=True)
+    for m in _LOOSE_DATE_RE.finditer(text):
+        iso = _iso_from_match(m)
+        if not _is_future(iso):
+            continue
+        events.append({
+            "title": "BSides London",
+            "date": iso,
+            "url": "https://bsides.london/",
+            "source": "BSides London",
+            "location": "London",
+        })
+        break  # single annual conference - first future date is the one
+    return events
+
+
+@source("DC4420", "💀", "Cyber & Infosec")
+def scrape_dc4420():
+    """DC4420 - the London DEF CON group, monthly hacker meetup."""
+    events = []
+    soup = fetch("https://dc4420.org/")
+    if not soup:
+        return events
+    text = soup.get_text(" ", strip=True)
+    for m in _LOOSE_DATE_RE.finditer(text):
+        iso = _iso_from_match(m)
+        if not _is_future(iso):
+            continue
+        events.append({
+            "title": "DC4420 - London DEF CON Group Meetup",
+            "date": iso,
+            "url": "https://dc4420.org/",
+            "source": "DC4420",
+            "location": "London",
+        })
+        break
+    return events
+
+
 @source("Cyber & Infosec Search", "🔐", "Cyber & Infosec")
 def scrape_cyber_infosec():
     events, seen = [], set()
@@ -512,11 +609,12 @@ LUMA_CALENDARS = {
     "AI Native Dev":    "cal-uYzPjdxdCyDtuNO",
     "SRV Frontier":     "cal-LbyWro3ZdQSojJX",
     "Vercel Events":    "cal-hp9HP2UFTGNaMnY",
-    "Jody Saunders":    "cal-yzm8pBHRjoQCz1E",
+    # RETIRED: "Jody Saunders" (cal-yzm8pBHRjoQCz1E) - the calendar returns
+    # HTTP 404, it has been deleted upstream.
 }
 LUMA_EMOJIS = {
     "Plugged":"🔌","Encode Club":"⛓️","Claude Community":"🟠",
-    "AI Native Dev":"⚡","SRV Frontier":"🚀","Vercel Events":"▲","Jody Saunders":"💡",
+    "AI Native Dev":"⚡","SRV Frontier":"🚀","Vercel Events":"▲",
 }
 
 def scrape_luma_calendar(name, cal_id):
@@ -550,24 +648,13 @@ for _name, _cal_id in LUMA_CALENDARS.items():
         return _scraper
     _make_scraper(_name, _cal_id, _emoji)
 
-@source("GDG London", "🔷", "Builder & Tech Community")
-def scrape_gdg_london():
-    events = []
-    soup = fetch("https://lu.ma/user/gdglondon")
-    if not soup:
-        return events
-    script = soup.find("script", id="__NEXT_DATA__")
-    if not script:
-        return events
-    try:
-        for a in soup.select("a[href*='lu.ma']"):
-            href = a.get("href","")
-            txt  = a.get_text(strip=True)
-            if href and txt and len(txt) > 5 and "/user/" not in href and is_valid_url(href):
-                events.append({"title": txt, "date": None, "url": href, "source": "GDG London"})
-    except Exception as e:
-        log.warning(f"GDG London parse failed: {e}")
-    return events[:10]
+# RETIRED: GDG London. lu.ma/user/gdglondon now redirects to luma.com and the
+# page is fully client-rendered - its __NEXT_DATA__ blob contains no events,
+# no calendar id and no event ids, and Luma exposes no public user-events API
+# (get-events / get-profile-items / get-hosting-events all return 404). The
+# old selector also looked for a[href*='lu.ma'], which stopped matching after
+# the luma.com rename. Scraping it would need a headless browser, which is a
+# much heavier dependency than this source is worth.
 
 # ─────────────────────────────────────────────
 # MAIN RUNNER
