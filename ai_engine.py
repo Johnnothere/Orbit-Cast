@@ -67,22 +67,14 @@ def _extract_json_object(raw: str) -> str:
     return raw
 
 
-def _call(system, user_content, max_tokens=1500, temperature=0):
-    # temperature=0 by default. Every pass in this pipeline is a judgement or
-    # extraction task, not a creative one - the same CV against the same
-    # catalog should produce the same scores. Left at the API default of 1.0,
-    # events scoring near the 65 threshold flipped in and out between
-    # identical runs (measured: a 66-72 band appearing in some runs, absent in
-    # others), which reads to the user as the product being unreliable rather
-    # than strict. This does not lower the bar or cache anything - it just
-    # stops the same input producing different answers.
-    #
-    # Note this reduces variance rather than eliminating it: LLM sampling is
-    # not bit-for-bit deterministic even at temperature 0.
+def _call(system, user_content, max_tokens=1500):
+    # NOTE: do NOT pass `temperature` here. It is deprecated on this model and
+    # the API rejects the request outright with a 400, which takes down every
+    # analysis (extract_profile included, so uploads come back as "not a CV").
+    # Sampling variance near the 65 threshold has to be handled some other way.
     resp = _get_client().messages.create(
         model=MODEL,
         max_tokens=max_tokens,
-        temperature=temperature,
         system=system,
         messages=[{"role": "user", "content": user_content}],
     )
