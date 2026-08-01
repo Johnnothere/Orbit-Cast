@@ -3,524 +3,716 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ORBITCAST</title>
+<title>OrbitCastAI — Honest CV-to-Event Matching</title>
+<meta name="description" content="OrbitCastAI reads the real person behind a CV, then scores every London event honestly. Two to four survive. Frequently none.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
 <style>
+/* ============================================================
+   DESIGN TOKENS  (oklch light blue/white system)
+   ============================================================ */
 :root{
-  --bg:#f3f2ef;--surface:#ffffff;--sf2:#f8f7f5;--border:#e5e4e0;--border2:#cfcec9;
-  --text:#12142a;--t2:#65667a;--t3:#a3a3a3;--blue:#2563eb;
-  --navy:#11133a;--navy2:#1b1f52;--sky:#38bdf8;--indigo:#4338ca;
-  --ci:#0891b2;--cd:#b45309;--cc:#dc2626;--ct:#7c3aed;--ce:#059669;--cb:#ea580c;--cn:#6366f1;--ch:#4338ca;
-  --ok:#059669;--warn:#d97706;--dead:#dc2626;
-  --shadow-sm:0 1px 3px rgba(17,19,58,.06);
-  --shadow-md:0 10px 30px -8px rgba(17,19,58,.14);
-  --shadow-lg:0 20px 60px -12px rgba(17,19,58,.22);
+  --radius:0.75rem;
+  --background:oklch(0.985 0.005 250);
+  --foreground:oklch(0.19 0.028 258);
+  --card:oklch(1 0 0);
+  --primary:oklch(0.52 0.185 258);
+  --primary-foreground:oklch(0.99 0.002 240);
+  --secondary:oklch(0.965 0.012 240);
+  --muted:oklch(0.97 0.01 240);
+  --muted-foreground:oklch(0.52 0.03 255);
+  --accent:oklch(0.95 0.022 240);
+  --destructive:oklch(0.58 0.22 25);
+  --border:oklch(0.918 0.012 255);
+  --surface:oklch(0.975 0.008 250);
+  --elevated:oklch(1 0 0);
+  --hairline:oklch(0.9 0.014 255);
+  --primary-glow:oklch(0.72 0.14 245);
+  --lux:oklch(0.78 0.09 236);
+  --ok:oklch(0.6 0.13 155);
+  --warn:oklch(0.7 0.15 70);
+  --gradient-lux:linear-gradient(135deg,var(--primary) 0%,var(--primary-glow) 55%,var(--lux) 100%);
+  --shadow-soft:0 1px 2px oklch(0.3 0.05 258/0.04),0 8px 24px -12px oklch(0.3 0.05 258/0.14);
+  --shadow-lift:0 1px 2px oklch(0.3 0.05 258/0.05),0 24px 60px -28px oklch(0.35 0.09 258/0.35);
+  --shadow-glow:0 12px 40px -14px oklch(0.52 0.185 258/0.45);
+  /* category accents, kept distinguishable but pulled toward the blue system */
+  --ci:oklch(0.58 0.11 220);--cd:oklch(0.6 0.12 60);--cc:oklch(0.58 0.19 25);
+  --ct:oklch(0.55 0.16 285);--ce:oklch(0.6 0.12 160);--cb:oklch(0.63 0.15 45);
+  --cn:oklch(0.55 0.15 270);--ch:oklch(0.52 0.17 265);--cy:oklch(0.55 0.16 240);
 }
-*{margin:0;padding:0;box-sizing:border-box;}
-html,body{overflow-x:hidden;max-width:100vw;}
-body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',sans-serif;min-height:100vh;font-size:14px;line-height:1.5;}
-::selection{background:rgba(37,99,235,.18);color:var(--navy);}
+*{margin:0;padding:0;box-sizing:border-box;border-color:var(--border);}
+html{scroll-behavior:smooth;}
+html,body{overflow-x:clip;max-width:100vw;}
+body{background:var(--background);color:var(--foreground);font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif;
+  min-height:100vh;font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
+::selection{background:color-mix(in oklab,var(--primary) 22%,transparent);color:var(--foreground);}
+a{color:inherit;}
 
-/* faint blueprint-grid texture, used behind marketing-feel surfaces only */
-.grid-tex{
-  background-image:
-    linear-gradient(rgba(17,19,58,.035) 1px,transparent 1px),
-    linear-gradient(90deg,rgba(17,19,58,.035) 1px,transparent 1px);
-  background-size:34px 34px;
-}
+/* ---------- atmosphere ---------- */
+.aurora{position:absolute;inset:0;pointer-events:none;z-index:0;
+  background:
+    radial-gradient(46rem 34rem at 18% 0%,oklch(0.86 0.09 250/0.55),transparent 65%),
+    radial-gradient(40rem 30rem at 86% 12%,oklch(0.9 0.07 214/0.5),transparent 68%),
+    radial-gradient(52rem 34rem at 50% 100%,oklch(0.92 0.05 258/0.55),transparent 70%);
+  filter:blur(2px);animation:drift 22s ease-in-out infinite alternate;}
+@keyframes drift{from{transform:translate3d(-2%,-1%,0) scale(1);}to{transform:translate3d(2%,2%,0) scale(1.08);}}
+.grain{position:absolute;inset:0;pointer-events:none;opacity:.35;mix-blend-mode:multiply;z-index:0;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.28'/%3E%3C/svg%3E");}
+.gridlines{position:absolute;inset:0;pointer-events:none;z-index:0;
+  background-image:linear-gradient(to right,oklch(0.5 0.06 258/0.07) 1px,transparent 1px),
+                   linear-gradient(to bottom,oklch(0.5 0.06 258/0.07) 1px,transparent 1px);
+  background-size:84px 84px;
+  -webkit-mask-image:radial-gradient(75% 60% at 50% 30%,black,transparent 100%);
+  mask-image:radial-gradient(75% 60% at 50% 30%,black,transparent 100%);}
 
-/* HEADER */
-header{background:var(--surface);border-bottom:1px solid var(--border);border-top:3px solid;border-image:linear-gradient(90deg,var(--navy),var(--blue) 55%,var(--sky)) 1;padding:0 24px;height:54px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:100;width:100%;}
-.header-browse-chrome{display:flex;align-items:center;gap:16px;flex:1;min-width:0;}
-.logo{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:1.02rem;color:var(--navy);letter-spacing:-.01em;display:flex;align-items:center;gap:9px;flex-shrink:0;cursor:pointer;user-select:none;transition:color .15s;}
-.logo:hover{color:var(--blue);}
-.logo-mark{width:7px;height:7px;border-radius:50%;background:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.15);}
-.search-wrap{flex:1;max-width:420px;position:relative;}
-.search-wrap input{width:100%;height:32px;border:1px solid var(--border);border-radius:7px;padding:0 10px 0 30px;font-family:'IBM Plex Sans',sans-serif;font-size:13px;background:var(--sf2);color:var(--text);outline:none;transition:border-color .15s;}
-.search-wrap input:focus{border-color:var(--blue);background:var(--surface);}
-.search-wrap input::placeholder{color:var(--t3);}
-.s-ico{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--t3);font-size:13px;pointer-events:none;font-style:normal;}
-.hd-meta{font-family:'IBM Plex Mono',monospace;font-size:.67rem;color:var(--t3);margin-left:auto;white-space:nowrap;}
-.new-badge{font-family:'IBM Plex Mono',monospace;font-size:.64rem;background:var(--navy);color:#fff;padding:3px 9px;border-radius:999px;cursor:pointer;flex-shrink:0;}
-.btn-sm{font-family:'IBM Plex Mono',monospace;font-size:.68rem;height:30px;padding:0 13px;border:1px solid var(--border2);border-radius:7px;background:var(--surface);color:var(--t2);cursor:pointer;transition:all .15s;white-space:nowrap;}
-.btn-sm:hover{border-color:var(--blue);color:var(--blue);}
-.btn-sm:disabled{opacity:.4;cursor:not-allowed;}
-.scraping-pulse{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--blue);margin-right:5px;animation:blink 1s infinite;}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+/* ---------- surfaces ---------- */
+.card-lux{position:relative;border:1px solid color-mix(in oklab,var(--hairline) 85%,transparent);
+  background:linear-gradient(180deg,oklch(1 0 0/0.86),oklch(1 0 0/0.6));
+  backdrop-filter:blur(18px) saturate(150%);-webkit-backdrop-filter:blur(18px) saturate(150%);
+  box-shadow:var(--shadow-soft);
+  transition:transform .45s cubic-bezier(.22,1,.36,1),box-shadow .45s cubic-bezier(.22,1,.36,1),border-color .45s ease;}
+.card-lux:hover{transform:translateY(-4px);border-color:color-mix(in oklab,var(--primary) 30%,transparent);box-shadow:var(--shadow-lift);}
+.glass{background:color-mix(in oklab,var(--elevated) 72%,transparent);backdrop-filter:blur(16px) saturate(140%);
+  -webkit-backdrop-filter:blur(16px) saturate(140%);
+  border:1px solid color-mix(in oklab,var(--hairline) 80%,transparent);box-shadow:var(--shadow-soft);}
+.inkwell{background:linear-gradient(165deg,oklch(0.26 0.06 258),oklch(0.17 0.045 262) 55%,oklch(0.2 0.07 250));
+  color:oklch(0.97 0.008 250);}
 
-/* LAYOUT */
-.layout{display:grid;grid-template-columns:210px 1fr;min-height:calc(100vh - 54px);width:100%;overflow:hidden;}
-.layout.full-width{grid-template-columns:1fr;}
-.sidebar{background:var(--surface);border-right:1px solid var(--border);padding:20px 0;position:sticky;top:54px;height:calc(100vh - 54px);overflow-y:auto;overflow-x:hidden;}
-.nav-section{margin-bottom:22px;}
-.nav-hd{font-family:'IBM Plex Mono',monospace;font-size:.59rem;color:var(--t3);text-transform:uppercase;letter-spacing:.12em;padding:0 16px 8px;}
-.cat-btn{display:flex;align-items:center;gap:8px;width:100%;padding:7px 16px;background:none;border:none;color:var(--t2);font-family:'IBM Plex Sans',sans-serif;font-size:13px;cursor:pointer;text-align:left;transition:color .13s;}
-.cat-btn:hover{color:var(--text);background:var(--sf2);}
-.cat-btn.active{color:var(--text);font-weight:500;background:var(--sf2);}
-.cat-btn.active .cat-lead{background:var(--blue);width:2px;height:14px;border-radius:1px;margin-left:-10px;}
-.cat-lead{width:0;height:14px;}
-.cat-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+/* ---------- type ---------- */
+.label-xs{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;letter-spacing:.26em;
+  text-transform:uppercase;color:var(--muted-foreground);}
+.display-xl{font-family:'IBM Plex Sans',sans-serif;font-weight:600;letter-spacing:-.045em;line-height:.92;}
+.serif-accent{font-family:'Instrument Serif',serif;font-style:italic;font-weight:400;letter-spacing:-.02em;}
+.lux-text{background:var(--gradient-lux);-webkit-background-clip:text;background-clip:text;color:transparent;}
+.lux-fill{background:var(--gradient-lux);}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;}
+.tabular{font-variant-numeric:tabular-nums;}
 
-/* MAIN */
-.main{background:var(--bg);overflow:hidden;min-width:0;}
-.view-tabs{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 24px;display:flex;align-items:center;gap:10px;overflow-x:auto;}
-.ai-primary-tab{font-family:'Space Grotesk',sans-serif;font-size:.82rem;font-weight:600;padding:9px 19px;border:none;border-radius:999px;cursor:pointer;white-space:nowrap;flex-shrink:0;color:var(--t2);background:var(--sf2);transition:all .18s;}
-.ai-primary-tab.active{color:#fff;background:linear-gradient(120deg,var(--navy),var(--blue) 65%,var(--sky));box-shadow:0 6px 18px -6px rgba(37,99,235,.55);}
-.ai-primary-tab:hover:not(.active){color:var(--blue);}
-.tabs-sep{width:1px;height:20px;background:var(--border);flex-shrink:0;}
-.browse-group{display:flex;gap:2px;background:var(--sf2);border-radius:999px;padding:3px;flex-shrink:0;}
-.browse-label{font-family:'IBM Plex Mono',monospace;font-size:.6rem;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-right:2px;align-self:center;}
-.view-tab{font-family:'IBM Plex Mono',monospace;font-size:.66rem;padding:7px 13px;border:none;border-radius:999px;background:none;color:var(--t2);cursor:pointer;transition:all .15s;font-weight:500;white-space:nowrap;flex-shrink:0;}
-.view-tab:hover{color:var(--text);}
-.view-tab.active{color:var(--text);background:var(--surface);box-shadow:var(--shadow-sm);}
-
-/* CONTROLS */
-.controls{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 24px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
-.ctrl-label{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--t2);cursor:pointer;user-select:none;}
-.ctrl-label input{accent-color:var(--blue);cursor:pointer;}
-.ctrl-sep{width:1px;height:16px;background:var(--border);flex-shrink:0;}
-.ctrl-sel{font-family:'IBM Plex Sans',sans-serif;font-size:12px;border:1px solid var(--border);border-radius:6px;padding:4px 8px;background:var(--surface);color:var(--t2);cursor:pointer;outline:none;}
-.ctrl-right{margin-left:auto;display:flex;gap:8px;}
-.btn-tog{font-family:'IBM Plex Mono',monospace;font-size:.65rem;height:28px;padding:0 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--t2);cursor:pointer;transition:all .13s;}
-.btn-tog.on,.btn-tog:hover{border-color:var(--blue);color:var(--blue);}
-.count-row{padding:12px 24px 8px;font-family:'IBM Plex Mono',monospace;font-size:.67rem;color:var(--t3);display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-.count-n{color:var(--text);font-weight:500;}
-.kb-hint{margin-left:auto;font-size:.6rem;}
-.kb-hint kbd{background:var(--sf2);border:1px solid var(--border2);border-radius:3px;padding:1px 5px;font-family:inherit;}
-
-/* EVENTS — kept information-dense on purpose: this is a live listings feed,
-   not a marketing surface, so polish goes into color/type/hover, not into
-   spacing the rows out awwwards-style at the cost of scanability. */
-.events-area{padding:0 24px 48px;overflow-x:hidden;}
-.date-group{margin-bottom:4px;}
-.date-hd{display:flex;align-items:center;gap:10px;padding:14px 0 6px;}
-.date-hd-lbl{font-family:'IBM Plex Mono',monospace;font-size:.7rem;color:var(--t2);font-weight:500;text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;}
-.date-hd-today{font-family:'IBM Plex Mono',monospace;font-size:.6rem;color:var(--blue);background:rgba(37,99,235,.09);padding:2px 7px;border-radius:10px;}
-.date-hd-line{flex:1;height:1px;background:var(--border);}
-.tbd-hd{padding:22px 0 8px;display:flex;align-items:center;gap:10px;}
-.tbd-hd-lbl{font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;}
-.ev{display:flex;align-items:center;background:var(--surface);border:1px solid var(--border);border-left:2px solid var(--cat,var(--border));border-radius:8px;margin-bottom:3px;transition:box-shadow .13s,border-color .13s,transform .13s;overflow:hidden;}
-.ev:hover{border-color:var(--border2);box-shadow:var(--shadow-sm);transform:translateX(1px);}
-.ev.past{opacity:.42;}
-.ev-time{width:76px;padding:12px 8px;flex-shrink:0;border-right:1px solid var(--border);text-align:center;}
-.ev-time .soon{font-family:'IBM Plex Mono',monospace;font-size:.62rem;font-weight:500;display:block;white-space:nowrap;}
-.ev-time .soon.blue{color:var(--blue);}
-.ev-time .soon.gray{color:var(--t3);}
-.ev-time .dt{font-family:'IBM Plex Mono',monospace;font-size:.56rem;color:var(--t3);display:block;margin-top:2px;}
-.ev-time .tm{font-family:'IBM Plex Mono',monospace;font-size:.56rem;color:var(--t3);display:block;margin-top:1px;}
-.ev-body{flex:1;min-width:0;padding:11px 14px;}
-.ev-title{font-size:13px;font-weight:500;color:var(--text);text-decoration:none;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.ev-title:hover{color:var(--blue);}
-.ev-src{font-size:11px;color:var(--t2);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.ev-right{display:flex;align-items:center;gap:2px;padding:0 10px;flex-shrink:0;}
-.ic-btn{width:28px;height:28px;border:none;background:none;color:var(--t3);cursor:pointer;border-radius:6px;font-size:14px;display:flex;align-items:center;justify-content:center;transition:color .13s,background .13s;}
-.ic-btn:hover{color:var(--blue);background:var(--sf2);}
-.ic-btn.saved{color:var(--blue);}
-
-/* SKELETON */
-.skel{background:linear-gradient(90deg,var(--border) 25%,var(--sf2) 50%,var(--border) 75%);background-size:200% 100%;animation:sh 1.3s infinite;border-radius:6px;}
-@keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
-.skel-row{height:56px;margin-bottom:3px;}
-.empty{text-align:center;padding:60px 20px;color:var(--t2);}
-.empty h3{font-size:15px;font-weight:500;color:var(--text);margin-bottom:6px;}
-.error-banner{background:rgba(220,38,38,.07);border:1px solid rgba(220,38,38,.2);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--dead);margin:12px 24px;}
-
-/* CALENDAR */
-.cal-view{display:none;padding:24px;}
-.cal-view.show{display:block;}
-.cal-hero{max-width:1100px;}
-.cal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px;}
-.cal-header-left{display:flex;align-items:baseline;gap:12px;}
-.cal-title{font-family:'Space Grotesk',sans-serif;font-size:2.1rem;font-weight:700;color:var(--navy);letter-spacing:-.01em;}
-.cal-year{font-family:'IBM Plex Mono',monospace;font-size:1.1rem;color:var(--t3);}
-.cal-header-right{display:flex;gap:8px;}
-.cal-btn{font-family:'IBM Plex Mono',monospace;font-size:.7rem;padding:7px 14px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--t2);cursor:pointer;transition:all .13s;}
-.cal-btn:hover{border-color:var(--blue);color:var(--blue);}
-.cal-btn.today-btn{background:var(--navy);color:#fff;border-color:var(--navy);}
-.cal-btn.today-btn:hover{background:var(--navy2);}
-.cal-weekdays{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;margin-bottom:4px;}
-.cal-wday{font-family:'IBM Plex Mono',monospace;font-size:.62rem;color:var(--t3);text-align:center;padding:4px 0;text-transform:uppercase;letter-spacing:.06em;}
-.cal-grid2{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
-.cal-cell{background:var(--surface);min-height:90px;padding:6px;cursor:pointer;transition:background .1s;position:relative;}
-.cal-cell:hover{background:var(--sf2);}
-.cal-cell.other-month{background:#f9f8f6;opacity:.6;}
-.cal-cell.is-today{background:linear-gradient(135deg,rgba(37,99,235,.05),rgba(56,189,248,.05));border:1px solid rgba(37,99,235,.22);}
-.cal-cell.is-today .cal-num{background:var(--navy);color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;}
-.cal-cell.selected{background:rgba(37,99,235,.06);}
-.cal-num{font-family:'IBM Plex Mono',monospace;font-size:.7rem;color:var(--t2);display:flex;align-items:center;justify-content:center;width:24px;height:24px;margin-bottom:2px;}
-.cal-badge{position:absolute;top:4px;right:4px;font-family:'IBM Plex Mono',monospace;font-size:.56rem;background:var(--navy);color:#fff;border-radius:10px;padding:1px 5px;font-weight:600;}
-.cal-ev-pill{font-size:10px;padding:2px 5px;margin-bottom:2px;border-radius:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-left:2px solid var(--pill-c,var(--border2));background:var(--sf2);}
-.cal-ev-pill a{color:var(--text);text-decoration:none;display:block;overflow:hidden;text-overflow:ellipsis;}
-.cal-more{font-family:'IBM Plex Mono',monospace;font-size:.56rem;color:var(--t3);}
-.cal-day-panel{max-width:1100px;margin:16px auto 0;background:var(--surface);border:1px solid var(--border);border-radius:16px;overflow:hidden;max-height:0;opacity:0;transition:all .3s ease;}
-.cal-day-panel.open{max-height:600px;opacity:1;padding:20px 24px;}
-.cdp-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;}
-.cdp-title{font-family:'IBM Plex Mono',monospace;font-size:.85rem;color:var(--text);font-weight:500;}
-.cdp-count{font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--blue);background:rgba(37,99,235,.08);padding:3px 10px;border-radius:10px;}
-.cdp-close{background:none;border:none;font-size:1.1rem;color:var(--t3);cursor:pointer;padding:4px;}
-.cdp-close:hover{color:var(--text);}
-.cdp-events{display:flex;flex-direction:column;gap:10px;}
-.cdp-ev{display:flex;justify-content:space-between;align-items:flex-start;padding:12px;background:var(--sf2);border-radius:10px;border-left:3px solid var(--cdp-c,var(--border2));}
-.cdp-ev-title{font-size:13px;font-weight:500;color:var(--text);margin-bottom:4px;}
-.cdp-ev-meta{font-size:11px;color:var(--t2);display:flex;gap:8px;}
-.cdp-ev-time{font-family:'IBM Plex Mono',monospace;font-size:.65rem;color:var(--blue);margin-bottom:3px;}
-.cdp-ev-actions{display:flex;gap:8px;flex-shrink:0;margin-left:12px;}
-.cdp-link{font-family:'IBM Plex Mono',monospace;font-size:.65rem;color:var(--blue);cursor:pointer;text-decoration:none;white-space:nowrap;}
-.cdp-link:hover{text-decoration:underline;}
-
-/* HACKATHONS — accent shifted from violet to indigo/navy to stay in the blue family */
-.hack-view{display:none;padding:24px;}
-.hack-view.show{display:block;}
-.hack-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;}
-.hack-title{font-family:'Space Grotesk',sans-serif;font-size:1.2rem;color:var(--navy);font-weight:700;display:flex;align-items:center;gap:10px;}
-.hack-badge{font-family:'IBM Plex Mono',monospace;font-size:.65rem;background:rgba(67,56,202,.1);color:var(--indigo);border:1px solid rgba(67,56,202,.22);padding:4px 10px;border-radius:999px;}
-.hack-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;}
-.hack-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;transition:box-shadow .15s,transform .15s;display:flex;flex-direction:column;}
-.hack-card:hover{box-shadow:var(--shadow-md);transform:translateY(-2px);}
-.hack-card-top{padding:16px 16px 12px;border-bottom:1px solid var(--border);background:linear-gradient(135deg,rgba(67,56,202,.05),rgba(37,99,235,.05));}
-.hack-card-date{font-family:'IBM Plex Mono',monospace;font-size:.65rem;color:var(--indigo);margin-bottom:6px;display:flex;align-items:center;gap:8px;}
-.hack-card-date .hack-time{color:var(--t3);}
-.hack-card-title{font-size:14px;font-weight:600;color:var(--text);line-height:1.35;margin-bottom:8px;}
-.hack-card-prize{display:inline-flex;align-items:center;gap:4px;font-family:'IBM Plex Mono',monospace;font-size:.64rem;background:rgba(5,150,105,.1);color:var(--ok);border:1px solid rgba(5,150,105,.2);padding:3px 9px;border-radius:10px;}
-.hack-card-body{padding:12px 16px 16px;flex:1;display:flex;flex-direction:column;gap:10px;}
-.hack-card-desc{font-size:12px;color:var(--t2);line-height:1.5;}
-.hack-card-actions{display:flex;gap:8px;margin-top:auto;}
-.hack-link{font-family:'IBM Plex Mono',monospace;font-size:.68rem;padding:6px 12px;border:1px solid var(--border2);border-radius:7px;color:var(--t2);text-decoration:none;transition:all .13s;}
-.hack-link:hover{border-color:var(--indigo);color:var(--indigo);}
-.hack-link.primary{background:var(--indigo);color:#fff;border-color:var(--indigo);}
-.hack-link.primary:hover{background:#372fa3;}
-.hack-soon{font-family:'IBM Plex Mono',monospace;font-size:.6rem;color:var(--blue);background:rgba(37,99,235,.08);padding:2px 7px;border-radius:8px;margin-left:auto;}
-.hack-past{opacity:.5;}
-
-/* AI VIEW — the front door of the product. Ambient gradient field behind
-   glass cards, now a blue→sky duotone (no violet) with a bolder, more
-   editorial hero: a live-stat eyebrow pill, an oversized Space Grotesk
-   wordmark, and an italic serif tagline. */
-.ai-view{display:none;position:relative;padding:56px 24px 80px;}
-.ai-view.show{display:block;}
-.ai-wrap{position:relative;z-index:1;max-width:700px;margin:0 auto;}
-
-.ai-bg{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none;}
-.ai-blob{position:absolute;border-radius:50%;filter:blur(90px);}
-.ai-blob-1{width:480px;height:480px;top:-160px;left:6%;background:radial-gradient(circle,rgba(37,99,235,.30),transparent 70%);animation:blobDrift1 17s ease-in-out infinite;translate:calc(var(--px,0px) * 1.3) calc(var(--py,0px) * 1.3);}
-.ai-blob-2{width:420px;height:420px;top:100px;right:2%;background:radial-gradient(circle,rgba(56,189,248,.26),transparent 70%);animation:blobDrift2 21s ease-in-out infinite;translate:calc(var(--px,0px) * -1) calc(var(--py,0px) * -1);}
-.ai-blob-3{width:360px;height:360px;bottom:8%;left:28%;background:radial-gradient(circle,rgba(17,19,58,.10),transparent 70%);animation:blobDrift3 24s ease-in-out infinite;translate:calc(var(--px,0px) * .6) calc(var(--py,0px) * .6);}
-@keyframes blobDrift1{0%,100%{transform:translate(0,0)}50%{transform:translate(30px,40px)}}
-@keyframes blobDrift2{0%,100%{transform:translate(0,0)}50%{transform:translate(-35px,-20px)}}
-@keyframes blobDrift3{0%,100%{transform:translate(0,0)}50%{transform:translate(20px,-30px)}}
-.ai-grain{position:absolute;inset:-10%;opacity:.05;mix-blend-mode:overlay;filter:url(#aiGrainFilter);}
-
-.ai-glass{position:relative;overflow:hidden;background:rgba(255,255,255,.55);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);border:1px solid rgba(255,255,255,.65);box-shadow:var(--shadow-md),0 1px 2px rgba(17,19,58,.04);transition:box-shadow .25s,transform .25s;}
-.ai-glass::before{content:'';position:absolute;inset:0;z-index:0;opacity:0;transition:opacity .35s;pointer-events:none;
-  background:radial-gradient(circle 220px at var(--mx,50%) var(--my,50%),rgba(255,255,255,.55),transparent 70%);}
-.ai-glass:hover::before{opacity:1;}
-.ai-glass > *{position:relative;z-index:1;}
-
-.ai-hero{text-align:center;margin-bottom:40px;}
-.ai-eyebrow{display:inline-flex;align-items:center;gap:8px;font-family:'IBM Plex Mono',monospace;font-size:.68rem;letter-spacing:.03em;color:var(--navy);background:rgba(255,255,255,.6);border:1px solid rgba(37,99,235,.22);backdrop-filter:blur(8px);padding:7px 16px 7px 12px;border-radius:999px;margin-bottom:22px;box-shadow:var(--shadow-sm);}
-.eyebrow-dot{width:6px;height:6px;border-radius:50%;background:var(--blue);animation:blink 1.6s infinite;flex-shrink:0;}
-.ai-brandmark{width:52px;height:52px;margin:0 auto 18px;border-radius:16px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;
-  background:linear-gradient(135deg,var(--navy),var(--blue) 65%,var(--sky));box-shadow:0 8px 28px -6px rgba(37,99,235,.55);animation:markFloat 5s ease-in-out infinite;}
-@keyframes markFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
-.ai-title{font-family:'Space Grotesk',sans-serif;font-size:3rem;line-height:1.02;font-weight:700;color:var(--navy);letter-spacing:-.03em;}
-.ai-title .accent{background:linear-gradient(100deg,var(--blue),var(--sky),var(--navy),var(--blue));background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:accentShift 6s ease-in-out infinite;}
-@keyframes accentShift{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
-.ai-tagline{font-family:'Instrument Serif',serif;font-style:italic;font-size:1.55rem;font-weight:400;color:var(--text);margin-top:8px;letter-spacing:0;}
-.ai-subtitle{font-size:14px;color:var(--t2);max-width:440px;margin:14px auto 0;line-height:1.6;}
-
-/* upload */
-.cv-drop-zone{border:1.5px dashed rgba(37,99,235,.35);border-radius:20px;padding:38px 24px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s,transform .2s;margin-bottom:14px;}
-.cv-drop-zone.active,.cv-drop-zone:hover{border-color:var(--blue);transform:translateY(-1px);}
-.cv-drop-zone.active{border-style:solid;}
-.cv-drop-zone.has-file{border-color:var(--blue);border-style:solid;}
-.cv-icon{width:46px;height:46px;margin:0 auto 14px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;
-  background:linear-gradient(135deg,var(--navy),var(--blue) 65%,var(--sky));box-shadow:0 6px 18px -4px rgba(37,99,235,.5);}
-.cv-icon svg{width:20px;height:20px;}
-.cv-zone-title{font-size:14px;font-weight:500;color:var(--text);margin-bottom:5px;}
-.cv-zone-sub{font-size:12px;color:var(--t3);}
-.cv-file-info{display:flex;align-items:center;gap:10px;border-radius:14px;padding:10px 14px;margin-bottom:14px;font-size:13px;}
-.cv-file-info svg{width:16px;height:16px;color:var(--blue);flex-shrink:0;}
-.cv-file-name{font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.cv-file-clear{background:none;border:none;color:var(--t3);cursor:pointer;font-size:16px;padding:0 4px;}
-.cv-file-clear:hover{color:var(--dead);}
-.ai-or{display:flex;align-items:center;gap:12px;margin:18px 0 16px;color:var(--t3);font-size:12px;}
-.ai-or::before,.ai-or::after{content:'';flex:1;height:1px;background:rgba(37,99,235,.15);}
-
-/* form */
-.ai-textarea{width:100%;min-height:96px;border:1px solid rgba(37,99,235,.18);border-radius:16px;padding:14px;font-family:'IBM Plex Sans',sans-serif;font-size:14px;color:var(--text);resize:vertical;outline:none;transition:border-color .2s;background:rgba(255,255,255,.5);line-height:1.6;}
-.ai-textarea:focus{border-color:var(--blue);background:rgba(255,255,255,.75);}
-.ai-textarea::placeholder{color:var(--t3);}
-.ai-tips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;}
-.ai-tip{font-size:11px;padding:5px 12px;background:rgba(255,255,255,.5);border:1px solid rgba(37,99,235,.15);border-radius:999px;color:var(--t2);cursor:pointer;transition:all .15s;backdrop-filter:blur(8px);}
-.ai-tip:hover{border-color:var(--blue);color:var(--blue);background:rgba(255,255,255,.8);}
-.ai-actionrow{display:flex;align-items:center;justify-content:space-between;margin-top:20px;flex-wrap:wrap;gap:12px;}
-.ai-char-count{font-family:'IBM Plex Mono',monospace;font-size:.64rem;color:var(--t3);}
-.ai-submit{position:relative;overflow:hidden;font-family:'Space Grotesk',sans-serif;font-size:.9rem;height:46px;padding:0 26px;color:#fff;border:none;border-radius:999px;cursor:pointer;font-weight:600;transition:transform .15s,box-shadow .15s;display:inline-flex;align-items:center;gap:8px;margin-left:auto;
-  background:linear-gradient(120deg,var(--navy),var(--blue) 65%,var(--sky));box-shadow:0 8px 22px -4px rgba(37,99,235,.5);}
-.ai-submit::after{content:'';position:absolute;top:0;left:-60%;width:40%;height:100%;background:linear-gradient(120deg,transparent,rgba(255,255,255,.4),transparent);transform:skewX(-20deg);transition:left .6s ease;}
-.ai-submit:hover::after{left:130%;}
-.ai-submit:hover{transform:translateY(-1px);box-shadow:0 10px 28px -4px rgba(37,99,235,.65);}
-.ai-submit:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none;}
-.ai-submit .btn-text{display:inline-flex;align-items:center;gap:8px;}
-.ai-submit .btn-loading{display:none;align-items:center;gap:8px;}
-.ai-submit.loading .btn-text{display:none;}
-.ai-submit.loading .btn-loading{display:inline-flex;}
+/* ---------- motion ---------- */
+.reveal{opacity:0;transform:translateY(24px);
+  transition:opacity .9s cubic-bezier(.22,1,.36,1),transform .9s cubic-bezier(.22,1,.36,1);}
+.reveal[data-shown="true"]{opacity:1;transform:none;}
+@keyframes rise{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
+.rise{animation:rise .7s cubic-bezier(.22,1,.36,1) both;}
+@keyframes marquee{from{transform:translateX(0);}to{transform:translateX(-50%);}}
+.marquee-track{display:flex;width:max-content;animation:marquee 38s linear infinite;gap:2.5rem;}
+@keyframes pulse-ring{0%{box-shadow:0 0 0 0 oklch(0.52 0.185 258/0.35);}70%{box-shadow:0 0 0 14px oklch(0.52 0.185 258/0);}100%{box-shadow:0 0 0 0 oklch(0.52 0.185 258/0);}}
+.pulse-ring{animation:pulse-ring 2.6s ease-out infinite;}
+@keyframes scan{0%{transform:translateY(-100%);}100%{transform:translateY(400%);}}
+.scanline{position:relative;overflow:hidden;}
+.scanline::before{content:"";position:absolute;left:0;right:0;height:25%;
+  background:linear-gradient(180deg,transparent,oklch(0.6 0.16 252/0.14),transparent);animation:scan 2.4s linear infinite;}
+@keyframes sheen{0%{transform:translateX(-120%);}100%{transform:translateX(220%);}}
+.sheen{position:relative;overflow:hidden;}
+.sheen::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(100deg,transparent 20%,oklch(1 0 0/0.3) 50%,transparent 80%);transform:translateX(-120%);}
+.sheen:hover::after{animation:sheen .9s ease-out;}
+@keyframes spin{to{transform:rotate(360deg);}}
 .ic-spin{animation:spin .8s linear infinite;}
-@keyframes spin{to{transform:rotate(360deg)}}
-.ai-progress{margin-top:10px;font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--t2);text-align:right;transition:opacity .2s;}
 
-.ai-submit:focus-visible,.ai-tip:focus-visible,.cv-drop-zone:focus-visible,.ai-textarea:focus-visible{outline:2px solid var(--blue);outline-offset:3px;}
+/* ---------- buttons ---------- */
+.btn-lux{display:inline-flex;align-items:center;gap:.5rem;border:none;cursor:pointer;border-radius:999px;
+  padding:.875rem 1.75rem;font-family:'IBM Plex Sans',sans-serif;font-size:.875rem;font-weight:600;
+  letter-spacing:-.01em;color:var(--primary-foreground);background:var(--gradient-lux);
+  box-shadow:var(--shadow-glow);transition:transform .3s;}
+.btn-lux:hover{transform:translateY(-2px);}
+.btn-lux:disabled{opacity:.35;cursor:not-allowed;transform:none;}
+.btn-ghost{display:inline-flex;align-items:center;gap:.5rem;cursor:pointer;border-radius:999px;
+  padding:.875rem 1.5rem;font-size:.875rem;font-weight:500;letter-spacing:-.01em;
+  background:color-mix(in oklab,var(--elevated) 72%,transparent);backdrop-filter:blur(16px);
+  border:1px solid color-mix(in oklab,var(--hairline) 80%,transparent);color:var(--foreground);
+  text-decoration:none;transition:transform .3s;}
+.btn-ghost:hover{transform:translateY(-2px);}
+.btn-white{display:inline-flex;align-items:center;justify-content:space-between;gap:.75rem;width:100%;
+  border:none;cursor:pointer;border-radius:999px;background:#fff;padding:1rem 1.5rem;
+  font-family:'IBM Plex Sans',sans-serif;font-size:.875rem;font-weight:600;letter-spacing:-.01em;
+  color:oklch(0.2 0.05 260);transition:transform .3s;}
+.btn-white:hover{transform:translateY(-2px);}
+.btn-white:disabled{opacity:.35;cursor:not-allowed;transform:none;}
 
-/* how it works — quiet editorial cards: thin rule + mono numeral, echoing
-   the tagline's restrained serif register instead of more glass */
-.ai-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:48px;}
-.ai-step{border-radius:16px;padding:18px 18px 18px 20px;border-left:2px solid rgba(37,99,235,.25);}
-.ai-step-n{font-family:'IBM Plex Mono',monospace;font-size:.72rem;background:linear-gradient(120deg,var(--navy),var(--blue));-webkit-background-clip:text;background-clip:text;color:transparent;font-weight:700;}
-.ai-step h3{font-family:'Space Grotesk',sans-serif;font-size:13.5px;font-weight:600;color:var(--navy);margin:8px 0 5px;}
-.ai-step p{font-size:12px;color:var(--t2);line-height:1.55;}
+/* ============================================================
+   NAV
+   ============================================================ */
+header.nav{position:fixed;inset-inline:0;top:0;z-index:50;transition:all .5s;}
+header.nav.solid{border-bottom:1px solid color-mix(in oklab,var(--hairline) 70%,transparent);
+  background:color-mix(in oklab,var(--background) 70%,transparent);backdrop-filter:blur(20px);}
+.nav-inner{margin:0 auto;display:flex;width:100%;max-width:72rem;align-items:center;justify-content:space-between;
+  gap:1rem;padding:1rem 1.5rem;min-width:0;}
+.header-browse-chrome{min-width:0;overflow:hidden;}
+.brand{display:flex;min-width:0;align-items:center;gap:.625rem;cursor:pointer;user-select:none;background:none;border:none;}
+.brand-mark{display:flex;height:1.75rem;width:1.75rem;flex-shrink:0;align-items:center;justify-content:center;
+  border-radius:.5rem;font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;
+  color:var(--primary-foreground);background:var(--gradient-lux);}
+.brand-name{font-size:.875rem;font-weight:600;letter-spacing:-.02em;white-space:nowrap;color:var(--foreground);}
+.nav-right{display:flex;flex-shrink:0;align-items:center;gap:1rem;}
+.nav-link{background:none;border:none;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px;
+  text-transform:uppercase;letter-spacing:.2em;color:var(--muted-foreground);transition:color .2s;padding:.25rem;}
+.nav-link:hover,.nav-link.active{color:var(--foreground);}
+.nav-cta{border:none;cursor:pointer;border-radius:999px;padding:.5rem 1rem;font-size:12px;font-weight:600;
+  letter-spacing:-.01em;color:var(--primary-foreground);background:var(--gradient-lux);transition:transform .3s;}
+.nav-cta:hover{transform:translateY(-2px);}
 
-/* results skeleton */
-.ai-skel-row{height:14px;border-radius:8px;margin-bottom:10px;}
-.ai-skel-card{border-radius:18px;padding:20px;margin-top:16px;}
-.ai-skel-card .skel{height:12px;border-radius:8px;margin-bottom:10px;}
-.ai-skel-row.skel,.ai-skel-card .skel{background:linear-gradient(90deg,rgba(37,99,235,.1) 25%,rgba(56,189,248,.2) 50%,rgba(37,99,235,.1) 75%);background-size:200% 100%;}
+/* ============================================================
+   LANDING / AI VIEW
+   ============================================================ */
+.ai-view{display:none;position:relative;}
+.ai-view.show{display:block;}
+.wrap{position:relative;margin:0 auto;width:100%;max-width:72rem;padding-inline:1.5rem;}
+
+/* hero */
+.hero{position:relative;isolation:isolate;overflow:hidden;padding-top:9rem;padding-bottom:6rem;}
+@media(min-width:640px){.hero{padding-top:12rem;padding-bottom:8rem;}}
+.hero-eyebrow{display:flex;align-items:center;gap:.75rem;}
+.hero-dot{height:.375rem;width:.375rem;border-radius:999px;background:var(--gradient-lux);}
+.hero h1,.hero .hero-line{font-size:3.4rem;}
+@media(min-width:640px){.hero h1,.hero .hero-line{font-size:6rem;}}
+@media(min-width:1024px){.hero h1,.hero .hero-line{font-size:7.5rem;}}
+.hero h1{margin-top:2rem;}
+.hero-line.dim{color:color-mix(in oklab,var(--muted-foreground) 45%,transparent);}
+.hero-foot{margin-top:3.5rem;display:grid;gap:2.5rem;border-top:1px solid var(--hairline);padding-top:2.5rem;}
+@media(min-width:1024px){.hero-foot{grid-template-columns:1fr auto;align-items:end;}}
+.hero-foot p{max-width:32rem;font-size:15px;line-height:1.7;color:var(--muted-foreground);}
+.hero-actions{display:flex;flex-wrap:wrap;align-items:center;gap:.75rem;}
+.stat-grid{margin-top:4rem;display:grid;grid-template-columns:repeat(2,1fr);gap:1px;overflow:hidden;
+  border-radius:1.5rem;border:1px solid var(--hairline);background:var(--hairline);}
+@media(min-width:640px){.stat-grid{grid-template-columns:repeat(4,1fr);}}
+.stat-cell{background:color-mix(in oklab,var(--background) 70%,transparent);backdrop-filter:blur(8px);padding:1.75rem 1.5rem;}
+.stat-cell dt{font-family:'IBM Plex Mono',monospace;font-size:1.875rem;font-variant-numeric:tabular-nums;letter-spacing:-.02em;}
+.stat-cell dd{margin-top:.5rem;}
+
+/* ticker */
+.ticker{overflow:hidden;border-block:1px solid var(--hairline);
+  background:color-mix(in oklab,var(--secondary) 40%,transparent);padding-block:1rem;}
+.ticker span{white-space:nowrap;}
+
+/* generic section */
+.sec{position:relative;margin:0 auto;width:100%;max-width:72rem;padding:7rem 1.5rem;}
+@media(min-width:640px){.sec{padding-block:10rem;}}
+.sec-head{display:flex;flex-wrap:wrap;align-items:end;justify-content:space-between;gap:1rem;}
+.sec-head h2{margin-top:.75rem;font-size:2.25rem;}
+@media(min-width:640px){.sec-head h2{font-size:3rem;}}
+.sec-head > p{max-width:20rem;font-size:.875rem;line-height:1.7;color:var(--muted-foreground);}
+.manifesto-lead{margin-top:2rem;max-width:56rem;font-size:1.75rem;line-height:1.25;letter-spacing:-.03em;}
+@media(min-width:640px){.manifesto-lead{font-size:2.75rem;}}
+.tile-grid{margin-top:4rem;display:grid;gap:1px;overflow:hidden;border-radius:1.5rem;
+  border:1px solid var(--hairline);background:var(--hairline);}
+@media(min-width:768px){.tile-grid.cols-3{grid-template-columns:repeat(3,1fr);}}
+@media(min-width:640px){.tile-grid.cols-4{grid-template-columns:repeat(2,1fr);}}
+@media(min-width:1024px){.tile-grid.cols-4{grid-template-columns:repeat(4,1fr);}}
+.tile{background:color-mix(in oklab,var(--background) 80%,transparent);backdrop-filter:blur(8px);padding:2rem;
+  transition:background .3s;position:relative;}
+.tile h3{margin-top:1rem;font-size:1.125rem;font-weight:500;letter-spacing:-.02em;}
+.tile p{margin-top:.75rem;font-size:.875rem;line-height:1.7;color:var(--muted-foreground);}
+.tile.cat{padding:2rem 1.5rem;}
+.tile.cat:hover{background:color-mix(in oklab,var(--primary) 4%,var(--background));}
+.tile.cat p{margin-top:.75rem;font-size:.875rem;font-weight:500;line-height:1.35;letter-spacing:-.02em;color:var(--foreground);}
+.tile.cat .underline{margin-top:1.25rem;display:block;height:1px;width:0;background:var(--gradient-lux);transition:width .5s;}
+.tile.cat:hover .underline{width:100%;}
+
+/* protocol */
+.protocol{display:grid;gap:3.5rem;padding-block:6rem;}
+@media(min-width:1024px){.protocol{grid-template-columns:.85fr 1.15fr;}}
+.protocol-aside{position:sticky;top:7rem;height:fit-content;}
+.protocol-aside h2{margin-top:1rem;font-size:2.25rem;}
+@media(min-width:640px){.protocol-aside h2{font-size:3rem;}}
+.step{display:grid;grid-template-columns:auto 1fr;gap:1.5rem;padding:2rem 0;border-top:1px solid var(--hairline);}
+.step:first-child{border-top:none;}
+.step-n{font-family:'IBM Plex Mono',monospace;font-size:.875rem;letter-spacing:.2em;color:var(--primary);padding-top:.25rem;}
+.step h3{font-size:1.25rem;font-weight:500;letter-spacing:-.02em;}
+.step p{margin-top:.5rem;font-size:.875rem;line-height:1.7;color:var(--muted-foreground);}
+
+/* submission console */
+.console-grid{margin-top:2.5rem;display:grid;gap:1rem;}
+@media(min-width:1024px){.console-grid{grid-template-columns:1.45fr 1fr;}}
+.dropzone{position:relative;cursor:pointer;overflow:hidden;border-radius:2rem;padding:2.5rem;}
+@media(min-width:640px){.dropzone{padding:3.5rem;}}
+.dropzone.drag{border-color:color-mix(in oklab,var(--primary) 60%,transparent);box-shadow:var(--shadow-glow);}
+.dz-icon{display:flex;height:4rem;width:4rem;align-items:center;justify-content:center;border-radius:1rem;
+  color:var(--primary-foreground);background:var(--gradient-lux);box-shadow:var(--shadow-glow);
+  transition:transform .5s;}
+.dropzone:hover .dz-icon{transform:scale(1.05);}
+.dropzone.drag .dz-icon{transform:scale(1.1);}
+.dz-icon svg{width:1.5rem;height:1.5rem;}
+.dz-title{margin-top:1.75rem;font-size:1.5rem;font-weight:500;letter-spacing:-.02em;}
+.dz-sub{margin-top:.5rem;max-width:24rem;font-size:.875rem;line-height:1.7;color:var(--muted-foreground);}
+.dz-tags{margin-top:2rem;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1.5rem;}
+.side-panel{position:relative;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;
+  border-radius:2rem;padding:2rem;}
+.side-panel .mono-label{font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;
+  letter-spacing:.26em;color:oklch(1 0 0/0.45);}
+.side-num{margin-top:1rem;font-family:'IBM Plex Mono',monospace;font-size:3rem;font-variant-numeric:tabular-nums;color:#fff;line-height:1;}
+.side-sub{margin-top:.25rem;font-size:.875rem;color:oklch(1 0 0/0.6);}
+.side-note{margin-top:1rem;font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;
+  line-height:1.7;letter-spacing:.18em;color:oklch(1 0 0/0.35);}
+
+/* textarea + tips */
+.ai-textarea{width:100%;min-height:7rem;border-radius:1.25rem;padding:1rem 1.125rem;resize:vertical;outline:none;
+  font-family:'IBM Plex Sans',sans-serif;font-size:.9375rem;line-height:1.7;color:var(--foreground);
+  border:1px solid var(--hairline);background:oklch(1 0 0/0.7);transition:border-color .3s,box-shadow .3s;}
+.ai-textarea:focus{border-color:color-mix(in oklab,var(--primary) 50%,transparent);box-shadow:0 0 0 4px oklch(0.52 0.185 258/0.08);}
+.ai-textarea::placeholder{color:var(--muted-foreground);opacity:.7;}
+.ai-tips{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.875rem;}
+.ai-tip{cursor:pointer;border-radius:999px;padding:.375rem .875rem;font-size:12px;color:var(--muted-foreground);
+  border:1px solid var(--hairline);background:oklch(1 0 0/0.6);transition:all .2s;}
+.ai-tip:hover{border-color:color-mix(in oklab,var(--primary) 45%,transparent);color:var(--primary);}
+.ai-actionrow{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem;margin-top:1rem;}
+.ai-progress{margin-top:.75rem;font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;
+  letter-spacing:.16em;color:var(--muted-foreground);text-align:right;transition:opacity .2s;}
 
 /* results */
-.ai-empty{border-radius:20px;padding:36px 24px;text-align:center;}
-.ai-empty.dashed{border-style:dashed;border-color:rgba(37,99,235,.3);}
-.ai-empty-icon{width:44px;height:44px;margin:0 auto 16px;border-radius:50%;background:linear-gradient(135deg,var(--t3),var(--t2));color:#fff;display:flex;align-items:center;justify-content:center;}
-.ai-empty-icon svg{width:20px;height:20px;}
-.ai-empty h2{font-family:'Space Grotesk',sans-serif;font-size:17px;font-weight:600;color:var(--navy);margin-bottom:8px;}
-.ai-empty p{font-size:13px;color:var(--t2);line-height:1.6;max-width:38ch;margin:0 auto;}
-.ai-empty p.strong{font-weight:500;color:var(--text);margin-bottom:6px;}
-.ai-empty-foot{font-family:'IBM Plex Mono',monospace;font-size:.65rem;color:var(--t3);margin-top:14px;}
+.results{margin-top:3.5rem;display:grid;gap:2.5rem;}
+.res-card{border-radius:2rem;padding:2rem;}
+@media(min-width:640px){.res-card{padding:2.5rem;}}
+.res-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:.75rem;}
+.res-head h2{font-size:1.875rem;}
+.profile-grid{margin-top:2rem;display:grid;gap:2.5rem;}
+@media(min-width:640px){.profile-grid{grid-template-columns:repeat(2,1fr);}}
+.profile-col h3{font-size:.875rem;font-weight:600;letter-spacing:-.01em;}
+.profile-col ul{list-style:none;margin-top:1rem;display:grid;gap:.75rem;}
+.profile-col li{padding-left:1rem;font-size:.875rem;line-height:1.7;}
+.profile-col.strong li{border-left:1px solid color-mix(in oklab,var(--primary) 30%,transparent);color:color-mix(in oklab,var(--foreground) 90%,transparent);}
+.profile-col.thin li{border-left:1px solid var(--hairline);color:var(--muted-foreground);}
+.dot-2{height:.5rem;width:.5rem;border-radius:999px;}
+.trajectory{margin-top:2rem;padding-top:1.5rem;border-top:1px solid var(--hairline);}
+.trajectory p{margin-top:.5rem;font-size:.875rem;line-height:1.7;}
+.match{border-radius:1.75rem;padding:1.75rem;}
+@media(min-width:640px){.match{padding:2rem;}}
+.match-top{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:1.5rem;}
+.match-meta{display:flex;flex-wrap:wrap;align-items:center;gap:.75rem;}
+.match h3{margin-top:.75rem;font-size:1.25rem;font-weight:500;line-height:1.35;letter-spacing:-.02em;}
+.match-score{flex-shrink:0;text-align:right;}
+.match-score .num{font-family:'IBM Plex Mono',monospace;font-size:3rem;font-weight:600;font-variant-numeric:tabular-nums;line-height:1;}
+.meter{margin-top:1.5rem;height:1px;width:100%;overflow:hidden;background:var(--hairline);}
+.meter i{display:block;height:1px;transition:width .9s cubic-bezier(.22,1,.36,1);}
+.match-why{margin-top:1.25rem;font-size:.875rem;line-height:1.7;color:color-mix(in oklab,var(--foreground) 85%,transparent);}
+.match-details{margin-top:1rem;display:grid;gap:.5rem;}
+.match-detail{font-size:.8125rem;line-height:1.7;color:var(--muted-foreground);}
+.match-detail b{font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.2em;
+  color:var(--primary);font-weight:600;margin-right:.5rem;}
+.match-link{margin-top:1.5rem;display:inline-flex;align-items:center;gap:.375rem;text-decoration:none;
+  font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.2em;
+  color:var(--primary);transition:opacity .2s;}
+.match-link:hover{opacity:.7;}
+.empty-card{border-radius:2rem;padding:3rem 2rem;text-align:center;}
+.empty-card h2{margin-top:1.5rem;font-size:1.5rem;font-weight:500;letter-spacing:-.02em;}
+.empty-card p{margin:.75rem auto 0;max-width:28rem;font-size:.875rem;line-height:1.7;color:var(--muted-foreground);}
+.empty-icon{margin:0 auto;display:flex;height:3rem;width:3rem;align-items:center;justify-content:center;
+  border-radius:999px;border:1px solid var(--hairline);color:var(--muted-foreground);}
+.skel-card{border-radius:1.75rem;padding:2rem;}
+.skel-bar{height:.75rem;border-radius:999px;background:var(--secondary);}
 
-.ai-mono-tag{font-family:'IBM Plex Mono',monospace;font-size:.65rem;color:var(--t3);white-space:nowrap;}
+/* closing */
+.closing{position:relative;overflow:hidden;border-radius:2.5rem;padding:5rem 2rem;text-align:center;}
+@media(min-width:640px){.closing{padding:7rem 4rem;}}
+.closing p.big{margin:2rem auto 0;max-width:48rem;font-size:2.2rem;color:#fff;}
+@media(min-width:640px){.closing p.big{font-size:3.5rem;}}
 
-.ai-profile{border-radius:20px;padding:26px;margin-bottom:16px;animation:aiRise .5s ease both;}
-.ai-profile-hd{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;}
-.ai-profile-hd h2{font-family:'Space Grotesk',sans-serif;font-size:17px;font-weight:600;color:var(--navy);}
-.ai-profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:18px;}
-.ai-profile-lbl{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--text);margin-bottom:10px;}
-.ai-profile-lbl .dot{width:8px;height:8px;border-radius:50%;}
-.ai-profile-lbl .dot.primary{background:linear-gradient(135deg,var(--blue),var(--sky));box-shadow:0 0 8px rgba(37,99,235,.6);}
-.ai-profile-lbl .dot.muted{background:var(--t3);opacity:.5;}
-.ai-profile ul{list-style:none;display:grid;gap:8px;}
-.ai-profile li{font-size:13px;line-height:1.55;color:var(--text);}
-.ai-profile-grid > div:last-child li{color:var(--t2);}
-.ai-trajectory{margin-top:18px;padding-top:18px;border-top:1px solid rgba(37,99,235,.15);}
-.ai-trajectory .ai-mono-tag{display:block;margin-bottom:8px;}
-.ai-trajectory p{font-size:13px;color:var(--text);line-height:1.6;}
+footer.site{border-top:1px solid var(--hairline);}
+.footer-inner{margin:0 auto;display:grid;gap:2rem;width:100%;max-width:72rem;padding:3rem 1.5rem;}
+@media(min-width:640px){.footer-inner{grid-template-columns:1fr auto;}}
+.footer-inner p{max-width:36rem;font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;
+  line-height:1.7;letter-spacing:.16em;color:var(--muted-foreground);}
 
-.ai-matches-hd{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;}
-.ai-matches-hd h2{font-family:'Space Grotesk',sans-serif;font-size:17px;font-weight:600;color:var(--navy);}
+/* ============================================================
+   BROWSE / CALENDAR / HACKATHONS
+   (kept information-dense on purpose - a live listings feed,
+    not a marketing surface - restyled into the new system)
+   ============================================================ */
+.browse-shell{display:none;padding-top:4.5rem;}
+.browse-shell.show{display:block;}
+.layout{display:grid;grid-template-columns:230px 1fr;min-height:calc(100vh - 4.5rem);width:100%;}
+.layout.full-width{grid-template-columns:1fr;}
+.sidebar{border-right:1px solid var(--hairline);padding:1.5rem 0;position:sticky;top:4.5rem;
+  height:calc(100vh - 4.5rem);overflow-y:auto;}
+.nav-section{margin-bottom:1.5rem;}
+.nav-hd{padding:0 1.25rem .75rem;}
+.cat-btn{display:flex;align-items:center;gap:.5rem;width:100%;padding:.5rem 1.25rem;background:none;border:none;
+  color:var(--muted-foreground);font-family:'IBM Plex Sans',sans-serif;font-size:.8125rem;cursor:pointer;
+  text-align:left;transition:all .15s;}
+.cat-btn:hover{color:var(--foreground);background:color-mix(in oklab,var(--primary) 4%,transparent);}
+.cat-btn.active{color:var(--foreground);font-weight:500;background:color-mix(in oklab,var(--primary) 6%,transparent);}
+.cat-dot{width:.375rem;height:.375rem;border-radius:999px;flex-shrink:0;}
+.main{min-width:0;overflow:hidden;}
+.view-tabs{border-bottom:1px solid var(--hairline);padding:.75rem 1.5rem;display:flex;align-items:center;
+  gap:.5rem;overflow-x:auto;}
+.view-tab{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.2em;text-transform:uppercase;
+  padding:.5rem .875rem;border:none;border-radius:999px;background:none;color:var(--muted-foreground);
+  cursor:pointer;transition:all .2s;white-space:nowrap;}
+.view-tab:hover{color:var(--foreground);}
+.view-tab.active{color:var(--primary-foreground);background:var(--gradient-lux);}
+.controls{border-bottom:1px solid var(--hairline);padding:.75rem 1.5rem;display:flex;align-items:center;
+  gap:.625rem;flex-wrap:wrap;}
+.ctrl-label{display:flex;align-items:center;gap:.375rem;font-size:.8125rem;color:var(--muted-foreground);cursor:pointer;}
+.ctrl-label input{accent-color:var(--primary);cursor:pointer;}
+.ctrl-sel{font-family:'IBM Plex Sans',sans-serif;font-size:.8125rem;border:1px solid var(--hairline);
+  border-radius:.5rem;padding:.3125rem .625rem;background:var(--card);color:var(--muted-foreground);cursor:pointer;outline:none;}
+.ctrl-sep{width:1px;height:1rem;background:var(--hairline);}
+.ctrl-right{margin-left:auto;display:flex;gap:.5rem;}
+.btn-tog{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  height:1.875rem;padding:0 .75rem;border:1px solid var(--hairline);border-radius:999px;background:var(--card);
+  color:var(--muted-foreground);cursor:pointer;transition:all .2s;}
+.btn-tog:hover{border-color:var(--primary);color:var(--primary);}
+.search-wrap{flex:1;max-width:26rem;position:relative;}
+.search-wrap input{width:100%;height:2rem;border:1px solid var(--hairline);border-radius:999px;
+  padding:0 .75rem 0 2rem;font-family:'IBM Plex Sans',sans-serif;font-size:.8125rem;background:var(--card);
+  color:var(--foreground);outline:none;transition:border-color .2s;}
+.search-wrap input:focus{border-color:var(--primary);}
+.s-ico{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);color:var(--muted-foreground);
+  font-size:.8125rem;pointer-events:none;font-style:normal;}
+.hd-meta{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--muted-foreground);white-space:nowrap;}
+.new-badge{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  background:var(--gradient-lux);color:var(--primary-foreground);padding:.25rem .625rem;border-radius:999px;
+  cursor:pointer;flex-shrink:0;}
+.btn-sm{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  height:1.875rem;padding:0 .875rem;border:1px solid var(--hairline);border-radius:999px;background:var(--card);
+  color:var(--muted-foreground);cursor:pointer;transition:all .2s;white-space:nowrap;}
+.btn-sm:hover{border-color:var(--primary);color:var(--primary);}
+.btn-sm:disabled{opacity:.4;cursor:not-allowed;}
+.scraping-pulse{display:inline-block;width:.375rem;height:.375rem;border-radius:999px;background:var(--primary);
+  margin-right:.375rem;animation:blink 1s infinite;}
+@keyframes blink{0%,100%{opacity:1;}50%{opacity:.25;}}
+.count-row{padding:.875rem 1.5rem .5rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;}
+.count-n{color:var(--foreground);font-weight:600;}
+.kb-hint{margin-left:auto;}
+.kb-hint kbd{background:var(--secondary);border:1px solid var(--hairline);border-radius:.25rem;padding:.0625rem .3125rem;font-family:inherit;}
+.events-area{padding:0 1.5rem 3rem;}
+.date-group{margin-bottom:.25rem;}
+.date-hd{display:flex;align-items:center;gap:.625rem;padding:1rem 0 .5rem;}
+.date-hd-line{flex:1;height:1px;background:var(--hairline);}
+.date-hd-today{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--primary);background:color-mix(in oklab,var(--primary) 9%,transparent);padding:.125rem .5rem;border-radius:999px;}
+.tbd-hd{padding:1.5rem 0 .5rem;display:flex;align-items:center;gap:.625rem;}
+.ev{display:flex;align-items:center;background:var(--card);border:1px solid var(--hairline);
+  border-left:2px solid var(--cat,var(--hairline));border-radius:.875rem;margin-bottom:.25rem;overflow:hidden;
+  transition:box-shadow .2s,border-color .2s,transform .2s;}
+.ev:hover{box-shadow:var(--shadow-soft);transform:translateX(2px);}
+.ev.past{opacity:.42;}
+.ev-time{width:5rem;padding:.75rem .5rem;flex-shrink:0;border-right:1px solid var(--hairline);text-align:center;}
+.ev-time .soon{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:500;display:block;white-space:nowrap;letter-spacing:.08em;}
+.ev-time .soon.blue{color:var(--primary);}
+.ev-time .soon.gray{color:var(--muted-foreground);}
+.ev-time .dt,.ev-time .tm{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted-foreground);display:block;margin-top:.125rem;}
+.ev-body{flex:1;min-width:0;padding:.6875rem .875rem;}
+.ev-title{font-size:.8125rem;font-weight:500;color:var(--foreground);text-decoration:none;display:block;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ev-title:hover{color:var(--primary);}
+.ev-src{font-size:11px;color:var(--muted-foreground);margin-top:.1875rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ev-right{display:flex;align-items:center;gap:.125rem;padding:0 .625rem;flex-shrink:0;}
+.ic-btn{width:1.75rem;height:1.75rem;border:none;background:none;color:var(--muted-foreground);cursor:pointer;
+  border-radius:.5rem;font-size:.875rem;display:flex;align-items:center;justify-content:center;transition:all .2s;}
+.ic-btn:hover{color:var(--primary);background:color-mix(in oklab,var(--primary) 7%,transparent);}
+.ic-btn.saved{color:var(--primary);}
+.skel{background:linear-gradient(90deg,var(--secondary) 25%,var(--muted) 50%,var(--secondary) 75%);
+  background-size:200% 100%;animation:sh 1.3s infinite;border-radius:.75rem;}
+@keyframes sh{0%{background-position:200% 0;}100%{background-position:-200% 0;}}
+.skel-row{height:3.5rem;margin-bottom:.25rem;}
+.empty{text-align:center;padding:4rem 1.25rem;color:var(--muted-foreground);}
+.empty h3{font-size:1rem;font-weight:500;color:var(--foreground);margin-bottom:.375rem;}
+.error-banner{background:color-mix(in oklab,var(--destructive) 7%,transparent);
+  border:1px solid color-mix(in oklab,var(--destructive) 20%,transparent);border-radius:.875rem;
+  padding:.75rem 1rem;font-size:.875rem;color:var(--destructive);margin:.75rem 1.5rem;}
+/* calendar */
+.cal-view{display:none;padding:1.5rem;}
+.cal-view.show{display:block;}
+.cal-hero{max-width:72rem;}
+.cal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem;flex-wrap:wrap;gap:.75rem;}
+.cal-header-left{display:flex;align-items:baseline;gap:.75rem;}
+.cal-title{font-family:'IBM Plex Sans',sans-serif;font-size:2rem;font-weight:600;letter-spacing:-.045em;}
+.cal-year{font-family:'IBM Plex Mono',monospace;font-size:1rem;color:var(--muted-foreground);}
+.cal-header-right{display:flex;gap:.5rem;}
+.cal-btn{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  padding:.5rem .875rem;border:1px solid var(--hairline);border-radius:999px;background:var(--card);
+  color:var(--muted-foreground);cursor:pointer;transition:all .2s;}
+.cal-btn:hover{border-color:var(--primary);color:var(--primary);}
+.cal-btn.today-btn{background:var(--gradient-lux);color:var(--primary-foreground);border-color:transparent;}
+.cal-weekdays{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;margin-bottom:.25rem;}
+.cal-wday{text-align:center;padding:.25rem 0;}
+.cal-grid2{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--hairline);
+  border:1px solid var(--hairline);border-radius:1.25rem;overflow:hidden;}
+.cal-cell{background:var(--card);min-height:5.5rem;padding:.375rem;cursor:pointer;transition:background .15s;position:relative;}
+.cal-cell:hover{background:color-mix(in oklab,var(--primary) 4%,var(--card));}
+.cal-cell.other-month{background:var(--surface);opacity:.55;}
+.cal-cell.is-today{background:color-mix(in oklab,var(--primary) 6%,var(--card));}
+.cal-cell.is-today .cal-num{background:var(--gradient-lux);color:var(--primary-foreground);border-radius:999px;}
+.cal-cell.selected{background:color-mix(in oklab,var(--primary) 8%,var(--card));}
+.cal-num{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted-foreground);display:flex;
+  align-items:center;justify-content:center;width:1.5rem;height:1.5rem;margin-bottom:.125rem;}
+.cal-badge{position:absolute;top:.25rem;right:.25rem;font-family:'IBM Plex Mono',monospace;font-size:9px;
+  background:var(--gradient-lux);color:var(--primary-foreground);border-radius:999px;padding:.0625rem .375rem;font-weight:600;}
+.cal-ev-pill{font-size:10px;padding:.125rem .3125rem;margin-bottom:.125rem;border-radius:.25rem;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;border-left:2px solid var(--pill-c,var(--hairline));background:var(--secondary);}
+.cal-ev-pill a{color:var(--foreground);text-decoration:none;display:block;overflow:hidden;text-overflow:ellipsis;}
+.cal-more{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted-foreground);}
+.cal-day-panel{max-width:72rem;margin:1rem auto 0;background:var(--card);border:1px solid var(--hairline);
+  border-radius:1.5rem;overflow:hidden;max-height:0;opacity:0;transition:all .3s ease;}
+.cal-day-panel.open{max-height:40rem;opacity:1;padding:1.25rem 1.5rem;}
+.cdp-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;}
+.cdp-title{font-size:.9375rem;font-weight:500;letter-spacing:-.02em;}
+.cdp-count{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--primary);background:color-mix(in oklab,var(--primary) 8%,transparent);padding:.1875rem .625rem;border-radius:999px;}
+.cdp-close{background:none;border:none;font-size:1.125rem;color:var(--muted-foreground);cursor:pointer;padding:.25rem;}
+.cdp-events{display:flex;flex-direction:column;gap:.625rem;}
+.cdp-ev{display:flex;justify-content:space-between;align-items:flex-start;padding:.75rem;background:var(--surface);
+  border-radius:.875rem;border-left:3px solid var(--cdp-c,var(--hairline));}
+.cdp-ev-title{font-size:.8125rem;font-weight:500;margin-bottom:.25rem;}
+.cdp-ev-meta{font-size:11px;color:var(--muted-foreground);display:flex;gap:.5rem;}
+.cdp-ev-time{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--primary);margin-bottom:.1875rem;}
+.cdp-ev-actions{display:flex;gap:.5rem;flex-shrink:0;margin-left:.75rem;}
+.cdp-link{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--primary);cursor:pointer;text-decoration:none;white-space:nowrap;}
+/* hackathons */
+.hack-view{display:none;padding:1.5rem;}
+.hack-view.show{display:block;}
+.hack-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:.75rem;}
+.hack-title{font-family:'IBM Plex Sans',sans-serif;font-size:1.5rem;font-weight:600;letter-spacing:-.04em;
+  display:flex;align-items:center;gap:.625rem;}
+.hack-badge{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  background:color-mix(in oklab,var(--primary) 9%,transparent);color:var(--primary);
+  border:1px solid color-mix(in oklab,var(--primary) 20%,transparent);padding:.25rem .625rem;border-radius:999px;}
+.hack-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(20rem,1fr));gap:.875rem;}
+.hack-card{border-radius:1.25rem;overflow:hidden;display:flex;flex-direction:column;}
+.hack-card-top{padding:1.25rem 1.25rem 1rem;border-bottom:1px solid var(--hairline);}
+.hack-card-date{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--primary);margin-bottom:.5rem;display:flex;align-items:center;gap:.5rem;}
+.hack-card-title{font-size:.9375rem;font-weight:500;line-height:1.35;letter-spacing:-.02em;}
+.hack-card-body{padding:1rem 1.25rem 1.25rem;flex:1;display:flex;flex-direction:column;gap:.75rem;}
+.hack-card-desc{font-size:.8125rem;color:var(--muted-foreground);line-height:1.6;}
+.hack-card-actions{display:flex;gap:.5rem;margin-top:auto;}
+.hack-link{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  padding:.5rem .875rem;border:1px solid var(--hairline);border-radius:999px;color:var(--muted-foreground);
+  text-decoration:none;cursor:pointer;background:none;transition:all .2s;}
+.hack-link:hover{border-color:var(--primary);color:var(--primary);}
+.hack-link.primary{background:var(--gradient-lux);color:var(--primary-foreground);border-color:transparent;}
+.hack-soon{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--primary);
+  background:color-mix(in oklab,var(--primary) 8%,transparent);padding:.125rem .5rem;border-radius:999px;margin-left:auto;}
+.hack-past{opacity:.5;}
 
-.ai-match{border-radius:20px;padding:22px 24px;margin-bottom:12px;transition:transform .2s,box-shadow .2s;animation:aiRise .5s ease both;}
-.ai-match:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg);}
-.ai-match-row{display:flex;justify-content:space-between;align-items:center;gap:16px;}
-.ai-match-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;}
-.ai-chip{font-family:'IBM Plex Mono',monospace;font-size:.66rem;background:rgba(37,99,235,.08);color:var(--blue);border-radius:6px;padding:2px 8px;}
-.ai-match-title{font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:600;color:var(--navy);line-height:1.4;}
-.ai-ring{position:relative;width:60px;height:60px;flex-shrink:0;}
-.ai-ring svg{width:100%;height:100%;transform:rotate(-90deg);}
-.ai-ring circle{fill:none;stroke-width:5;}
-.ai-ring .ring-bg{stroke:rgba(37,99,235,.12);}
-.ai-ring .ring-fg{stroke:url(#aiRingGrad);stroke-linecap:round;filter:drop-shadow(0 0 3px rgba(37,99,235,.45));transition:stroke-dashoffset .7s ease;}
-.ai-ring b{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:.92rem;font-weight:700;color:var(--text);}
-.ai-match-tier{font-family:'IBM Plex Mono',monospace;font-size:.64rem;text-align:center;color:var(--t3);margin-top:4px;}
-.ai-match-why{font-size:13.5px;color:var(--text);line-height:1.6;margin-top:14px;}
-.ai-match-details{margin-top:12px;padding-top:12px;border-top:1px solid rgba(37,99,235,.15);display:grid;gap:7px;}
-.ai-match-detail{font-size:12px;line-height:1.6;color:var(--t2);}
-.ai-match-detail b{font-family:'IBM Plex Mono',monospace;font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;color:var(--blue);font-weight:600;margin-right:7px;}
-.ai-match-link{display:inline-flex;align-items:center;gap:5px;margin-top:14px;font-size:12.5px;font-weight:600;color:var(--blue);text-decoration:none;}
-.ai-match-link:hover{opacity:.75;}
-.ai-match-link svg{width:12px;height:12px;}
+/* ---------- misc ---------- */
+#loadBar{position:fixed;top:0;left:0;height:2px;width:0;background:var(--gradient-lux);z-index:2000;opacity:0;transition:opacity .2s;}
+.toast-wrap{position:fixed;bottom:1.25rem;right:1.25rem;z-index:3000;display:flex;flex-direction:column;gap:.5rem;}
+.toast{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.06em;
+  background:oklch(0.2 0.05 260);color:#fff;padding:.625rem .875rem;border-radius:.75rem;animation:rise .2s ease;}
+.consent-banner{position:fixed;left:1.25rem;right:1.25rem;bottom:1.25rem;z-index:2500;max-width:44rem;margin:0 auto;
+  border-radius:1.5rem;padding:1.25rem 1.5rem;display:flex;align-items:center;gap:1.25rem;flex-wrap:wrap;animation:rise .3s ease;}
+.consent-text{flex:1;min-width:14rem;display:flex;flex-direction:column;gap:.25rem;}
+.consent-text strong{font-size:.875rem;font-weight:600;letter-spacing:-.01em;}
+.consent-text span{font-size:.8125rem;color:var(--muted-foreground);line-height:1.6;}
+.consent-actions{display:flex;gap:.5rem;flex-shrink:0;}
 
-@keyframes aiRise{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
 @media(prefers-reduced-motion:reduce){
-  .ai-profile,.ai-match,.ai-brandmark{animation:none;}
-  .ic-spin,.ai-blob,.ai-title .accent,.eyebrow-dot{animation:none;}
+  .aurora,.marquee-track,.pulse-ring,.scanline::before,.ic-spin,.rise{animation:none!important;}
+  .reveal{opacity:1;transform:none;transition:none;}
 }
-@media(max-width:640px){
-  .ai-profile-grid{grid-template-columns:1fr;}
-  .ai-steps{grid-template-columns:1fr;}
-  .ai-title{font-size:2.2rem;}
-}
-
-/* MISC */
-#loadBar{position:fixed;top:0;left:0;height:2px;width:0;background:var(--blue);z-index:2000;opacity:0;transition:opacity .2s;}
-.toast-wrap{position:fixed;bottom:20px;right:20px;z-index:3000;display:flex;flex-direction:column;gap:8px;}
-.toast{font-family:'IBM Plex Mono',monospace;font-size:.7rem;background:var(--navy);color:#fff;padding:9px 14px;border-radius:8px;animation:tIn .2s ease;}
-@keyframes tIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-
-.consent-banner{position:fixed;left:20px;right:20px;bottom:20px;z-index:2500;max-width:640px;margin:0 auto;
-  background:var(--surface);border:1px solid var(--border2);border-radius:18px;box-shadow:var(--shadow-lg);
-  padding:18px 20px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;animation:tIn .3s ease;}
-.consent-text{flex:1;min-width:220px;display:flex;flex-direction:column;gap:4px;}
-.consent-text strong{font-family:'Space Grotesk',sans-serif;font-size:14px;color:var(--navy);}
-.consent-text span{font-size:12px;color:var(--t2);line-height:1.55;}
-.consent-actions{display:flex;gap:8px;flex-shrink:0;}
-.consent-accept{height:36px;padding:0 18px;font-size:.78rem;margin-left:0;}
-@media(max-width:640px){.consent-banner{flex-direction:column;align-items:stretch;}.consent-actions{justify-content:flex-end;}}
-
-@media(max-width:768px){
-  .layout{grid-template-columns:1fr}
-  .sidebar{display:none}
-  header{padding:0 14px}
-  .events-area,.controls,.count-row{padding-left:14px;padding-right:14px}
-  .hack-view,.ai-view{padding:16px}
-  .hack-grid{grid-template-columns:1fr}
+@media(max-width:900px){
+  .layout{grid-template-columns:1fr;}
+  .sidebar{display:none;}
+  .protocol-aside{position:static;}
+  .hero{padding-top:7rem;}
 }
 </style>
 </head>
 <body>
 <div id="loadBar"></div>
 
-<header>
-  <div class="logo" onclick="goHome()"><div class="logo-mark"></div>ORBITCAST</div>
-  <div class="header-browse-chrome" id="headerBrowseChrome" style="display:none">
-    <div class="search-wrap">
-      <i class="s-ico">&#x2315;</i>
-      <input id="search" type="text" placeholder="Search events, sources…" oninput="render()">
+<!-- ============ NAV ============ -->
+<header class="nav" id="siteNav">
+  <div class="nav-inner">
+    <button class="brand" onclick="goHome()">
+      <span class="brand-mark">O</span>
+      <span class="brand-name">OrbitCast<span class="lux-text">AI</span></span>
+    </button>
+
+    <div class="header-browse-chrome" id="headerBrowseChrome" style="display:none;flex:1;align-items:center;gap:1rem;min-width:0;">
+      <div class="search-wrap">
+        <i class="s-ico">&#x2315;</i>
+        <input id="search" type="text" placeholder="Search events, sources…" oninput="render()">
+      </div>
+      <span class="hd-meta" id="lastRunEl">—</span>
+      <span class="new-badge" id="newBadge" style="display:none" onclick="filterNew()"><span id="newCt">0</span> new</span>
+      <button class="btn-sm" id="refreshBtn" onclick="doRefresh()">↻ Refresh</button>
     </div>
-    <span class="hd-meta" id="lastRunEl">—</span>
-    <span class="new-badge" id="newBadge" style="display:none" onclick="filterNew()"><span id="newCt">0</span> new</span>
-    <button class="btn-sm" id="refreshBtn" onclick="doRefresh()">↻ Refresh</button>
+
+    <div class="nav-right">
+      <button class="nav-link" id="tabAI" onclick="switchView('ai')">Home</button>
+      <button class="nav-link nav-browse-link" id="tabEvents" onclick="switchView('events')">Events</button>
+      <button class="nav-link nav-browse-link" id="tabCalendar" onclick="switchView('calendar')">Calendar</button>
+      <button class="nav-link nav-browse-link" id="tabHackathons" onclick="switchView('hackathons')">Hackathons</button>
+      <button class="nav-cta sheen" id="navCta" onclick="scrollToConsole()">Begin</button>
+    </div>
   </div>
 </header>
 
-<div class="layout full-width" id="layoutRoot">
-  <nav class="sidebar" id="sidebar" style="display:none">
-    <div class="nav-section">
-      <div class="nav-hd">Category</div>
-      <div id="catList"></div>
-    </div>
-  </nav>
+<!-- ============ LANDING / AI ============ -->
+<div class="ai-view show" id="aiView">
 
-  <div class="main">
-    <div class="view-tabs">
-      <button class="ai-primary-tab active" id="tabAI" onclick="switchView('ai')">&#10022; OrbitCast AI</button>
-      <div class="tabs-sep"></div>
-      <span class="browse-label">Browse</span>
-      <div class="browse-group">
-        <button class="view-tab" id="tabEvents" onclick="switchView('events')">Events</button>
-        <button class="view-tab" id="tabCalendar" onclick="switchView('calendar')">Calendar</button>
-        <button class="view-tab" id="tabHackathons" onclick="switchView('hackathons')">⚡ Hackathons</button>
-      </div>
-    </div>
-
-    <!-- EVENTS VIEW -->
-    <div id="eventsView" style="display:none">
-      <div class="controls">
-        <label class="ctrl-label"><input type="checkbox" id="cbUpcoming" checked onchange="render()"> Upcoming</label>
-        <div class="ctrl-sep"></div>
-        <label class="ctrl-label"><input type="checkbox" id="cbSaved" onchange="render()"> Saved</label>
-        <div class="ctrl-sep"></div>
-        <select class="ctrl-sel" id="dateRange" onchange="render()">
-          <option value="all">All dates</option>
-          <option value="today">Today</option>
-          <option value="week">This week</option>
-          <option value="month">This month</option>
-          <option value="30">Next 30 days</option>
-          <option value="90">Next 90 days</option>
-        </select>
-        <div class="ctrl-sep"></div>
-        <select class="ctrl-sel" id="sortSel" onchange="render()">
-          <option value="date">Sort: soonest</option>
-          <option value="source">Sort: by source</option>
-          <option value="alpha">Sort: A–Z</option>
-          <option value="category">Sort: by category</option>
-        </select>
-        <div class="ctrl-right">
-          <button class="btn-tog" onclick="exportAll()">↓ Export .ics</button>
+  <!-- HERO -->
+  <section class="hero">
+    <div class="aurora"></div>
+    <div class="gridlines"></div>
+    <div class="grain"></div>
+    <div class="wrap">
+      <div class="reveal">
+        <div class="hero-eyebrow">
+          <span class="hero-dot pulse-ring"></span>
+          <span class="label-xs" id="heroLiveBadge">Honest event intelligence · London</span>
         </div>
       </div>
-      <div class="count-row">
-        <span><span class="count-n" id="cntN">0</span> events</span>
-        <span id="cntMeta" style="color:var(--t3)"></span>
-        <span class="kb-hint">Press <kbd>/</kbd> to search · <kbd>C</kbd> calendar</span>
+      <div class="reveal" data-delay="90">
+        <h1 class="display-xl">No flattery.</h1>
       </div>
-      <div id="errorBanner" style="display:none" class="error-banner"></div>
-      <div class="events-area" id="eventsArea"></div>
-    </div>
+      <div class="reveal" data-delay="160">
+        <p class="display-xl hero-line"><span class="serif-accent lux-text">Only</span> the rooms</p>
+      </div>
+      <div class="reveal" data-delay="230">
+        <p class="display-xl hero-line dim">that deserve you.</p>
+      </div>
 
-    <!-- CALENDAR VIEW -->
-    <div class="cal-view" id="calView">
-      <div class="cal-hero">
-        <div class="cal-header">
-          <div class="cal-header-left">
-            <span class="cal-title" id="calTitle">June</span>
-            <span class="cal-year" id="calYearLabel">2026</span>
-          </div>
-          <div class="cal-header-right">
-            <button class="cal-btn" onclick="calPrev()">← Prev</button>
-            <button class="cal-btn today-btn" onclick="calGoToday()">Today</button>
-            <button class="cal-btn" onclick="calNext()">Next →</button>
+      <div class="hero-foot">
+        <div class="reveal" data-delay="280">
+          <p>OrbitCastAI reads the real person behind a CV &mdash; the roles actually held, the projects
+             actually shipped &mdash; then scores every event in the live London catalog. Two to four
+             survive. Frequently none. That refusal is the product.</p>
+        </div>
+        <div class="reveal" data-delay="340">
+          <div class="hero-actions">
+            <button class="btn-lux sheen" onclick="scrollToConsole()">Submit your CV <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+            <a class="btn-ghost" href="#protocol">Read the protocol</a>
           </div>
         </div>
-        <div class="cal-weekdays">
-          <div class="cal-wday">Mon</div><div class="cal-wday">Tue</div><div class="cal-wday">Wed</div>
-          <div class="cal-wday">Thu</div><div class="cal-wday">Fri</div><div class="cal-wday">Sat</div><div class="cal-wday">Sun</div>
+      </div>
+
+      <div class="reveal" data-delay="400">
+        <dl class="stat-grid">
+          <div class="stat-cell"><dt class="tabular" id="statEvents">—</dt><dd class="label-xs">events scored</dd></div>
+          <div class="stat-cell"><dt class="tabular">65</dt><dd class="label-xs">minimum viable score</dd></div>
+          <div class="stat-cell"><dt class="tabular">2&ndash;4</dt><dd class="label-xs">typical matches</dd></div>
+          <div class="stat-cell"><dt class="tabular">0</dt><dd class="label-xs">fabricated ids</dd></div>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <!-- TICKER -->
+  <div class="ticker">
+    <div class="marquee-track" id="tickerTrack"></div>
+  </div>
+
+  <!-- 01 POSITION -->
+  <section class="sec">
+    <div class="reveal"><span class="label-xs">01 &mdash; Position</span></div>
+    <div class="reveal" data-delay="80">
+      <p class="manifesto-lead">Every recommendation engine on earth is optimised to make you feel
+        <span class="serif-accent" style="color:color-mix(in oklab,var(--muted-foreground) 70%,transparent)">seen</span>.
+        This one is optimised to be <span class="lux-text">right</span> &mdash; even when right means telling you that
+        nothing in the catalog is worth your Thursday.</p>
+    </div>
+    <div class="reveal" data-delay="160">
+      <div class="tile-grid cols-3">
+        <div class="tile"><span class="label-xs">01</span><h3>Evidence, or silence</h3>
+          <p>Every claim cites the role, the project, the shipped thing. No adjectives without a source line.</p></div>
+        <div class="tile"><span class="label-xs">02</span><h3>Gaps in the open</h3>
+          <p>The profile names what is thin as prominently as what is strong &mdash; and which rooms would close it.</p></div>
+        <div class="tile"><span class="label-xs">03</span><h3>Enforced, not requested</h3>
+          <p>Sub-65 scores and hallucinated event ids never reach the interface. The filter is code.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROTOCOL -->
+  <section class="sec" id="protocol" style="padding-block:0;">
+    <div class="protocol">
+      <div class="protocol-aside">
+        <div class="reveal">
+          <span class="label-xs">The protocol</span>
+          <h2 class="display-xl">Four passes,
+            <span class="serif-accent" style="color:color-mix(in oklab,var(--muted-foreground) 60%,transparent)">before a word</span>
+            reaches you</h2>
         </div>
-        <div class="cal-grid2" id="calGrid2"></div>
-        <div class="cal-day-panel" id="calDayPanel"></div>
+      </div>
+      <div>
+        <div class="reveal"><div class="step"><span class="step-n">I</span><div><h3>Classify</h3>
+          <p>Is this actually a CV? Cover letters, decks and stray PDFs are stopped at the door &mdash; no profile is invented for them.</p></div></div></div>
+        <div class="reveal" data-delay="70"><div class="step"><span class="step-n">II</span><div><h3>Read</h3>
+          <p>Roles, scope, timeline, depth. The engine extracts the person, not the keyword cloud.</p></div></div></div>
+        <div class="reveal" data-delay="140"><div class="step"><span class="step-n">III</span><div><h3>Score</h3>
+          <p>Every event is rated 0&ndash;100 against real evidence. 90+ attend, 75+ solid, 65+ imperfect, below that: gone.</p></div></div></div>
+        <div class="reveal" data-delay="210"><div class="step"><span class="step-n">IV</span><div><h3>Return</h3>
+          <p>Two to four rooms with the reasoning attached &mdash; or an honest, empty result.</p></div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 02 SUBMISSION -->
+  <section class="sec" id="console" style="scroll-margin-top:6rem;">
+    <div class="reveal">
+      <div class="sec-head">
+        <div>
+          <span class="label-xs">02 &mdash; Submission</span>
+          <h2 class="display-xl">Present your <span class="serif-accent" style="color:var(--primary)">record</span></h2>
+        </div>
+        <p>Text is extracted server-side and the original file is discarded immediately. Nothing is kept that you cannot erase.</p>
       </div>
     </div>
 
-    <!-- HACKATHONS VIEW -->
-    <div class="hack-view" id="hackathonsView">
-      <div class="hack-header">
-        <div class="hack-title">⚡ London Hackathons <span class="hack-badge" id="hackCount">0 upcoming</span></div>
-        <label class="ctrl-label"><input type="checkbox" id="cbHackUpcoming" checked onchange="renderHackathons()"> Upcoming only</label>
-      </div>
-      <div class="hack-grid" id="hackGrid"></div>
-    </div>
-
-    <!-- AI VIEW -->
-    <div class="ai-view show grid-tex" id="aiView">
-      <div class="ai-bg" aria-hidden="true">
-        <div class="ai-blob ai-blob-1"></div>
-        <div class="ai-blob ai-blob-2"></div>
-        <div class="ai-blob ai-blob-3"></div>
-        <div class="ai-grain"></div>
-      </div>
-      <svg width="0" height="0" style="position:absolute">
-        <defs>
-          <linearGradient id="aiRingGrad" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="var(--blue)"/><stop offset="100%" stop-color="var(--sky)"/>
-          </linearGradient>
-          <filter id="aiGrainFilter"><feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter>
-        </defs>
-      </svg>
-
-      <div class="ai-wrap">
-
-        <div class="ai-hero">
-          <div class="ai-eyebrow" id="heroLiveBadge"><span class="eyebrow-dot"></span>Scanning London's event feed…</div>
-          <div class="ai-brandmark">&#10022;</div>
-          <h1 class="ai-title">OrbitCast<span class="accent">AI</span></h1>
-          <p class="ai-tagline">Make network into networth.</p>
-          <p class="ai-subtitle">Drop your CV &mdash; we'll match you to the events in London actually worth your time.</p>
-        </div>
-
-        <div class="cv-drop-zone ai-glass" id="cvDropZone" tabindex="0" role="button" aria-label="Upload your CV"
-          ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleCVDrop(event)"
-          onclick="document.getElementById('cvFile').click()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('cvFile').click();}">
+    <div class="reveal" data-delay="80">
+      <div class="console-grid">
+        <div class="dropzone card-lux" id="cvDropZone" tabindex="0" role="button" aria-label="Upload your CV"
+             ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleCVDrop(event)"
+             onclick="document.getElementById('cvFile').click()"
+             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('cvFile').click();}">
+          <div class="gridlines" style="opacity:.7"></div>
           <input type="file" id="cvFile" accept=".pdf,.docx,.txt" style="display:none" onchange="handleCVFile(this)">
-          <div class="cv-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M5 11l7-7 7 7M4 20h16"/></svg></div>
-          <div class="cv-zone-title">Drop your CV here, or click to browse</div>
-          <div class="cv-zone-sub">PDF, DOCX, or TXT &middot; Max 5MB &middot; only extracted text is stored</div>
-        </div>
-        <div class="cv-file-info ai-glass" id="cvFileInfo" style="display:none">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M9 13h6M9 17h6"/></svg>
-          <span class="cv-file-name" id="cvFileName"></span>
-          <button class="cv-file-clear" onclick="clearCV()" title="Remove">&times;</button>
+          <div style="position:relative;z-index:1">
+            <div class="dz-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M5 11l7-7 7 7M4 20h16"/></svg></div>
+            <p class="dz-title" id="dzTitle">Drop your CV</p>
+            <p class="dz-sub" id="dzSub">PDF, DOCX or TXT. Or click anywhere in this panel to browse.</p>
+            <div class="dz-tags">
+              <span class="label-xs">server-side parsing</span>
+              <span class="label-xs">text only</span>
+              <span class="label-xs">gdpr erasable</span>
+            </div>
+            <div id="cvFileInfo" style="display:none;margin-top:1.25rem;align-items:center;gap:.625rem;">
+              <span class="label-xs" style="color:var(--primary)">loaded</span>
+              <span class="mono" style="font-size:12px" id="cvFileName"></span>
+              <button onclick="event.stopPropagation();clearCV()" style="background:none;border:none;color:var(--muted-foreground);cursor:pointer;font-size:1rem;">&times;</button>
+            </div>
+          </div>
         </div>
 
-        <div class="ai-or">or describe yourself</div>
+        <div class="side-panel inkwell">
+          <div class="aurora" style="opacity:.3"></div>
+          <div style="position:relative;z-index:1">
+            <span class="mono-label">Engine</span>
+            <p class="side-num" id="sidePanelCount">—</p>
+            <p class="side-sub">live London events in the catalog</p>
+            <div style="margin-top:1.5rem;display:flex;gap:.375rem;">
+              <span style="height:2px;flex:1;border-radius:999px;background:oklch(1 0 0/0.85)"></span>
+              <span style="height:2px;flex:1;border-radius:999px;background:oklch(1 0 0/0.5)"></span>
+              <span style="height:2px;flex:1;border-radius:999px;background:oklch(1 0 0/0.25)"></span>
+            </div>
+          </div>
+          <div style="position:relative;z-index:1;margin-top:2.5rem;">
+            <button class="btn-white sheen" id="aiSubmitBtn" onclick="submitAI()">
+              <span class="btn-text">Run the analysis <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+              <span class="btn-loading" style="display:none;align-items:center;gap:.5rem;">
+                <svg class="ic-spin" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle opacity=".25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"/></svg>
+                Reading you
+              </span>
+            </button>
+            <p class="side-note">Sub-65 scores are discarded in code, not in prose.</p>
+          </div>
+        </div>
+      </div>
+    </div>
 
-        <textarea class="ai-textarea" id="aiInput" placeholder="I'm a software engineer with 5 years in fintech, now looking to transition into AI product management. Interested in defence tech and deep tech investing. Currently building a side project using LLMs..." oninput="updateCharCount()"></textarea>
+    <div class="reveal" data-delay="120">
+      <div style="margin-top:1.5rem;">
+        <span class="label-xs">or describe yourself</span>
+        <textarea class="ai-textarea" id="aiInput" style="margin-top:.75rem;"
+          placeholder="I'm a software engineer with 5 years in fintech, now moving into AI product management. Interested in defence tech and deep tech investing. Currently building a side project using LLMs…"
+          oninput="updateCharCount()"></textarea>
         <div class="ai-tips">
           <span class="ai-tip" tabindex="0" role="button" onclick="setAiTip('Software engineer with 3 years Python & ML experience, interested in AI/product roles')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">Tech &amp; AI</span>
           <span class="ai-tip" tabindex="0" role="button" onclick="setAiTip('Business professional seeking networking with founders and investors in London')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">Business</span>
@@ -528,39 +720,146 @@ header{background:var(--surface);border-bottom:1px solid var(--border);border-to
           <span class="ai-tip" tabindex="0" role="button" onclick="setAiTip('PhD student researching defence technology, geopolitics, and AI governance')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">Research</span>
           <span class="ai-tip" tabindex="0" role="button" onclick="setAiTip('Founder looking for co-founders, investors and hackathons to build and ship fast')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">Founder</span>
         </div>
-
         <div class="ai-actionrow">
-          <span class="ai-char-count" id="aiCharCount">0 / 5000</span>
-          <button class="ai-submit" id="aiSubmitBtn" onclick="submitAI()">
-            <span class="btn-text">Analyze my CV <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
-            <span class="btn-loading"><svg class="ic-spin" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle opacity=".3" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"/></svg>Reading your CV&hellip;</span>
-          </button>
+          <span class="label-xs" id="aiCharCount">0 / 5000</span>
         </div>
         <div class="ai-progress" id="aiProgress" style="display:none"></div>
-
-        <div class="ai-steps" id="aiSteps">
-          <div class="ai-step ai-glass"><span class="ai-step-n">01</span><h3>Classify</h3><p>First: is this actually a CV? If not, it stops and tells you.</p></div>
-          <div class="ai-step ai-glass"><span class="ai-step-n">02</span><h3>Read</h3><p>Extract real roles, projects, and skills &mdash; with evidence, not titles.</p></div>
-          <div class="ai-step ai-glass"><span class="ai-step-n">03</span><h3>Match &amp; audit</h3><p>Score each event 0&ndash;100 honestly. Only 65+ survives, in code &mdash; then a final pass drops generic reasoning.</p></div>
-        </div>
-
-        <div id="aiResults"></div>
       </div>
     </div>
 
+    <div id="aiSteps" style="display:none"></div>
+    <div id="aiResults"></div>
+  </section>
+
+  <!-- 03 COVERAGE -->
+  <section class="sec">
+    <div class="reveal">
+      <div class="sec-head">
+        <div>
+          <span class="label-xs">03 &mdash; Coverage</span>
+          <h2 class="display-xl">Eight <span class="serif-accent" style="color:var(--primary)">territories</span></h2>
+        </div>
+        <p>A live catalog, continuously refreshed from real London sources, junk filtered before it ever reaches scoring.</p>
+      </div>
+    </div>
+    <div class="reveal" data-delay="90">
+      <div class="tile-grid cols-4" id="coverageGrid"></div>
+    </div>
+  </section>
+
+  <!-- CLOSING -->
+  <section class="sec" style="padding-bottom:7rem;padding-top:0;">
+    <div class="reveal">
+      <div class="closing inkwell">
+        <div class="aurora" style="opacity:.25"></div>
+        <div class="grain" style="opacity:.2"></div>
+        <div style="position:relative;z-index:1">
+          <span class="mono" style="font-size:10px;text-transform:uppercase;letter-spacing:.3em;color:oklch(1 0 0/0.45)">The one non-negotiable</span>
+          <p class="display-xl big">Honesty over <span class="serif-accent" style="color:oklch(1 0 0/0.6)">flattery</span> &mdash; in the product, and in how we talk about it.</p>
+          <button class="btn-white sheen" style="width:auto;margin-top:3rem;padding:1rem 2rem;" onclick="scrollToConsole()">
+            Submit your CV <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="site">
+    <div class="footer-inner">
+      <p>OrbitCastAI &mdash; honesty over flattery. Only extracted CV text is stored, never the raw file.
+         Consent is opt-in and revocable from this browser.</p>
+      <span class="label-xs" style="text-align:right">&copy; 2026 OrbitCast</span>
+    </div>
+  </footer>
+</div>
+
+<!-- ============ BROWSE SHELL ============ -->
+<div class="browse-shell" id="browseShell">
+  <div class="layout" id="layoutRoot">
+    <nav class="sidebar" id="sidebar">
+      <div class="nav-section">
+        <div class="nav-hd label-xs">Category</div>
+        <div id="catList"></div>
+      </div>
+    </nav>
+
+    <div class="main">
+      <div class="view-tabs">
+        <button class="view-tab" onclick="switchView('events')" id="vtEvents">Events</button>
+        <button class="view-tab" onclick="switchView('calendar')" id="vtCalendar">Calendar</button>
+        <button class="view-tab" onclick="switchView('hackathons')" id="vtHackathons">⚡ Hackathons</button>
+      </div>
+
+      <div id="eventsView" style="display:none">
+        <div class="controls">
+          <label class="ctrl-label"><input type="checkbox" id="cbUpcoming" checked onchange="render()"> Upcoming</label>
+          <div class="ctrl-sep"></div>
+          <label class="ctrl-label"><input type="checkbox" id="cbSaved" onchange="render()"> Saved</label>
+          <div class="ctrl-sep"></div>
+          <select class="ctrl-sel" id="dateRange" onchange="render()">
+            <option value="all">All dates</option><option value="today">Today</option>
+            <option value="week">This week</option><option value="month">This month</option>
+            <option value="30">Next 30 days</option><option value="90">Next 90 days</option>
+          </select>
+          <div class="ctrl-sep"></div>
+          <select class="ctrl-sel" id="sortSel" onchange="render()">
+            <option value="date">Sort: soonest</option><option value="source">Sort: by source</option>
+            <option value="alpha">Sort: A–Z</option><option value="category">Sort: by category</option>
+          </select>
+          <div class="ctrl-right"><button class="btn-tog" onclick="exportAll()">↓ Export .ics</button></div>
+        </div>
+        <div class="count-row">
+          <span class="label-xs"><span class="count-n" id="cntN">0</span> events</span>
+          <span class="label-xs" id="cntMeta"></span>
+          <span class="kb-hint label-xs">Press <kbd>/</kbd> to search · <kbd>C</kbd> calendar</span>
+        </div>
+        <div id="errorBanner" style="display:none" class="error-banner"></div>
+        <div class="events-area" id="eventsArea"></div>
+      </div>
+
+      <div class="cal-view" id="calView">
+        <div class="cal-hero">
+          <div class="cal-header">
+            <div class="cal-header-left">
+              <span class="cal-title" id="calTitle">June</span>
+              <span class="cal-year" id="calYearLabel">2026</span>
+            </div>
+            <div class="cal-header-right">
+              <button class="cal-btn" onclick="calPrev()">← Prev</button>
+              <button class="cal-btn today-btn" onclick="calGoToday()">Today</button>
+              <button class="cal-btn" onclick="calNext()">Next →</button>
+            </div>
+          </div>
+          <div class="cal-weekdays">
+            <div class="cal-wday label-xs">Mon</div><div class="cal-wday label-xs">Tue</div><div class="cal-wday label-xs">Wed</div>
+            <div class="cal-wday label-xs">Thu</div><div class="cal-wday label-xs">Fri</div><div class="cal-wday label-xs">Sat</div><div class="cal-wday label-xs">Sun</div>
+          </div>
+          <div class="cal-grid2" id="calGrid2"></div>
+          <div class="cal-day-panel" id="calDayPanel"></div>
+        </div>
+      </div>
+
+      <div class="hack-view" id="hackathonsView">
+        <div class="hack-header">
+          <div class="hack-title display-xl">⚡ London Hackathons <span class="hack-badge" id="hackCount">0 upcoming</span></div>
+          <label class="ctrl-label"><input type="checkbox" id="cbHackUpcoming" checked onchange="renderHackathons()"> Upcoming only</label>
+        </div>
+        <div class="hack-grid" id="hackGrid"></div>
+      </div>
+    </div>
   </div>
 </div>
 
 <div class="toast-wrap" id="toastWrap"></div>
 
-<div class="consent-banner" id="consentBanner" style="display:none">
+<div class="consent-banner card-lux" id="consentBanner" style="display:none">
   <div class="consent-text">
-    <strong>Help OrbitCast AI improve?</strong>
+    <strong>Help OrbitCastAI improve?</strong>
     <span>With your OK, we'll save your CV analysis and which recommendations you click through to, so the matching engine gets better calibrated over time. Nothing is shared or sold, and you can revoke this and delete everything anytime from your browser.</span>
   </div>
   <div class="consent-actions">
     <button class="btn-sm" onclick="setConsent(false)">Decline</button>
-    <button class="ai-submit consent-accept" onclick="setConsent(true)">Accept</button>
+    <button class="btn-lux" style="padding:.625rem 1.25rem;font-size:.8125rem;" onclick="setConsent(true)">Accept</button>
   </div>
 </div>
 
@@ -568,19 +867,16 @@ header{background:var(--surface);border-bottom:1px solid var(--border);border-to
 // ── CONFIG ───────────────────────────────────────────────
 const REDUCE_MOTION = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const CAT_COLOR = {
-  'Intelligence & Security':'var(--ci)',
-  'Defence & Geopolitics':  'var(--cd)',
-  'Cyber & Infosec':        'var(--cc)',
-  'Tech & AI':              'var(--ct)',
-  'Education & Research':   'var(--ce)',
-  'Builder & Tech Community':'var(--cb)',
-  'Business & Networking':  'var(--cn)',
-  'Hackathons':             'var(--ch)',
+  'Intelligence & Security':'var(--ci)','Defence & Geopolitics':'var(--cd)','Cyber & Infosec':'var(--cy)',
+  'Tech & AI':'var(--ct)','Education & Research':'var(--ce)','Builder & Tech Community':'var(--cb)',
+  'Business & Networking':'var(--cn)','Hackathons':'var(--ch)',
 };
 const CAT_VAR = {
-  'Intelligence & Security':'--ci','Defence & Geopolitics':'--cd','Cyber & Infosec':'--cc',
+  'Intelligence & Security':'--ci','Defence & Geopolitics':'--cd','Cyber & Infosec':'--cy',
   'Tech & AI':'--ct','Education & Research':'--ce','Builder & Tech Community':'--cb','Business & Networking':'--cn',
 };
+const ALL_CATEGORIES = ['Defence & Geopolitics','Intelligence & Security','Tech & AI','Cyber & Infosec',
+  'Education & Research','Builder & Tech Community','Business & Networking','Hackathons'];
 
 const JUNK_PATHS=['/cart','/register','/registration','/login','/cookie','/privacy','/terms','/sitemap','/404'];
 function isLegit(e){
@@ -590,7 +886,6 @@ function isLegit(e){
   if(e.title.trim().length<5)return false;
   return true;
 }
-
 
 // ── STATE ────────────────────────────────────────────────
 const NOW=new Date();
@@ -635,24 +930,37 @@ function fmtDateGroup(dt){
 // ── VIEW SWITCHING ───────────────────────────────────────
 function switchView(view){
   currentView=view;
-  document.querySelectorAll('.view-tab').forEach(t=>t.classList.remove('active'));
+  const isAI=view==='ai';
+  document.getElementById('aiView').classList.toggle('show',isAI);
+  document.getElementById('browseShell').classList.toggle('show',!isAI);
   document.getElementById('eventsView').style.display=view==='events'?'':'none';
   document.getElementById('calView').classList.toggle('show',view==='calendar');
   document.getElementById('hackathonsView').classList.toggle('show',view==='hackathons');
-  document.getElementById('aiView').classList.toggle('show',view==='ai');
-  document.getElementById('tabAI').classList.toggle('active',view==='ai');
-  const tabMap={events:'tabEvents',calendar:'tabCalendar',hackathons:'tabHackathons'};
-  if(tabMap[view])document.getElementById(tabMap[view]).classList.add('active');
-  // AI is the front door - Browse chrome (sidebar filters, search, refresh) only
-  // matters once you're actually browsing events, so keep it out of the way.
-  const isBrowse=view!=='ai';
-  document.getElementById('sidebar').style.display=isBrowse?'':'none';
-  document.getElementById('headerBrowseChrome').style.display=isBrowse?'':'none';
-  document.getElementById('layoutRoot').classList.toggle('full-width',!isBrowse);
+
+  document.querySelectorAll('.nav-link').forEach(t=>t.classList.remove('active'));
+  const navMap={ai:'tabAI',events:'tabEvents',calendar:'tabCalendar',hackathons:'tabHackathons'};
+  if(navMap[view])document.getElementById(navMap[view]).classList.add('active');
+  document.querySelectorAll('.view-tab').forEach(t=>t.classList.remove('active'));
+  const vtMap={events:'vtEvents',calendar:'vtCalendar',hackathons:'vtHackathons'};
+  if(vtMap[view])document.getElementById(vtMap[view]).classList.add('active');
+
+  // Browse chrome (search/refresh) only matters once you're actually browsing.
+  // When it IS shown it needs the horizontal room, so the duplicate section
+  // links collapse - the browse shell has its own view-tabs for those, and
+  // leaving both in the bar made them physically overlap.
+  document.getElementById('headerBrowseChrome').style.display=isAI?'none':'flex';
+  document.querySelectorAll('.nav-browse-link').forEach(el=>{el.style.display=isAI?'':'none';});
+  document.getElementById('navCta').style.display=isAI?'':'none';
+  document.getElementById('siteNav').classList.toggle('solid',!isAI);
   if(view==='calendar')renderCal();
   if(view==='hackathons')renderHackathons();
+  if(isAI)window.scrollTo({top:0,behavior:'smooth'});
 }
-function goHome(){switchView('ai');window.scrollTo({top:0,behavior:'smooth'});}
+function goHome(){switchView('ai');}
+function scrollToConsole(){
+  if(currentView!=='ai'){switchView('ai');}
+  setTimeout(()=>{document.getElementById('console').scrollIntoView({behavior:'smooth',block:'start'});},80);
+}
 
 // ── API ──────────────────────────────────────────────────
 async function fetchEvents(){
@@ -674,20 +982,43 @@ async function fetchEvents(){
     renderLastRun();
     render();
     renderSidebar();
-    updateHeroBadge();
+    updateHeroStats();
+    renderCoverage();
     if(currentView==='calendar')renderCal();
   }catch(err){showError('Could not load events: '+err.message);}
   finally{setLoad(false);}
 }
 
-// Live-stat eyebrow pill on the AI hero (purely cosmetic - guarded so a
-// missing element or empty feed never throws).
-function updateHeroBadge(){
-  const el=document.getElementById('heroLiveBadge');
-  if(!el)return;
+// Hero/console live counters - cosmetic only, guarded so an empty feed or a
+// missing element can never throw and take the page down with it.
+function updateHeroStats(){
   const upcoming=allEvents.filter(isUp).length;
-  if(!upcoming){el.lastChild.textContent='Scanning London\'s event feed…';return;}
-  el.lastChild.textContent=upcoming+' upcoming London events tracked right now';
+  const badge=document.getElementById('heroLiveBadge');
+  const stat=document.getElementById('statEvents');
+  const side=document.getElementById('sidePanelCount');
+  if(badge)badge.textContent=upcoming?('Honest event intelligence · '+upcoming+' live London events'):'Honest event intelligence · London';
+  if(stat)stat.textContent=upcoming?upcoming:'—';
+  if(side)side.textContent=upcoming?String(upcoming).padStart(2,'0'):'—';
+}
+function renderCoverage(){
+  const grid=document.getElementById('coverageGrid');
+  if(!grid)return;
+  const counts={};
+  allEvents.forEach(e=>{counts[e.cat]=(counts[e.cat]||0)+1;});
+  grid.innerHTML=ALL_CATEGORIES.map((c,i)=>{
+    const n=counts[c]||0;
+    return '<div class="tile cat"><span class="label-xs">'+pad(i+1)+'</span>'
+      +'<p>'+esc(c)+'</p>'
+      +'<span class="label-xs" style="display:block;margin-top:.5rem">'+(n?n+' live':'none right now')+'</span>'
+      +'<span class="underline"></span></div>';
+  }).join('');
+}
+function renderTicker(){
+  const items=['grounded in evidence','no invented profiles','gaps named out loud',
+               'scores enforced in code','honesty over flattery','two to four rooms'];
+  const row=[...items,...items];
+  const t=document.getElementById('tickerTrack');
+  if(t)t.innerHTML=row.map(s=>'<span class="label-xs">'+esc(s)+'</span>').join('');
 }
 
 async function doRefresh(){
@@ -712,17 +1043,16 @@ async function doRefresh(){
   }catch(err){btn.disabled=false;btn.textContent='↻ Refresh';showError('Refresh failed: '+err.message);}
 }
 
-// ── SIDEBAR (dynamic categories) ────────────────────────
+// ── SIDEBAR ─────────────────────────────────────────────
 function renderSidebar(){
   const catCounts={};
   allEvents.forEach(e=>{catCounts[e.cat]=(catCounts[e.cat]||0)+1;});
-  const allCats=Object.entries(CAT_COLOR);
-  const activeCats=allCats.filter(([cat])=>catCounts[cat]>0);
-  let html='<button class="cat-btn '+(activeCat==='all'?'active':'')+'" onclick="setCat(\'all\',this)"><span class="cat-lead"></span>All events</button>';
-  activeCats.forEach(([cat,col])=>{
+  const activeCats=Object.entries(CAT_COLOR).filter(([cat])=>catCounts[cat]>0);
+  let html='<button class="cat-btn '+(activeCat==='all'?'active':'')+'" onclick="setCat(\'all\',this)">All events</button>';
+  activeCats.forEach(([cat])=>{
     const varName=CAT_VAR[cat]||'--ct';
-    const label=cat.replace('&','&amp;').replace('Intelligence & Security','Intel & Security').replace('Builder & Tech Community','Builder & Tech').replace('Business & Networking','Business');
-    html+='<button class="cat-btn '+(activeCat===cat?'active':'')+'" onclick="setCat(\''+esc(cat)+'\',this)"><span class="cat-lead"></span><span class="cat-dot" style="background:var('+varName+')"></span>'+label+'</button>';
+    const label=cat.replace('Intelligence & Security','Intel & Security').replace('Builder & Tech Community','Builder & Tech').replace('Business & Networking','Business');
+    html+='<button class="cat-btn '+(activeCat===cat?'active':'')+'" onclick="setCat(\''+esc(cat)+'\',this)"><span class="cat-dot" style="background:var('+varName+')"></span>'+esc(label)+'</button>';
   });
   document.getElementById('catList').innerHTML=html;
 }
@@ -775,10 +1105,10 @@ function render(){
   const sortedGroups=Object.values(groups).sort((a,b)=>a.date-b.date);
   let html=sortedGroups.map(g=>{
     const hd=fmtDateGroup(g.date);
-    return '<div class="date-group"><div class="date-hd"><span class="date-hd-lbl">'+esc(hd.label)+'</span>'+(hd.isToday?'<span class="date-hd-today">today</span>':'')+'<span class="date-hd-line"></span></div>'+g.evs.map(evRow).join('')+'</div>';
+    return '<div class="date-group"><div class="date-hd"><span class="label-xs">'+esc(hd.label)+'</span>'+(hd.isToday?'<span class="date-hd-today">today</span>':'')+'<span class="date-hd-line"></span></div>'+g.evs.map(evRow).join('')+'</div>';
   }).join('');
   if(undated.length){
-    html+='<div class="tbd-hd"><span class="date-hd-line"></span><span class="tbd-hd-lbl">Date not confirmed ('+undated.length+')</span><span class="date-hd-line"></span></div>';
+    html+='<div class="tbd-hd"><span class="date-hd-line"></span><span class="label-xs">Date not confirmed ('+undated.length+')</span><span class="date-hd-line"></span></div>';
     html+=undated.map(evRow).join('');
   }
   area.innerHTML=html;
@@ -787,10 +1117,10 @@ function render(){
 function evRow(e){
   const ta=timeAway(e);
   const past=!isUp(e);
-  const catCol=CAT_COLOR[e.cat]||'var(--border2)';
+  const catCol=CAT_COLOR[e.cat]||'var(--hairline)';
   const dt=e.date?fmtShort(e.date):'';
   const tm=e.time?e.time:'All day';
-  return '<div class="ev'+(past?' past':'')+(e.hasDate?'':' ev-tbd')+'" style="--cat:'+catCol+'">'
+  return '<div class="ev'+(past?' past':'')+'" style="--cat:'+catCol+'">'
     +'<div class="ev-time"><span class="soon '+ta.cls+'">'+esc(ta.txt)+'</span>'+(dt?'<span class="dt">'+esc(dt)+'</span>':'')+'<span class="tm">'+esc(tm)+'</span></div>'
     +'<div class="ev-body"><a class="ev-title" href="'+esc(e.url)+'" target="_blank" rel="noopener">'+esc(e.title)+'</a><div class="ev-src">'+esc(e.emoji)+' '+esc(e.src)+' · '+esc(e.cat)+'</div></div>'
     +'<div class="ev-right"><button class="ic-btn" onclick="dlICS(\''+e.id+'\')" title="Add to calendar">📅</button><button class="ic-btn '+(saved.has(e.id)?'saved':'')+'" onclick="toggleStar(\''+e.id+'\',this)" title="Save">☆</button><button class="ic-btn" onclick="openLink(\''+esc(e.url)+'\')" title="View">↗</button></div>'
@@ -801,12 +1131,7 @@ function evRow(e){
 function renderHackathons(){
   const upcomingOnly=document.getElementById('cbHackUpcoming').checked;
   const today=new Date(NOW.getFullYear(),NOW.getMonth(),NOW.getDate());
-  // Sourced live from the scrape feed (server tags any title matching
-  // hackathon/buildathon/hack-night as category 'Hackathons') - no
-  // hand-maintained list to go stale.
-  let hacks=allEvents.filter(e=>e.cat==='Hackathons').map(e=>({
-    title:e.title,date:e.date,url:e.url,desc:e.src,
-  }));
+  let hacks=allEvents.filter(e=>e.cat==='Hackathons').map(e=>({title:e.title,date:e.date,url:e.url,desc:e.src}));
   hacks.sort((a,b)=>{if(!a.date&&!b.date)return 0;if(!a.date)return 1;if(!b.date)return -1;return a.date-b.date;});
   const upcoming=hacks.filter(h=>!h.date||h.date>=today);
   document.getElementById('hackCount').textContent=(upcomingOnly?upcoming.length:hacks.length)+' upcoming';
@@ -817,10 +1142,9 @@ function renderHackathons(){
     const isSoon=h.date&&!isPast&&(h.date-today)/86400000<=3;
     const dateStr=h.date?fmtFull(h.date):'Date TBD';
     const dateISO=h.date?h.date.toISOString().split('T')[0]:'';
-    return '<div class="hack-card'+(isPast?' hack-past':'')+'"><div class="hack-card-top">'
-      +'<div class="hack-card-date">📅 '+esc(dateStr)+(isSoon?'<span class="hack-soon">This week</span>':'')+'</div>'
-      +'<div class="hack-card-title">'+esc(h.title)+'</div>'
-      +'</div><div class="hack-card-body">'
+    return '<div class="hack-card card-lux'+(isPast?' hack-past':'')+'"><div class="hack-card-top">'
+      +'<div class="hack-card-date">'+esc(dateStr)+(isSoon?'<span class="hack-soon">This week</span>':'')+'</div>'
+      +'<div class="hack-card-title">'+esc(h.title)+'</div></div><div class="hack-card-body">'
       +(h.desc?'<div class="hack-card-desc">'+esc(h.desc)+'</div>':'')
       +'<div class="hack-card-actions"><a class="hack-link primary" href="'+esc(h.url)+'" target="_blank" rel="noopener">Register →</a>'
       +'<button class="hack-link" onclick="addHackToCalendar(\''+esc(h.title)+'\',\''+esc(dateISO)+'\',\''+esc(h.url)+'\')">+ Calendar</button></div>'
@@ -829,7 +1153,6 @@ function renderHackathons(){
 }
 function addHackToCalendar(title,dateStr,url){
   if(!dateStr){toast('No date for this event');return;}
-  const dt=parseDate(dateStr);const end=new Date(dt.getTime()+86400000);
   const lines=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//ORBITCAST//EN','BEGIN:VEVENT',
     'UID:hack-'+Date.now()+'@orbitcast','DTSTAMP:'+icsDate(new Date()),
     'DTSTART;VALUE=DATE:'+dateStr.replace(/-/g,''),
@@ -858,26 +1181,28 @@ function filterNew(){
 function openLink(url){if(url&&url!=='#')window.open(url,'_blank','noopener');}
 
 // ── CV HANDLING ──────────────────────────────────────────
-function handleDragOver(e){e.preventDefault();document.getElementById('cvDropZone').classList.add('active');}
-function handleDragLeave(e){document.getElementById('cvDropZone').classList.remove('active');}
+function handleDragOver(e){e.preventDefault();document.getElementById('cvDropZone').classList.add('drag');}
+function handleDragLeave(e){document.getElementById('cvDropZone').classList.remove('drag');}
 function handleCVDrop(e){
-  e.preventDefault();document.getElementById('cvDropZone').classList.remove('active');
+  e.preventDefault();document.getElementById('cvDropZone').classList.remove('drag');
   const file=e.dataTransfer?.files?.[0];if(file)processFile(file);
 }
 function handleCVFile(input){const file=input.files?.[0];if(file)processFile(file);}
 function clearCV(){
   cvFileData=null;
   document.getElementById('cvFileInfo').style.display='none';
-  document.getElementById('cvDropZone').classList.remove('has-file');
   document.getElementById('cvFile').value='';
+  document.getElementById('dzTitle').textContent='Drop your CV';
+  document.getElementById('dzSub').textContent='PDF, DOCX or TXT. Or click anywhere in this panel to browse.';
 }
 function processFile(file){
   if(file.size>5*1024*1024){toast('File too large — max 5MB');return;}
   cvFileData=file;
   document.getElementById('cvFileName').textContent=file.name;
   document.getElementById('cvFileInfo').style.display='flex';
-  document.getElementById('cvDropZone').classList.add('has-file');
-  toast('CV loaded ✓');
+  document.getElementById('dzTitle').textContent=file.name;
+  document.getElementById('dzSub').textContent='Ready. Run the analysis when you are.';
+  toast('CV loaded');
 }
 
 // ── AI FORM ──────────────────────────────────────────────
@@ -885,38 +1210,31 @@ function updateCharCount(){const l=document.getElementById('aiInput').value.leng
 function setAiTip(t){document.getElementById('aiInput').value=t;updateCharCount();}
 
 const AI_PROGRESS_STEPS=[
-  'Reading your background…',
-  'Checking honesty on strengths & gaps…',
-  'Matching against the event catalog…',
-  'Auditing recommendations for generic flattery…',
+  'Reading your background…','Checking honesty on strengths & gaps…',
+  'Matching against the live catalog…','Auditing recommendations for generic flattery…',
 ];
 function aiSkeleton(){
-  return '<div class="ai-skel-row skel" style="width:33%"></div>'
-    +'<div class="ai-skel-row skel" style="width:100%"></div>'
-    +'<div class="ai-skel-row skel" style="width:80%"></div>'
-    +'<div class="ai-skel-card ai-glass"><div class="skel" style="width:25%"></div><div class="skel" style="width:100%"></div><div class="skel" style="width:65%;margin-bottom:0"></div></div>'
-    +'<div class="ai-skel-card ai-glass"><div class="skel" style="width:25%"></div><div class="skel" style="width:100%"></div><div class="skel" style="width:65%;margin-bottom:0"></div></div>';
+  return '<div class="results">'
+    +'<div class="skel-card card-lux scanline"><div class="skel-bar" style="width:25%"></div>'
+    +'<div class="skel-bar" style="width:100%;margin-top:1rem"></div><div class="skel-bar" style="width:66%;margin-top:.5rem"></div></div>'
+    +'<div class="skel-card card-lux scanline"><div class="skel-bar" style="width:25%"></div>'
+    +'<div class="skel-bar" style="width:100%;margin-top:1rem"></div><div class="skel-bar" style="width:66%;margin-top:.5rem"></div></div>'
+    +'</div>';
 }
 function tierFor(score){
-  if(score>=85)return 'Should attend';
-  if(score>=75)return 'Solid match';
-  return 'Fit';
-}
-function ringSvg(fit){
-  const c=170;
-  return '<div class="ai-ring" data-fit="'+fit+'"><svg viewBox="0 0 64 64">'
-    +'<circle class="ring-bg" cx="32" cy="32" r="27"></circle>'
-    +'<circle class="ring-fg" cx="32" cy="32" r="27" stroke-dasharray="'+c+'" stroke-dashoffset="'+c+'"></circle>'
-    +'</svg><b>0</b></div>';
+  if(score>=85)return{label:'Should attend',cls:'lux-fill'};
+  if(score>=75)return{label:'Solid match',cls:'solid'};
+  return{label:'Fit',cls:'fit'};
 }
 async function submitAI(){
   const input=document.getElementById('aiInput').value.trim();
   if(!cvFileData&&input.length<10){toast('Upload a CV or tell us a bit about yourself');return;}
   const btn=document.getElementById('aiSubmitBtn');
   const progress=document.getElementById('aiProgress');
-  document.getElementById('aiSteps').style.display='none';
   document.getElementById('aiResults').innerHTML=aiSkeleton();
-  btn.classList.add('loading');btn.disabled=true;
+  btn.disabled=true;
+  btn.querySelector('.btn-text').style.display='none';
+  btn.querySelector('.btn-loading').style.display='inline-flex';
   progress.style.display='block';progress.style.opacity='1';
   let step=0;
   progress.textContent=AI_PROGRESS_STEPS[0];
@@ -935,7 +1253,9 @@ async function submitAI(){
   }catch(err){toast('Failed: '+err.message);document.getElementById('aiResults').innerHTML='';}
   finally{
     clearInterval(stepTimer);
-    btn.classList.remove('loading');btn.disabled=false;
+    btn.disabled=false;
+    btn.querySelector('.btn-text').style.display='inline-flex';
+    btn.querySelector('.btn-loading').style.display='none';
     progress.style.opacity='0';
     setTimeout(()=>{progress.style.display='none';},250);
   }
@@ -945,89 +1265,88 @@ function renderAIResults(data){
   const container=document.getElementById('aiResults');
 
   if(!data.is_cv){
-    // analysis_failed means the pipeline broke, NOT that the document failed
-    // classification. Never tell someone their valid CV "doesn't look like a
-    // CV" because our API call fell over.
+    // analysis_failed means WE broke, not that the document failed
+    // classification. Never tell someone their valid CV isn't a CV because
+    // our API call fell over.
     const broke=!!data.analysis_failed;
-    container.innerHTML='<div class="ai-empty ai-glass">'
-      +'<div class="ai-empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    container.innerHTML='<div class="results"><div class="empty-card card-lux">'
+      +'<div class="empty-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
       +(broke?'<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>':'<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>')
       +'</svg></div>'
-      +'<h2>'+(broke?'We couldn\'t finish':'This doesn\'t look like a CV')+'</h2>'
-      +'<p>'+esc(data.message_if_not_cv||'Try uploading a CV or resume — PDF, DOCX, or TXT.')+'</p>'
-      +'<p class="ai-empty-foot">'+(broke?'analysis failed &middot; your CV was not rejected':'stopped at classification &middot; no profile generated')+'</p>'
-      +'</div>';
-    container.scrollIntoView({behavior:'smooth'});
+      +'<h2>'+(broke?'We couldn\'t finish':'This isn\'t a CV')+'</h2>'
+      +'<p>'+esc(data.message_if_not_cv||'Every upload is classified before it is matched. Cover letters, reports and stray PDFs stop here — no profile is invented.')+'</p>'
+      +'<p class="label-xs" style="margin-top:1.5rem">'+(broke?'analysis failed · your cv was not rejected':'stopped at gate one · nothing generated')+'</p>'
+      +'</div></div>';
+    container.scrollIntoView({behavior:'smooth',block:'start'});
     return;
   }
 
   const p=data.profile||{};
   const recs=data.recommendations||[];
 
-  let html='<div class="ai-profile ai-glass">'
-    +'<div class="ai-profile-hd"><h2>Your profile'+(p.seniority?' · '+esc(p.seniority):'')+'</h2><span class="ai-mono-tag">grounded in CV evidence</span></div>'
-    +'<div class="ai-profile-grid">'
-    +'<div><div class="ai-profile-lbl"><span class="dot primary"></span>Strong in</div><ul>'
-    +((p.strengths&&p.strengths.length)?p.strengths.map(s=>'<li>'+esc(s)+'</li>').join(''):'<li>No specific strengths surfaced.</li>')
+  let html='<div class="results">';
+
+  // profile
+  html+='<div class="res-card card-lux rise">'
+    +'<div class="res-head"><h2 class="display-xl">Your profile'+(p.seniority?' <span class="serif-accent" style="color:var(--primary)">'+esc(p.seniority)+'</span>':'')+'</h2>'
+    +'<span class="label-xs">grounded in cv evidence</span></div>'
+    +'<div class="profile-grid">'
+    +'<div class="profile-col strong"><div style="display:flex;align-items:center;gap:.5rem"><span class="dot-2 lux-fill"></span><h3>Strong in</h3></div><ul>'
+    +((p.strengths&&p.strengths.length)?p.strengths.map(s=>'<li>'+esc(s)+'</li>').join(''):'<li style="border:none;padding:0;color:var(--muted-foreground)">No specific strengths surfaced.</li>')
     +'</ul></div>'
-    +'<div><div class="ai-profile-lbl"><span class="dot muted"></span>Thin on</div><ul>'
-    +((p.gaps&&p.gaps.length)?p.gaps.map(g=>'<li>'+esc(g)+'</li>').join(''):'<li>No notable gaps detected.</li>')
-    +'</ul></div>'
-    +'</div>'
-    +(p.trajectory?'<div class="ai-trajectory"><span class="ai-mono-tag">Where you\'re headed</span><p>'+esc(p.trajectory)+'</p></div>':'')
+    +'<div class="profile-col thin"><div style="display:flex;align-items:center;gap:.5rem"><span class="dot-2" style="background:color-mix(in oklab,var(--muted-foreground) 40%,transparent)"></span><h3>Thin on</h3></div><ul>'
+    +((p.gaps&&p.gaps.length)?p.gaps.map(g=>'<li>'+esc(g)+'</li>').join(''):'<li style="border:none;padding:0">No notable gaps detected.</li>')
+    +'</ul></div></div>'
+    +(p.trajectory?'<div class="trajectory"><span class="label-xs">where you\'re headed</span><p>'+esc(p.trajectory)+'</p></div>':'')
     +'</div>';
 
+  // matches
+  html+='<div><div class="res-head"><h2 class="display-xl">'
+    +(recs.length?recs.length+' room'+(recs.length===1?'':'s'):'No rooms')
+    +'</h2><span class="label-xs">scored 0&ndash;100 · only 65+ shown</span></div>';
+
   if(!recs.length){
-    // A scoring failure must never be dressed up as an honest "no matches" -
-    // that's the exact opposite of what this product claims to do.
     if(data.scoring_failed){
-      html+='<div class="ai-matches-hd"><h2>Couldn\'t finish</h2><span class="ai-mono-tag">matching step failed</span></div>'
-        +'<div class="ai-empty ai-glass dashed"><p class="strong">The matching step didn\'t complete.</p>'
+      html+='<div class="empty-card card-lux" style="margin-top:1.25rem">'
+        +'<p style="font-size:1.125rem;font-weight:500;letter-spacing:-.02em">The matching step didn\'t complete.</p>'
         +'<p>This is a failure on our side, not a verdict on your CV &mdash; we didn\'t get to score the catalog against it. Your profile above is still valid. Please try again.</p></div>';
     }else{
-      html+='<div class="ai-matches-hd"><h2>No matches</h2><span class="ai-mono-tag">scored 0&ndash;100 &middot; only 65+ shown</span></div>'
-        +'<div class="ai-empty ai-glass dashed"><p class="strong">No strong matches right now.</p>'
-        +'<p>That\'s an honest result, not a failure. Nothing in the current catalog crossed the 65 threshold against your CV. Check back after the next refresh.</p></div>';
+      html+='<div class="empty-card card-lux" style="margin-top:1.25rem">'
+        +'<p style="font-size:1.125rem;font-weight:500;letter-spacing:-.02em">Nothing clears the bar.</p>'
+        +'<p>An honest result, not a failure. Nothing in the live catalog crossed 65 against your record.</p></div>';
     }
-    container.innerHTML=html;
-    container.scrollIntoView({behavior:'smooth'});
-    return;
+  }else{
+    html+='<div style="margin-top:1.25rem;display:grid;gap:.75rem">';
+    recs.forEach((r,i)=>{
+      const fit=r.fit_score||0;
+      const tier=tierFor(fit);
+      const barStyle=fit>=85?'background:var(--gradient-lux)'
+        :(fit>=75?'background:color-mix(in oklab,var(--primary) 70%,transparent)'
+                 :'background:color-mix(in oklab,var(--primary) 40%,transparent)');
+      const extras=[
+        r.why_now?['Why now',r.why_now]:null,
+        r.prepare?['Prepare',r.prepare]:null,
+        r.benefit?['Benefit',r.benefit]:null,
+      ].filter(Boolean);
+      html+='<div class="match card-lux rise" style="animation-delay:'+(i*70)+'ms">'
+        +'<div class="match-top"><div style="min-width:0">'
+        +'<div class="match-meta"><span class="label-xs">'+esc(r.category||'')+'</span>'
+        +'<span class="mono" style="font-size:11px;color:var(--muted-foreground)">'+esc(r.date||'')+'</span></div>'
+        +'<h3>'+esc(r.title||'')+'</h3></div>'
+        +'<div class="match-score"><span class="num lux-text tabular">'+fit+'</span>'
+        +'<p class="label-xs" style="margin-top:.25rem">'+tier.label+'</p></div></div>'
+        +'<div class="meter"><i style="width:'+fit+'%;'+barStyle+'"></i></div>'
+        +'<p class="match-why">'+esc(r.why||'')+'</p>'
+        +(extras.length?'<div class="match-details">'+extras.map(([k,v])=>'<div class="match-detail"><b>'+k+'</b>'+esc(v)+'</div>').join('')+'</div>':'')
+        +(r.url?'<a class="match-link" href="'+esc(r.url)+'" target="_blank" rel="noopener"'+(r.recommendation_id?' onclick="trackView('+JSON.stringify(r.recommendation_id)+')"':'')+'>View event <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></a>':'')
+        +'</div>';
+    });
+    html+='</div>';
   }
+  html+='</div></div>';
 
-  html+='<div class="ai-matches-hd"><h2>'+recs.length+' match'+(recs.length===1?'':'es')+'</h2><span class="ai-mono-tag">scored 0&ndash;100 &middot; only 65+ shown</span></div>';
-  recs.forEach((r,i)=>{
-    const fit=r.fit_score||0;
-    const extras=[
-      r.why_now?['Why now',r.why_now]:null,
-      r.prepare?['Prepare',r.prepare]:null,
-      r.benefit?['Benefit',r.benefit]:null,
-    ].filter(Boolean);
-    html+='<div class="ai-match ai-glass" style="animation-delay:'+(i*70)+'ms">'
-      +'<div class="ai-match-row">'
-      +'<div><div class="ai-match-meta"><span class="ai-chip">'+esc(r.category)+'</span><span class="ai-mono-tag">'+esc(r.date||'')+'</span></div>'
-      +'<h3 class="ai-match-title"><a href="'+esc(r.url)+'" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">'+esc(r.title)+'</a></h3></div>'
-      +'<div>'+ringSvg(fit)+'<p class="ai-match-tier">'+tierFor(fit)+'</p></div>'
-      +'</div>'
-      +'<p class="ai-match-why">'+esc(r.why)+'</p>'
-      +(extras.length?'<div class="ai-match-details">'+extras.map(([k,v])=>'<div class="ai-match-detail"><b>'+k+'</b>'+esc(v)+'</div>').join('')+'</div>':'')
-      +(r.url?'<a class="ai-match-link" href="'+esc(r.url)+'" target="_blank" rel="noopener"'+(r.recommendation_id?' onclick="trackView('+JSON.stringify(r.recommendation_id)+')"':'')+'>View event <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></a>':'')
-      +'</div>';
-  });
   container.innerHTML=html;
-  container.scrollIntoView({behavior:'smooth'});
-  container.querySelectorAll('.ai-ring').forEach(el=>animateRing(el,parseInt(el.dataset.fit,10)));
-}
-
-function animateRing(el,target){
-  if(REDUCE_MOTION){el.querySelector('b').textContent=target;el.querySelector('.ring-fg').style.strokeDashoffset=170-(170*target/100);return;}
-  const b=el.querySelector('b'),fg=el.querySelector('.ring-fg'),c=170,dur=900,start=performance.now();
-  function tick(now){
-    const p=Math.min(1,(now-start)/dur),eased=1-Math.pow(1-p,3),val=Math.round(target*eased);
-    b.textContent=val;
-    fg.style.strokeDashoffset=c-(c*val/100);
-    if(p<1)requestAnimationFrame(tick);
-  }
-  requestAnimationFrame(tick);
+  container.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
 // ── .ICS ────────────────────────────────────────────────
@@ -1076,12 +1395,12 @@ async function initConsent(){
     const res=await fetch('/api/consent');
     const data=await res.json();
     if(data.decision===null)document.getElementById('consentBanner').style.display='flex';
-  }catch{/* if this fails, just don't show the banner - never block the app on it */}
+  }catch{/* never block the app on this */}
 }
 async function setConsent(accepted){
   document.getElementById('consentBanner').style.display='none';
   try{await fetch('/api/consent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accepted})});}catch{}
-  toast(accepted?'Thanks — this helps OrbitCast AI improve over time':'Got it — nothing will be tracked or saved');
+  toast(accepted?'Thanks — this helps OrbitCastAI improve over time':'Got it — nothing will be tracked or saved');
 }
 
 // ── CALENDAR ────────────────────────────────────────────
@@ -1111,13 +1430,12 @@ function renderCal(){
     let cls='cal-cell';
     if(mo!==0)cls+=' other-month';
     if(isT)cls+=' is-today';
-    if(evs.length)cls+=' has-events';
     if(selDay===dk)cls+=' selected';
     let pills='';
-    evs.slice(0,3).forEach(e=>{const col=CAT_COLOR[e.cat]||'var(--border2)';pills+='<div class="cal-ev-pill" style="--pill-c:'+col+'"><a href="'+esc(e.url)+'" target="_blank" rel="noopener" title="'+esc(e.title)+'" onclick="event.stopPropagation()">'+esc(e.title.substring(0,30))+'</a></div>';});
+    evs.slice(0,3).forEach(e=>{const col=CAT_COLOR[e.cat]||'var(--hairline)';pills+='<div class="cal-ev-pill" style="--pill-c:'+col+'"><a href="'+esc(e.url)+'" target="_blank" rel="noopener" title="'+esc(e.title)+'" onclick="event.stopPropagation()">'+esc(e.title.substring(0,30))+'</a></div>';});
     if(evs.length>3)pills+='<span class="cal-more">+'+(evs.length-3)+' more</span>';
     const badge=evs.length>0?'<span class="cal-badge">'+evs.length+'</span>':'';
-    html+='<div class="'+cls+'" onclick="showCalDay(\''+dk+'\')"><span class="cal-num">'+day+'</span>'+badge+'<div class="cal-dots">'+pills+'</div></div>';
+    html+='<div class="'+cls+'" onclick="showCalDay(\''+dk+'\')"><span class="cal-num">'+day+'</span>'+badge+'<div>'+pills+'</div></div>';
   }
   document.getElementById('calGrid2').innerHTML=html;
 }
@@ -1132,7 +1450,7 @@ function showCalDay(dk){
   const mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const dayNames=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const dateObj=new Date(y,m-1,dy);
-  panel.innerHTML='<div class="cdp-header"><div style="display:flex;align-items:center;gap:12px;"><span class="cdp-title">'+dayNames[dateObj.getDay()]+', '+dy+' '+mn[m-1]+' '+y+'</span><span class="cdp-count">'+evs.length+' event'+(evs.length>1?'s':'')+'</span></div><button class="cdp-close" onclick="closeCalPanel()">×</button></div><div class="cdp-events">'+evs.map(e=>{const col=CAT_COLOR[e.cat]||'var(--border2)';const tm=e.time||'All day';return'<div class="cdp-ev" style="--cdp-c:'+col+'"><div class="cdp-ev-info"><div class="cdp-ev-time">'+esc(tm)+'</div><div class="cdp-ev-title">'+esc(e.title)+'</div><div class="cdp-ev-meta"><span>'+esc(e.emoji)+' '+esc(e.src)+'</span><span>'+esc(e.cat)+'</span></div></div><div class="cdp-ev-actions"><a class="cdp-link" onclick="dlICS(\''+e.id+'\')">+ Calendar</a><a class="cdp-link" href="'+esc(e.url)+'" target="_blank" rel="noopener">View →</a></div></div>';}).join('')+'</div>';
+  panel.innerHTML='<div class="cdp-header"><div style="display:flex;align-items:center;gap:.75rem;"><span class="cdp-title">'+dayNames[dateObj.getDay()]+', '+dy+' '+mn[m-1]+' '+y+'</span><span class="cdp-count">'+evs.length+' event'+(evs.length>1?'s':'')+'</span></div><button class="cdp-close" onclick="closeCalPanel()">×</button></div><div class="cdp-events">'+evs.map(e=>{const col=CAT_COLOR[e.cat]||'var(--hairline)';const tm=e.time||'All day';return'<div class="cdp-ev" style="--cdp-c:'+col+'"><div><div class="cdp-ev-time">'+esc(tm)+'</div><div class="cdp-ev-title">'+esc(e.title)+'</div><div class="cdp-ev-meta"><span>'+esc(e.emoji)+' '+esc(e.src)+'</span><span>'+esc(e.cat)+'</span></div></div><div class="cdp-ev-actions"><a class="cdp-link" onclick="dlICS(\''+e.id+'\')">+ Calendar</a><a class="cdp-link" href="'+esc(e.url)+'" target="_blank" rel="noopener">View →</a></div></div>';}).join('')+'</div>';
   panel.classList.add('open');
   setTimeout(()=>panel.scrollIntoView({behavior:'smooth',block:'nearest'}),50);
 }
@@ -1143,32 +1461,36 @@ function calGoToday(){calY=NOW.getFullYear();calM=NOW.getMonth();selDay=null;clo
 
 // ── KEYBOARD ────────────────────────────────────────────
 document.addEventListener('keydown',e=>{
-  if(e.key==='/'&&document.activeElement.tagName!=='INPUT'&&document.activeElement.tagName!=='TEXTAREA'){e.preventDefault();document.getElementById('search').focus();}
-  if(e.key==='Escape'){document.getElementById('search').blur();document.getElementById('search').value='';render();}
-  if((e.key==='c'||e.key==='C')&&document.activeElement.tagName!=='INPUT'&&document.activeElement.tagName!=='TEXTAREA'){switchView(currentView==='calendar'?'events':'calendar');}
+  const typing=document.activeElement&&['INPUT','TEXTAREA'].includes(document.activeElement.tagName);
+  if(e.key==='/'&&!typing&&currentView!=='ai'){e.preventDefault();document.getElementById('search').focus();}
+  if(e.key==='Escape'&&currentView!=='ai'){document.getElementById('search').blur();document.getElementById('search').value='';render();}
+  if((e.key==='c'||e.key==='C')&&!typing&&currentView!=='ai'){switchView(currentView==='calendar'?'events':'calendar');}
 });
 
-// ── AI PANEL: glass spotlight + blob parallax ────────────
-if(!REDUCE_MOTION){
-  document.addEventListener('mousemove',e=>{
-    const view=document.getElementById('aiView');
-    if(!view||!view.classList.contains('show'))return;
-    const card=e.target.closest&&e.target.closest('.ai-glass');
-    if(card){
-      const r=card.getBoundingClientRect();
-      card.style.setProperty('--mx',(e.clientX-r.left)+'px');
-      card.style.setProperty('--my',(e.clientY-r.top)+'px');
-    }
-    const bg=view.querySelector('.ai-bg');
-    if(bg){
-      bg.style.setProperty('--px',((e.clientX/window.innerWidth-.5)*24)+'px');
-      bg.style.setProperty('--py',((e.clientY/window.innerHeight-.5)*24)+'px');
-    }
-  });
+// ── SCROLL REVEAL + STICKY NAV ──────────────────────────
+function initReveal(){
+  const els=document.querySelectorAll('.reveal');
+  if(REDUCE_MOTION||!('IntersectionObserver' in window)){els.forEach(el=>el.dataset.shown='true');return;}
+  const io=new IntersectionObserver(entries=>{
+    entries.forEach(en=>{
+      if(en.isIntersecting){
+        const d=parseInt(en.target.dataset.delay||'0',10);
+        setTimeout(()=>{en.target.dataset.shown='true';},d);
+        io.unobserve(en.target);
+      }
+    });
+  },{rootMargin:'0px 0px -10% 0px',threshold:.05});
+  els.forEach(el=>io.observe(el));
 }
+window.addEventListener('scroll',()=>{
+  const nav=document.getElementById('siteNav');
+  if(currentView==='ai')nav.classList.toggle('solid',window.scrollY>12);
+},{passive:true});
 
 // ── BOOT ────────────────────────────────────────────────
 (function boot(){
+  renderTicker();
+  initReveal();
   document.getElementById('eventsArea').innerHTML=Array.from({length:8}).map(()=>'<div class="skel skel-row"></div>').join('');
   fetchEvents();
   setInterval(fetchEvents,30*60*1000);
