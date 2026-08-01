@@ -8,17 +8,35 @@ import os
 import json
 import threading
 import logging
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, make_response, render_template, request
 from security import init_security
 import ai_engine
+import db
+import rag
 
 log = logging.getLogger("orbitcast.web")
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 6 * 1024 * 1024  # 6MB hard cap on request body
+app.config["MAX_CONTENT_LENGTH"] = 12 * 1024 * 1024  # headroom for admin example-doc uploads
 limiter = init_security(app)
+
+ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
+OC_UID_MAX_AGE = 60 * 60 * 24 * 365 * 2  # 2 years
+
+
+def ensure_oc_uid(resp):
+    """Every write to the database is keyed on this anonymous per-browser id.
+    Mints one on first contact and persists it via cookie on `resp` - never
+    tied to any real identity, just enough to know "same browser asked
+    before" for consent and, later, for the forget-me delete."""
+    oc_uid = request.cookies.get("oc_uid")
+    if not oc_uid:
+        oc_uid = uuid.uuid4().hex
+        resp.set_cookie("oc_uid", oc_uid, max_age=OC_UID_MAX_AGE, httponly=True, samesite="Lax")
+    return oc_uid
 
 SEEN_FILE   = Path("seen_events.json")
 EVENTS_FILE = Path("events_cache.json")
@@ -136,7 +154,9 @@ def api_status():
 
 @app.route("/")
 def dashboard():
-    return render_template("index.html")
+    resp = make_response(render_template("index.html"))
+    ensure_oc_uid(resp)
+    return resp
 
 # ─────────────────────────────────────────────
 # ORBITCAST AI  — Claude-powered CV analysis
@@ -172,6 +192,81 @@ def api_analyze():
         return jsonify({"error": "No events available. Try refreshing first."}), 404
 
     result = ai_engine.analyze_upload(file_text, events)
+
+    resp = jsonify(result)
+    oc_uid = ensure_oc_uid(resp)
+    # Consent is the hinge: no recorded "yes" for this browser means nothing
+    # gets written, and the response the user sees is identical either way.
+    if db.get_consent(oc_uid):
+        try:
+            analysis_id = db.save_analysis(oc_uid, result.get("is_cv", False), file_text, result.get("profile"))
+            recs = result.get("recommendations", [])
+            rec_ids = db.save_recommendations(analysis_id, recs)
+            for rec, rec_id in zip(recs, rec_ids):
+                rec["recommendation_id"] = rec_id
+            resp = jsonify(result)  # rebuild - recs now carry recommendation_id for tracking
+        except Exception as e:
+            log.warning(f"Persisting analysis failed (non-fatal): {e}")
+    return resp
+
+
+# ─────────────────────────────────────────────
+# CONSENT + TRACKING + GDPR
+# ─────────────────────────────────────────────
+
+@app.route("/api/consent", methods=["GET", "POST"])
+def api_consent():
+    if request.method == "GET":
+        oc_uid = request.cookies.get("oc_uid")
+        decision = db.get_consent(oc_uid) if oc_uid else None
+        return jsonify({"decision": decision})
+
+    data = request.get_json(silent=True) or {}
+    accepted = bool(data.get("accepted"))
+    resp = jsonify({"ok": True, "decision": accepted})
+    oc_uid = ensure_oc_uid(resp)
+    db.set_consent(oc_uid, accepted)
+    return resp
+
+@app.route("/api/track", methods=["POST"])
+@limiter.limit("200 per hour")
+def api_track():
+    oc_uid = request.cookies.get("oc_uid")
+    data = request.get_json(silent=True) or {}
+    if oc_uid and db.get_consent(oc_uid):
+        db.log_interaction(oc_uid, data.get("recommendation_id"), data.get("event_type", "view_event"))
+    return jsonify({"ok": True})
+
+@app.route("/api/forget", methods=["POST"])
+@limiter.limit("10 per hour")
+def api_forget():
+    oc_uid = request.cookies.get("oc_uid")
+    if oc_uid:
+        db.forget(oc_uid)
+    resp = jsonify({"ok": True})
+    resp.set_cookie("oc_uid", "", expires=0)
+    return resp
+
+# ─────────────────────────────────────────────
+# ADMIN — RAG example ingestion (mirrors "upload a doc to train it")
+# ─────────────────────────────────────────────
+
+@app.route("/api/admin/ingest", methods=["POST"])
+@limiter.limit("30 per hour")
+def api_admin_ingest():
+    if not ADMIN_SECRET or request.headers.get("X-Admin-Secret") != ADMIN_SECRET:
+        return jsonify({"error": "Unauthorized"}), 401
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return jsonify({"error": "Upload a document (PDF, DOCX, or TXT) of example judgments."}), 400
+    file_bytes = file.read()
+    try:
+        text = ai_engine.extract_text(file_bytes, file.filename)
+    except Exception as e:
+        return jsonify({"error": f"Could not read that file: {e}"}), 400
+    if not text or len(text.strip()) < 20:
+        return jsonify({"error": "That file looks empty."}), 400
+    result = rag.ingest_document(text, file.filename, reviewed_by=request.headers.get("X-Admin-User"))
     return jsonify(result)
 
 

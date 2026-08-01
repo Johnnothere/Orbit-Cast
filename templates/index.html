@@ -332,6 +332,16 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
 .toast{font-family:'IBM Plex Mono',monospace;font-size:.7rem;background:var(--text);color:#fff;padding:9px 14px;border-radius:4px;animation:tIn .2s ease;}
 @keyframes tIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 
+.consent-banner{position:fixed;left:20px;right:20px;bottom:20px;z-index:2500;max-width:640px;margin:0 auto;
+  background:var(--surface);border:1px solid var(--border2);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.12);
+  padding:18px 20px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;animation:tIn .3s ease;}
+.consent-text{flex:1;min-width:220px;display:flex;flex-direction:column;gap:4px;}
+.consent-text strong{font-size:13.5px;color:var(--text);}
+.consent-text span{font-size:12px;color:var(--t2);line-height:1.55;}
+.consent-actions{display:flex;gap:8px;flex-shrink:0;}
+.consent-accept{height:36px;padding:0 18px;font-size:.78rem;margin-left:0;}
+@media(max-width:640px){.consent-banner{flex-direction:column;align-items:stretch;}.consent-actions{justify-content:flex-end;}}
+
 @media(max-width:768px){
   .layout{grid-template-columns:1fr}
   .sidebar{display:none}
@@ -519,6 +529,17 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
 </div>
 
 <div class="toast-wrap" id="toastWrap"></div>
+
+<div class="consent-banner" id="consentBanner" style="display:none">
+  <div class="consent-text">
+    <strong>Help OrbitCast AI improve?</strong>
+    <span>With your OK, we'll save your CV analysis and which recommendations you click through to, so the matching engine gets better calibrated over time. Nothing is shared or sold, and you can revoke this and delete everything anytime from your browser.</span>
+  </div>
+  <div class="consent-actions">
+    <button class="btn-sm" onclick="setConsent(false)">Decline</button>
+    <button class="ai-submit consent-accept" onclick="setConsent(true)">Accept</button>
+  </div>
+</div>
 
 <script>
 // ── CONFIG ───────────────────────────────────────────────
@@ -941,7 +962,7 @@ function renderAIResults(data){
       +'</div>'
       +'<p class="ai-match-why">'+esc(r.why)+'</p>'
       +(extras.length?'<div class="ai-match-details">'+extras.map(([k,v])=>'<div class="ai-match-detail"><b>'+k+'</b>'+esc(v)+'</div>').join('')+'</div>':'')
-      +(r.url?'<a class="ai-match-link" href="'+esc(r.url)+'" target="_blank" rel="noopener">View event <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></a>':'')
+      +(r.url?'<a class="ai-match-link" href="'+esc(r.url)+'" target="_blank" rel="noopener"'+(r.recommendation_id?' onclick="trackView('+JSON.stringify(r.recommendation_id)+')"':'')+'>View event <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></a>':'')
       +'</div>';
   });
   container.innerHTML=html;
@@ -994,6 +1015,26 @@ function hideError(){document.getElementById('errorBanner').style.display='none'
 function renderLastRun(){if(!lastRunTs)return;const m=Math.floor((new Date()-lastRunTs)/60000);const ago=m<1?'just now':m<60?m+'m ago':Math.floor(m/60)+'h ago';document.getElementById('lastRunEl').textContent='Updated '+ago;}
 setInterval(renderLastRun,60000);
 function toast(msg){const w=document.getElementById('toastWrap');const t=document.createElement('div');t.className='toast';t.textContent=msg;w.appendChild(t);setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),320);},2200);}
+
+// ── CONSENT ──────────────────────────────────────────────
+function trackView(recommendationId){
+  try{
+    const body=new Blob([JSON.stringify({recommendation_id:recommendationId,event_type:'view_event'})],{type:'application/json'});
+    navigator.sendBeacon('/api/track',body);
+  }catch{/* best-effort, never block the click */}
+}
+async function initConsent(){
+  try{
+    const res=await fetch('/api/consent');
+    const data=await res.json();
+    if(data.decision===null)document.getElementById('consentBanner').style.display='flex';
+  }catch{/* if this fails, just don't show the banner - never block the app on it */}
+}
+async function setConsent(accepted){
+  document.getElementById('consentBanner').style.display='none';
+  try{await fetch('/api/consent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accepted})});}catch{}
+  toast(accepted?'Thanks — this helps OrbitCast AI improve over time':'Got it — nothing will be tracked or saved');
+}
 
 // ── CALENDAR ────────────────────────────────────────────
 const MN=['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -1083,6 +1124,7 @@ if(!REDUCE_MOTION){
   document.getElementById('eventsArea').innerHTML=Array.from({length:8}).map(()=>'<div class="skel skel-row"></div>').join('');
   fetchEvents();
   setInterval(fetchEvents,30*60*1000);
+  initConsent();
 })();
 </script>
 </body>
