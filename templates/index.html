@@ -139,7 +139,10 @@ header.nav.solid{border-bottom:1px solid color-mix(in oklab,var(--hairline) 70%,
   background:color-mix(in oklab,var(--background) 70%,transparent);backdrop-filter:blur(20px);}
 .nav-inner{margin:0 auto;display:flex;width:100%;max-width:72rem;align-items:center;justify-content:space-between;
   gap:1rem;padding:1rem 1.5rem;min-width:0;}
-.header-browse-chrome{min-width:0;overflow:hidden;}
+/* search/refresh chrome lives in the browse toolbar, not the nav, so the nav
+   can stay byte-identical on every page */
+.header-browse-chrome{display:flex;align-items:center;gap:.75rem;flex:1 1 22rem;min-width:0;margin-left:auto;
+  justify-content:flex-end;}
 .brand{display:flex;min-width:0;align-items:center;gap:.625rem;cursor:pointer;user-select:none;background:none;border:none;}
 .brand-mark{display:flex;height:1.75rem;width:1.75rem;flex-shrink:0;align-items:center;justify-content:center;
   border-radius:.5rem;font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;
@@ -204,23 +207,6 @@ header.nav.solid{border-bottom:1px solid color-mix(in oklab,var(--hairline) 70%,
   transition:background .3s;position:relative;}
 .tile h3{margin-top:1rem;font-size:1.125rem;font-weight:500;letter-spacing:-.02em;}
 .tile p{margin-top:.75rem;font-size:.875rem;line-height:1.7;color:var(--muted-foreground);}
-.tile.cat{padding:2rem 1.5rem;}
-.tile.cat:hover{background:color-mix(in oklab,var(--primary) 4%,var(--background));}
-.tile.cat p{margin-top:.75rem;font-size:.875rem;font-weight:500;line-height:1.35;letter-spacing:-.02em;color:var(--foreground);}
-.tile.cat .underline{margin-top:1.25rem;display:block;height:1px;width:0;background:var(--gradient-lux);transition:width .5s;}
-.tile.cat:hover .underline{width:100%;}
-
-/* protocol */
-.protocol{display:grid;gap:3.5rem;padding-block:6rem;}
-@media(min-width:1024px){.protocol{grid-template-columns:.85fr 1.15fr;}}
-.protocol-aside{position:sticky;top:7rem;height:fit-content;}
-.protocol-aside h2{margin-top:1rem;font-size:2.25rem;}
-@media(min-width:640px){.protocol-aside h2{font-size:3rem;}}
-.step{display:grid;grid-template-columns:auto 1fr;gap:1.5rem;padding:2rem 0;border-top:1px solid var(--hairline);}
-.step:first-child{border-top:none;}
-.step-n{font-family:'IBM Plex Mono',monospace;font-size:.875rem;letter-spacing:.2em;color:var(--primary);padding-top:.25rem;}
-.step h3{font-size:1.25rem;font-weight:500;letter-spacing:-.02em;}
-.step p{margin-top:.5rem;font-size:.875rem;line-height:1.7;color:var(--muted-foreground);}
 
 /* submission console */
 .console-grid{margin-top:2.5rem;display:grid;gap:1rem;}
@@ -335,7 +321,7 @@ footer.site{border-top:1px solid var(--hairline);}
 .cat-dot{width:.375rem;height:.375rem;border-radius:999px;flex-shrink:0;}
 .main{min-width:0;overflow:hidden;}
 .view-tabs{border-bottom:1px solid var(--hairline);padding:.75rem 1.5rem;display:flex;align-items:center;
-  gap:.5rem;overflow-x:auto;}
+  gap:.5rem;flex-wrap:wrap;}
 .view-tab{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.2em;text-transform:uppercase;
   padding:.5rem .875rem;border:none;border-radius:999px;background:none;color:var(--muted-foreground);
   cursor:pointer;transition:all .2s;white-space:nowrap;}
@@ -444,6 +430,7 @@ footer.site{border-top:1px solid var(--hairline);}
 .cal-ev-pill{font-size:10px;padding:.125rem .3125rem;margin-bottom:.125rem;border-radius:.25rem;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis;border-left:2px solid var(--pill-c,var(--hairline));background:var(--secondary);}
 .cal-ev-pill a{color:var(--foreground);text-decoration:none;display:block;overflow:hidden;text-overflow:ellipsis;}
+.pill-time{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--primary);margin-right:.125rem;}
 .cal-more{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted-foreground);}
 .cal-day-panel{max-width:72rem;margin:1rem auto 0;background:var(--card);border:1px solid var(--hairline);
   border-radius:1.5rem;overflow:hidden;max-height:0;opacity:0;transition:all .3s ease;}
@@ -508,7 +495,6 @@ footer.site{border-top:1px solid var(--hairline);}
 @media(max-width:900px){
   .layout{grid-template-columns:1fr;}
   .sidebar{display:none;}
-  .protocol-aside{position:static;}
   .hero{padding-top:7rem;}
 }
 </style>
@@ -524,21 +510,11 @@ footer.site{border-top:1px solid var(--hairline);}
       <span class="brand-name">OrbitCast<span class="lux-text">AI</span></span>
     </button>
 
-    <div class="header-browse-chrome" id="headerBrowseChrome" style="display:none;flex:1;align-items:center;gap:1rem;min-width:0;">
-      <div class="search-wrap">
-        <i class="s-ico">&#x2315;</i>
-        <input id="search" type="text" placeholder="Search events, sources…" oninput="render()">
-      </div>
-      <span class="hd-meta" id="lastRunEl">—</span>
-      <span class="new-badge" id="newBadge" style="display:none" onclick="filterNew()"><span id="newCt">0</span> new</span>
-      <button class="btn-sm" id="refreshBtn" onclick="doRefresh()">↻ Refresh</button>
-    </div>
-
     <div class="nav-right">
       <button class="nav-link" id="tabAI" onclick="switchView('ai')">Home</button>
-      <button class="nav-link nav-browse-link" id="tabEvents" onclick="switchView('events')">Events</button>
-      <button class="nav-link nav-browse-link" id="tabCalendar" onclick="switchView('calendar')">Calendar</button>
-      <button class="nav-link nav-browse-link" id="tabHackathons" onclick="switchView('hackathons')">Hackathons</button>
+      <button class="nav-link" id="tabEvents" onclick="switchView('events')">Events</button>
+      <button class="nav-link" id="tabCalendar" onclick="switchView('calendar')">Calendar</button>
+      <button class="nav-link" id="tabHackathons" onclick="switchView('hackathons')">Hackathons</button>
       <button class="nav-cta sheen" id="navCta" onclick="scrollToConsole()">Begin</button>
     </div>
   </div>
@@ -578,7 +554,7 @@ footer.site{border-top:1px solid var(--hairline);}
         <div class="reveal" data-delay="340">
           <div class="hero-actions">
             <button class="btn-lux sheen" onclick="scrollToConsole()">Submit your CV <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
-            <a class="btn-ghost" href="#protocol">Read the protocol</a>
+            <button class="btn-ghost" onclick="switchView('events')">Browse the catalog</button>
           </div>
         </div>
       </div>
@@ -616,30 +592,6 @@ footer.site{border-top:1px solid var(--hairline);}
           <p>The profile names what is thin as prominently as what is strong &mdash; and which rooms would close it.</p></div>
         <div class="tile"><span class="label-xs">03</span><h3>Enforced, not requested</h3>
           <p>Sub-65 scores and hallucinated event ids never reach the interface. The filter is code.</p></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- PROTOCOL -->
-  <section class="sec" id="protocol" style="padding-block:0;">
-    <div class="protocol">
-      <div class="protocol-aside">
-        <div class="reveal">
-          <span class="label-xs">The protocol</span>
-          <h2 class="display-xl">Four passes,
-            <span class="serif-accent" style="color:color-mix(in oklab,var(--muted-foreground) 60%,transparent)">before a word</span>
-            reaches you</h2>
-        </div>
-      </div>
-      <div>
-        <div class="reveal"><div class="step"><span class="step-n">I</span><div><h3>Classify</h3>
-          <p>Is this actually a CV? Cover letters, decks and stray PDFs are stopped at the door &mdash; no profile is invented for them.</p></div></div></div>
-        <div class="reveal" data-delay="70"><div class="step"><span class="step-n">II</span><div><h3>Read</h3>
-          <p>Roles, scope, timeline, depth. The engine extracts the person, not the keyword cloud.</p></div></div></div>
-        <div class="reveal" data-delay="140"><div class="step"><span class="step-n">III</span><div><h3>Score</h3>
-          <p>Every event is rated 0&ndash;100 against real evidence. 90+ attend, 75+ solid, 65+ imperfect, below that: gone.</p></div></div></div>
-        <div class="reveal" data-delay="210"><div class="step"><span class="step-n">IV</span><div><h3>Return</h3>
-          <p>Two to four rooms with the reasoning attached &mdash; or an honest, empty result.</p></div></div></div>
       </div>
     </div>
   </section>
@@ -731,22 +683,6 @@ footer.site{border-top:1px solid var(--hairline);}
     <div id="aiResults"></div>
   </section>
 
-  <!-- 03 COVERAGE -->
-  <section class="sec">
-    <div class="reveal">
-      <div class="sec-head">
-        <div>
-          <span class="label-xs">03 &mdash; Coverage</span>
-          <h2 class="display-xl">Eight <span class="serif-accent" style="color:var(--primary)">territories</span></h2>
-        </div>
-        <p>A live catalog, continuously refreshed from real London sources, junk filtered before it ever reaches scoring.</p>
-      </div>
-    </div>
-    <div class="reveal" data-delay="90">
-      <div class="tile-grid cols-4" id="coverageGrid"></div>
-    </div>
-  </section>
-
   <!-- CLOSING -->
   <section class="sec" style="padding-bottom:7rem;padding-top:0;">
     <div class="reveal">
@@ -788,6 +724,15 @@ footer.site{border-top:1px solid var(--hairline);}
         <button class="view-tab" onclick="switchView('events')" id="vtEvents">Events</button>
         <button class="view-tab" onclick="switchView('calendar')" id="vtCalendar">Calendar</button>
         <button class="view-tab" onclick="switchView('hackathons')" id="vtHackathons">⚡ Hackathons</button>
+        <div class="header-browse-chrome" id="headerBrowseChrome">
+          <div class="search-wrap">
+            <i class="s-ico">&#x2315;</i>
+            <input id="search" type="text" placeholder="Search events, sources…" oninput="render()">
+          </div>
+          <span class="hd-meta" id="lastRunEl">—</span>
+          <span class="new-badge" id="newBadge" style="display:none" onclick="filterNew()"><span id="newCt">0</span> new</span>
+          <button class="btn-sm" id="refreshBtn" onclick="doRefresh()">↻ Refresh</button>
+        </div>
       </div>
 
       <div id="eventsView" style="display:none">
@@ -875,9 +820,6 @@ const CAT_VAR = {
   'Intelligence & Security':'--ci','Defence & Geopolitics':'--cd','Cyber & Infosec':'--cy',
   'Tech & AI':'--ct','Education & Research':'--ce','Builder & Tech Community':'--cb','Business & Networking':'--cn',
 };
-const ALL_CATEGORIES = ['Defence & Geopolitics','Intelligence & Security','Tech & AI','Cyber & Infosec',
-  'Education & Research','Builder & Tech Community','Business & Networking','Hackathons'];
-
 const JUNK_PATHS=['/cart','/register','/registration','/login','/cookie','/privacy','/terms','/sitemap','/404'];
 function isLegit(e){
   if(!e.title||!e.url)return false;
@@ -904,6 +846,28 @@ function pad(n){return String(n).padStart(2,'0');}
 function parseDate(s){if(!s)return null;if(/^\d{4}-\d{2}-\d{2}$/.test(s))return new Date(s+'T12:00:00');return new Date(s);}
 function isUp(e){if(!e.date)return true;return e.date>=new Date(NOW.getFullYear(),NOW.getMonth(),NOW.getDate());}
 function isToday(e){if(!e.date)return false;return e.date.toDateString()===NOW.toDateString();}
+// Times arrive two different ways. ~40 events carry a clean separate `time`
+// field; ~82 more bury it inside the date string ("Thu 6 August 2026,
+// 11.00-12.00BST", "Wed, Sep 9, 6:00 PM"). Those were all being labelled
+// "All day", which is simply false. Pull the real time out of whichever
+// place it is, and only say "All day" when there genuinely isn't one.
+function eventTime(e){
+  if(e.time)return e.time;
+  const raw=String(e.rawDate||'');
+  // strip the leading ISO date so "2026-08-01" can't be read as a time
+  const body=raw.replace(/^\d{4}-\d{2}-\d{2}[T ]?/,'');
+  const re=/(\d{1,2})[:.](\d{2})\s*(a\.?m\.?|p\.?m\.?)?/gi;
+  const hits=[];
+  let m;
+  while((m=re.exec(body))!==null&&hits.length<2){
+    const h=parseInt(m[1],10),min=m[2];
+    if(h>23||parseInt(min,10)>59)continue;
+    const mer=m[3]?m[3].replace(/\./g,'').toUpperCase():'';
+    hits.push(h+':'+min+(mer?' '+mer:''));
+  }
+  if(!hits.length)return 'All day';
+  return hits.length>1?hits[0]+'–'+hits[1]:hits[0];
+}
 function fmtShort(dt){return dt.toLocaleDateString('en-GB',{day:'numeric',month:'short'});}
 function fmtFull(dt){return dt.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',year:'numeric'});}
 function timeAway(e){
@@ -944,13 +908,9 @@ function switchView(view){
   const vtMap={events:'vtEvents',calendar:'vtCalendar',hackathons:'vtHackathons'};
   if(vtMap[view])document.getElementById(vtMap[view]).classList.add('active');
 
-  // Browse chrome (search/refresh) only matters once you're actually browsing.
-  // When it IS shown it needs the horizontal room, so the duplicate section
-  // links collapse - the browse shell has its own view-tabs for those, and
-  // leaving both in the bar made them physically overlap.
-  document.getElementById('headerBrowseChrome').style.display=isAI?'none':'flex';
-  document.querySelectorAll('.nav-browse-link').forEach(el=>{el.style.display=isAI?'':'none';});
-  document.getElementById('navCta').style.display=isAI?'':'none';
+  // The nav bar stays identical on every page. The search/refresh chrome
+  // lives inside the browse shell's own toolbar rather than the nav, so the
+  // nav never has to reflow or drop links depending on where you are.
   document.getElementById('siteNav').classList.toggle('solid',!isAI);
   if(view==='calendar')renderCal();
   if(view==='hackathons')renderHackathons();
@@ -973,6 +933,7 @@ async function fetchEvents(){
     allEvents=(evData.events||[]).filter(isLegit).map((e,i)=>({
       id:e.id||('ev'+i),cat:e.category||'Tech & AI',src:e.source||'',
       emoji:e.emoji||'',title:e.title||'',date:parseDate(e.date),
+      rawDate:e.date||'',
       url:e.url||'#',hasDate:!!e.date,time:e.time||null,location:e.location||'',
     }));
     sourceSummary=sumData.summary||[];
@@ -983,7 +944,6 @@ async function fetchEvents(){
     render();
     renderSidebar();
     updateHeroStats();
-    renderCoverage();
     if(currentView==='calendar')renderCal();
   }catch(err){showError('Could not load events: '+err.message);}
   finally{setLoad(false);}
@@ -999,19 +959,6 @@ function updateHeroStats(){
   if(badge)badge.textContent=upcoming?('Honest event intelligence · '+upcoming+' live London events'):'Honest event intelligence · London';
   if(stat)stat.textContent=upcoming?upcoming:'—';
   if(side)side.textContent=upcoming?String(upcoming).padStart(2,'0'):'—';
-}
-function renderCoverage(){
-  const grid=document.getElementById('coverageGrid');
-  if(!grid)return;
-  const counts={};
-  allEvents.forEach(e=>{counts[e.cat]=(counts[e.cat]||0)+1;});
-  grid.innerHTML=ALL_CATEGORIES.map((c,i)=>{
-    const n=counts[c]||0;
-    return '<div class="tile cat"><span class="label-xs">'+pad(i+1)+'</span>'
-      +'<p>'+esc(c)+'</p>'
-      +'<span class="label-xs" style="display:block;margin-top:.5rem">'+(n?n+' live':'none right now')+'</span>'
-      +'<span class="underline"></span></div>';
-  }).join('');
 }
 function renderTicker(){
   const items=['grounded in evidence','no invented profiles','gaps named out loud',
@@ -1119,7 +1066,7 @@ function evRow(e){
   const past=!isUp(e);
   const catCol=CAT_COLOR[e.cat]||'var(--hairline)';
   const dt=e.date?fmtShort(e.date):'';
-  const tm=e.time?e.time:'All day';
+  const tm=eventTime(e);
   return '<div class="ev'+(past?' past':'')+'" style="--cat:'+catCol+'">'
     +'<div class="ev-time"><span class="soon '+ta.cls+'">'+esc(ta.txt)+'</span>'+(dt?'<span class="dt">'+esc(dt)+'</span>':'')+'<span class="tm">'+esc(tm)+'</span></div>'
     +'<div class="ev-body"><a class="ev-title" href="'+esc(e.url)+'" target="_blank" rel="noopener">'+esc(e.title)+'</a><div class="ev-src">'+esc(e.emoji)+' '+esc(e.src)+' · '+esc(e.cat)+'</div></div>'
@@ -1131,7 +1078,7 @@ function evRow(e){
 function renderHackathons(){
   const upcomingOnly=document.getElementById('cbHackUpcoming').checked;
   const today=new Date(NOW.getFullYear(),NOW.getMonth(),NOW.getDate());
-  let hacks=allEvents.filter(e=>e.cat==='Hackathons').map(e=>({title:e.title,date:e.date,url:e.url,desc:e.src}));
+  let hacks=allEvents.filter(e=>e.cat==='Hackathons').map(e=>({title:e.title,date:e.date,url:e.url,desc:e.src,time:eventTime(e)}));
   hacks.sort((a,b)=>{if(!a.date&&!b.date)return 0;if(!a.date)return 1;if(!b.date)return -1;return a.date-b.date;});
   const upcoming=hacks.filter(h=>!h.date||h.date>=today);
   document.getElementById('hackCount').textContent=(upcomingOnly?upcoming.length:hacks.length)+' upcoming';
@@ -1143,7 +1090,7 @@ function renderHackathons(){
     const dateStr=h.date?fmtFull(h.date):'Date TBD';
     const dateISO=h.date?h.date.toISOString().split('T')[0]:'';
     return '<div class="hack-card card-lux'+(isPast?' hack-past':'')+'"><div class="hack-card-top">'
-      +'<div class="hack-card-date">'+esc(dateStr)+(isSoon?'<span class="hack-soon">This week</span>':'')+'</div>'
+      +'<div class="hack-card-date">'+esc(dateStr)+(h.time&&h.time!=='All day'?' · '+esc(h.time):'')+(isSoon?'<span class="hack-soon">This week</span>':'')+'</div>'
       +'<div class="hack-card-title">'+esc(h.title)+'</div></div><div class="hack-card-body">'
       +(h.desc?'<div class="hack-card-desc">'+esc(h.desc)+'</div>':'')
       +'<div class="hack-card-actions"><a class="hack-link primary" href="'+esc(h.url)+'" target="_blank" rel="noopener">Register →</a>'
@@ -1220,6 +1167,17 @@ function aiSkeleton(){
     +'<div class="skel-card card-lux scanline"><div class="skel-bar" style="width:25%"></div>'
     +'<div class="skel-bar" style="width:100%;margin-top:1rem"></div><div class="skel-bar" style="width:66%;margin-top:.5rem"></div></div>'
     +'</div>';
+}
+// Recommendations carry the raw scraped date string, which is frequently not
+// presentable ("Thu 6 August 2026, 11.00-12.00BST"). Render it as a clean
+// date + time, falling back to the raw string rather than dropping it.
+function fmtRecDate(raw){
+  if(!raw)return '';
+  const d=parseDate(raw);
+  const tm=eventTime({rawDate:raw});
+  if(!d||isNaN(d.getTime()))return String(raw).slice(0,32);
+  const ds=d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
+  return tm==='All day'?ds:ds+' · '+tm;
 }
 function tierFor(score){
   if(score>=85)return{label:'Should attend',cls:'lux-fill'};
@@ -1331,7 +1289,7 @@ function renderAIResults(data){
       html+='<div class="match card-lux rise" style="animation-delay:'+(i*70)+'ms">'
         +'<div class="match-top"><div style="min-width:0">'
         +'<div class="match-meta"><span class="label-xs">'+esc(r.category||'')+'</span>'
-        +'<span class="mono" style="font-size:11px;color:var(--muted-foreground)">'+esc(r.date||'')+'</span></div>'
+        +'<span class="mono" style="font-size:11px;color:var(--muted-foreground)">'+esc(fmtRecDate(r.date))+'</span></div>'
         +'<h3>'+esc(r.title||'')+'</h3></div>'
         +'<div class="match-score"><span class="num lux-text tabular">'+fit+'</span>'
         +'<p class="label-xs" style="margin-top:.25rem">'+tier.label+'</p></div></div>'
@@ -1432,7 +1390,12 @@ function renderCal(){
     if(isT)cls+=' is-today';
     if(selDay===dk)cls+=' selected';
     let pills='';
-    evs.slice(0,3).forEach(e=>{const col=CAT_COLOR[e.cat]||'var(--hairline)';pills+='<div class="cal-ev-pill" style="--pill-c:'+col+'"><a href="'+esc(e.url)+'" target="_blank" rel="noopener" title="'+esc(e.title)+'" onclick="event.stopPropagation()">'+esc(e.title.substring(0,30))+'</a></div>';});
+    evs.slice(0,3).forEach(e=>{
+      const col=CAT_COLOR[e.cat]||'var(--hairline)';
+      const tm=eventTime(e);
+      const lead=tm==='All day'?'':'<span class="pill-time">'+esc(tm.split('–')[0])+'</span> ';
+      pills+='<div class="cal-ev-pill" style="--pill-c:'+col+'"><a href="'+esc(e.url)+'" target="_blank" rel="noopener" title="'+esc(tm+' · '+e.title)+'" onclick="event.stopPropagation()">'+lead+esc(e.title.substring(0,26))+'</a></div>';
+    });
     if(evs.length>3)pills+='<span class="cal-more">+'+(evs.length-3)+' more</span>';
     const badge=evs.length>0?'<span class="cal-badge">'+evs.length+'</span>':'';
     html+='<div class="'+cls+'" onclick="showCalDay(\''+dk+'\')"><span class="cal-num">'+day+'</span>'+badge+'<div>'+pills+'</div></div>';
@@ -1450,7 +1413,7 @@ function showCalDay(dk){
   const mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const dayNames=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const dateObj=new Date(y,m-1,dy);
-  panel.innerHTML='<div class="cdp-header"><div style="display:flex;align-items:center;gap:.75rem;"><span class="cdp-title">'+dayNames[dateObj.getDay()]+', '+dy+' '+mn[m-1]+' '+y+'</span><span class="cdp-count">'+evs.length+' event'+(evs.length>1?'s':'')+'</span></div><button class="cdp-close" onclick="closeCalPanel()">×</button></div><div class="cdp-events">'+evs.map(e=>{const col=CAT_COLOR[e.cat]||'var(--hairline)';const tm=e.time||'All day';return'<div class="cdp-ev" style="--cdp-c:'+col+'"><div><div class="cdp-ev-time">'+esc(tm)+'</div><div class="cdp-ev-title">'+esc(e.title)+'</div><div class="cdp-ev-meta"><span>'+esc(e.emoji)+' '+esc(e.src)+'</span><span>'+esc(e.cat)+'</span></div></div><div class="cdp-ev-actions"><a class="cdp-link" onclick="dlICS(\''+e.id+'\')">+ Calendar</a><a class="cdp-link" href="'+esc(e.url)+'" target="_blank" rel="noopener">View →</a></div></div>';}).join('')+'</div>';
+  panel.innerHTML='<div class="cdp-header"><div style="display:flex;align-items:center;gap:.75rem;"><span class="cdp-title">'+dayNames[dateObj.getDay()]+', '+dy+' '+mn[m-1]+' '+y+'</span><span class="cdp-count">'+evs.length+' event'+(evs.length>1?'s':'')+'</span></div><button class="cdp-close" onclick="closeCalPanel()">×</button></div><div class="cdp-events">'+evs.map(e=>{const col=CAT_COLOR[e.cat]||'var(--hairline)';const tm=eventTime(e);return'<div class="cdp-ev" style="--cdp-c:'+col+'"><div><div class="cdp-ev-time">'+esc(tm)+'</div><div class="cdp-ev-title">'+esc(e.title)+'</div><div class="cdp-ev-meta"><span>'+esc(e.emoji)+' '+esc(e.src)+'</span><span>'+esc(e.cat)+'</span></div></div><div class="cdp-ev-actions"><a class="cdp-link" onclick="dlICS(\''+e.id+'\')">+ Calendar</a><a class="cdp-link" href="'+esc(e.url)+'" target="_blank" rel="noopener">View →</a></div></div>';}).join('')+'</div>';
   panel.classList.add('open');
   setTimeout(()=>panel.scrollIntoView({behavior:'smooth',block:'nearest'}),50);
 }
