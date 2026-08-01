@@ -161,26 +161,118 @@ def _infer_format(title: str) -> str:
     return "event"
 
 
-def _is_past(date_str: str) -> bool:
-    """Best-effort only: some sources scrape a clean ISO date, others scrape
-    arbitrary text we can't parse. Only exclude an event when we can
-    confidently confirm it's already happened - an unparseable date passes
-    through rather than risk dropping a real future event."""
-    if not date_str:
-        return False
-    try:
-        return date.fromisoformat(str(date_str)[:10]) < date.today()
-    except ValueError:
-        return False
+# Sources scrape wildly inconsistent date strings - the live catalog carries
+# ISO ("2026-08-01"), UK long ("19 August 2026"), US short ("Wed, Sep 9, 6:00
+# PM"), compact ("Aug17"), ranges ("Mon 7 September 2026 - Thu 10 September
+# 2026") and recurring-with-no-date ("Monday at 6:00 PM") all at once. These
+# CANNOT be compared as raw strings: "20 October 2026" sorts before
+# "2026-08-01" lexicographically, so a plain string sort is not a date sort at
+# all. Everything date-related below goes through parse_event_date().
+_MONTHS = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+           "jul": 7, "aug": 8, "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12}
+
+
+def _month_num(token: str):
+    t = token.lower().rstrip(".")
+    return _MONTHS.get(t[:4]) or _MONTHS.get(t[:3])
+
+
+def _infer_year(month: int, day: int, today: date):
+    """No year in the string: pick the nearest sensible one. A date that
+    already passed more than ~60 days ago almost certainly means next year."""
+    for year in (today.year, today.year + 1):
+        try:
+            candidate = date(year, month, day)
+        except ValueError:
+            continue
+        if (today - candidate).days <= 60:
+            return candidate
+    return None
+
+
+def parse_event_date(raw, today: date = None):
+    """Best-effort real date from a scraped date string. Returns None for
+    genuinely dateless/recurring listings ("Monday at 6:00 PM") rather than
+    guessing a date that would then drive sorting and past-event filtering."""
+    if not raw:
+        return None
+    today = today or date.today()
+    s = str(raw).strip()
+    if not s:
+        return None
+
+    m = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})", s)                       # 2026-08-01
+    if m:
+        try:
+            return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            return None
+
+    m = re.search(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?\s+(\d{4})\b", s)
+    if m and _month_num(m.group(2)):                                       # 19 August 2026
+        try:
+            return date(int(m.group(3)), _month_num(m.group(2)), int(m.group(1)))
+        except ValueError:
+            return None
+
+    m = re.match(r"^([A-Za-z]{3,9})\.?\s*(\d{1,2})$", s)                    # Aug17
+    if m and _month_num(m.group(1)):
+        return _infer_year(_month_num(m.group(1)), int(m.group(2)), today)
+
+    m = re.search(r"\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:\s*,?\s*(\d{4}))?", s)
+    if m and _month_num(m.group(1)):                                       # Wed, Sep 9, 6:00 PM
+        month, day = _month_num(m.group(1)), int(m.group(2))
+        if m.group(3):
+            try:
+                return date(int(m.group(3)), month, day)
+            except ValueError:
+                return None
+        return _infer_year(month, day, today)
+
+    return None
+
+
+def _is_past(date_str) -> bool:
+    """Only exclude an event when we can confidently confirm it's already
+    happened - an unparseable/recurring date passes through rather than risk
+    dropping a real future event."""
+    parsed = parse_event_date(date_str)
+    return parsed is not None and parsed < date.today()
+
+
+# Scraper artifacts that are not events at all. Kept deliberately tight -
+# these pollute the catalog and waste scoring slots, but an over-broad filter
+# would silently drop real events, which is the worse failure.
+_JUNK_TITLE_RE = re.compile(
+    r"\b(view our|follow us|subscribe|newsletter|headline sponsor|our sponsors"
+    r"|sponsors \d{4}|linkedin profile|privacy policy|terms of use|cookie)\b",
+    re.I,
+)
+
+
+def _is_junk(title: str) -> bool:
+    t = (title or "").strip()
+    return len(t) < 5 or bool(_JUNK_TITLE_RE.search(t))
 
 
 def build_compact_events(events: list) -> list:
     """Shared shape passed to both scoring and (eventually) the frontend.
+
     Drops events we can confirm already happened - recommending a past event
-    is the kind of thing the honesty rules exist to prevent."""
-    return [
-        {
-            "id": str(e.get("id") or e.get("url") or e.get("title", "")),
+    is the kind of thing the honesty rules exist to prevent - plus obvious
+    scraper artifacts that aren't events, plus duplicates: the same event is
+    routinely scraped from several sources/pages, and every duplicate both
+    wastes a scoring slot and risks the same event being recommended twice."""
+    compact, seen = [], set()
+    for e in events:
+        if _is_past(e.get("date")) or _is_junk(e.get("title", "")):
+            continue
+        event_id = str(e.get("id") or e.get("url") or e.get("title", ""))
+        if event_id in seen:
+            continue
+        seen.add(event_id)
+        compact.append({
+            "id": event_id,
             "title": e.get("title", ""),
             "category": e.get("category", ""),
             "date": e.get("date", ""),
@@ -189,10 +281,45 @@ def build_compact_events(events: list) -> list:
             "emoji": e.get("emoji", ""),
             "format": _infer_format(e.get("title", "")),
             "description": (e.get("description", "") or "")[:400],
-        }
-        for e in events
-        if not _is_past(e.get("date"))
-    ]
+        })
+    return compact
+
+
+def select_catalog(compact_events: list, cap: int = None) -> list:
+    """Pick which events the scorer actually gets to see.
+
+    Soonest-first alone starves niche categories: the live feed is dominated
+    by high-volume community listings, so a straight date cut handed the model
+    ~57 co-working meetups and 2 security events - which is why a security
+    specialist could get zero matches out of a catalog that genuinely had
+    relevant events in it, just slightly further out.
+
+    So: sort each category by real date, then round-robin across categories.
+    Every category keeps its soonest-first bias, but no single high-volume
+    category can crowd the others out of the prompt."""
+    cap = cap or MAX_CATALOG_SIZE
+    if len(compact_events) <= cap:
+        return compact_events
+
+    by_cat = {}
+    for e in compact_events:
+        by_cat.setdefault(e.get("category") or "Uncategorised", []).append(e)
+
+    for events in by_cat.values():
+        # Undated events sort last - they're real, but a confirmed date is a
+        # better bet for "worth your time in the near future".
+        events.sort(key=lambda e: (parse_event_date(e.get("date")) is None,
+                                    parse_event_date(e.get("date")) or date.max))
+
+    selected, queues = [], list(by_cat.values())
+    while len(selected) < cap and any(queues):
+        for q in queues:
+            if not q:
+                continue
+            selected.append(q.pop(0))
+            if len(selected) >= cap:
+                break
+    return selected
 
 
 # --------------------------------------------------------------------------
@@ -353,10 +480,11 @@ def build_scoring_prompt() -> str:
 
 
 def score_events(profile: dict, compact_events: list) -> list:
-    # Soonest first, capped - a smaller, closer-dated candidate pool is both a more
-    # useful set to recommend from and a smaller prompt, which made truncation less
-    # likely in practice (confirmed via stop_reason=max_tokens on the full catalog).
-    catalog = sorted(compact_events, key=lambda e: e.get("date") or "9999-99-99")[:MAX_CATALOG_SIZE]
+    # Capped candidate pool - a smaller set is both more useful to recommend
+    # from and a smaller prompt, which made truncation less likely in practice
+    # (confirmed via stop_reason=max_tokens on the full catalog). select_catalog
+    # keeps it soonest-first *per category* so niche categories aren't starved.
+    catalog = select_catalog(compact_events)
 
     # RAG: pull in past human-reviewed judgments for people similar to this
     # profile, if the retrieval layer is configured. Never lets a retrieval
