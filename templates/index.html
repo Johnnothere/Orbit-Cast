@@ -972,9 +972,17 @@ function renderAIResults(data){
     +'</div>';
 
   if(!recs.length){
-    html+='<div class="ai-matches-hd"><h2>No matches</h2><span class="ai-mono-tag">scored 0&ndash;100 &middot; only 65+ shown</span></div>'
-      +'<div class="ai-empty ai-glass dashed"><p class="strong">No strong matches right now.</p>'
-      +'<p>That\'s an honest result, not a failure. Nothing in the current catalog crossed the 65 threshold against your CV. Check back after the next refresh.</p></div>';
+    // A scoring failure must never be dressed up as an honest "no matches" -
+    // that's the exact opposite of what this product claims to do.
+    if(data.scoring_failed){
+      html+='<div class="ai-matches-hd"><h2>Couldn\'t finish</h2><span class="ai-mono-tag">matching step failed</span></div>'
+        +'<div class="ai-empty ai-glass dashed"><p class="strong">The matching step didn\'t complete.</p>'
+        +'<p>This is a failure on our side, not a verdict on your CV &mdash; we didn\'t get to score the catalog against it. Your profile above is still valid. Please try again.</p></div>';
+    }else{
+      html+='<div class="ai-matches-hd"><h2>No matches</h2><span class="ai-mono-tag">scored 0&ndash;100 &middot; only 65+ shown</span></div>'
+        +'<div class="ai-empty ai-glass dashed"><p class="strong">No strong matches right now.</p>'
+        +'<p>That\'s an honest result, not a failure. Nothing in the current catalog crossed the 65 threshold against your CV. Check back after the next refresh.</p></div>';
+    }
     container.innerHTML=html;
     container.scrollIntoView({behavior:'smooth'});
     return;
