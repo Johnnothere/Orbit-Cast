@@ -24,6 +24,12 @@ from anthropic import Anthropic
 
 log = logging.getLogger("orbitcast.ai")
 
+try:
+    import rag
+except Exception as _exc:  # pragma: no cover - never let RAG availability break core analysis
+    log.warning(f"rag module unavailable, continuing without retrieval: {_exc}")
+    rag = None
+
 MODEL = "claude-sonnet-5"             # current Sonnet model id
 FIT_THRESHOLD = 65                   # only surface events scoring this or higher
 MAX_RECOMMENDATIONS = 4              # honesty rule: 2-4 strong matches, not a list
@@ -289,12 +295,24 @@ def score_events(profile: dict, compact_events: list) -> list:
     # likely in practice (confirmed via stop_reason=max_tokens on the full catalog).
     catalog = sorted(compact_events, key=lambda e: e.get("date") or "9999-99-99")[:MAX_CATALOG_SIZE]
 
+    # RAG: pull in past human-reviewed judgments for people similar to this
+    # profile, if the retrieval layer is configured. Never lets a retrieval
+    # failure sink the analysis - falls straight back to the static few-shot
+    # examples already baked into SCORING_SYSTEM_PROMPT.
+    rag_block = ""
+    if rag is not None:
+        try:
+            rag_block = rag.format_examples_for_prompt(rag.retrieve_examples(profile))
+        except Exception as exc:
+            log.warning(f"RAG retrieval failed, continuing without it: {exc}")
+
     user_content = (
         f"TODAY'S DATE: {date.today().isoformat()}\n\n"
         "PERSON PROFILE (JSON):\n"
         f"{json.dumps(profile, ensure_ascii=False)}\n\n"
         "EVENT CATALOG (JSON array):\n"
         f"{json.dumps(catalog, ensure_ascii=False)}"
+        + (f"\n\n{rag_block}" if rag_block else "")
     )
     data = _call(SCORING_SYSTEM_PROMPT, user_content, max_tokens=4096)
     valid_ids = {e["id"] for e in catalog}
