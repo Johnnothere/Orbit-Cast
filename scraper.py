@@ -382,6 +382,59 @@ def scrape_allevents_science():  return _scrape_allevents("science", "AllEvents 
 def scrape_allevents_startup():  return _scrape_allevents("startup", "AllEvents Startup")
 
 # ─────────────────────────────────────────────
+# CYBER & INFOSEC  (keyword-filtered aggregate)
+# ─────────────────────────────────────────────
+# The dedicated infosec sources (Infosecurity Europe, BISI, Intelligence
+# Forums, OSMOSIS) have all gone dead and return zero events, which left the
+# Cyber & Infosec category completely empty - a security professional could
+# upload a strong CV and legitimately get no relevant matches, because the
+# catalog contained no technical security content at all.
+#
+# The generic listing-site searches DO still work, but their "cyber-security"
+# category slugs are NOT real topical filters - they return property
+# investment webinars and film fairs alongside the real thing. Labelling that
+# raw feed as security content would be worse than having none, so we keep
+# only titles that actually name security work. Precision over volume:
+# a smaller, genuinely-security list beats a padded, mislabelled one.
+_SECURITY_TITLE_RE = re.compile(
+    r"\b(cyber ?security|cybersecurity|infosec|information security"
+    r"|network security|application security|appsec|pen ?test\w*"
+    r"|penetration test\w*|ethical hack\w*|red team\w*|blue team\w*"
+    r"|purple team\w*|threat intel\w*|threat hunt\w*|malware|ransomware"
+    r"|owasp|bsides|b-sides|ciso|soc analyst|vulnerabilit\w*|exploit\w*"
+    r"|zero.?day|zero.?trust|digital forensic\w*|incident response|osint"
+    r"|bug bounty|hack the box|capture the flag|ctf)\b",
+    re.IGNORECASE,
+)
+
+_SECURITY_SEARCHES = [
+    ("eventbrite", "cyber-security"),
+    ("eventbrite", "information-security"),
+    ("eventbrite", "hacking"),
+    ("allevents",  "cyber-security"),
+    ("allevents",  "it"),
+]
+
+
+@source("Cyber & Infosec Search", "🔐", "Cyber & Infosec")
+def scrape_cyber_infosec():
+    events, seen = [], set()
+    for kind, slug in _SECURITY_SEARCHES:
+        try:
+            found = (_scrape_eventbrite(slug, "Cyber & Infosec Search") if kind == "eventbrite"
+                     else _scrape_allevents(slug, "Cyber & Infosec Search"))
+        except Exception as e:
+            log.warning(f"Cyber search {kind}/{slug} failed: {e}")
+            continue
+        for ev in found:
+            title = (ev.get("title") or "").strip()
+            if not _SECURITY_TITLE_RE.search(title) or title.lower() in seen:
+                continue
+            seen.add(title.lower())
+            events.append(ev)
+    return events[:25]
+
+# ─────────────────────────────────────────────
 # LUMA DISCOVER
 # ─────────────────────────────────────────────
 
