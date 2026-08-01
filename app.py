@@ -174,6 +174,11 @@ def api_analyze():
             return jsonify({"error": "File too large (max 5MB)."}), 400
         try:
             file_text = ai_engine.extract_text(file_bytes, file.filename)
+        except ValueError as e:
+            # Raised with an already user-facing message (e.g. no extractable
+            # text found) - surface it instead of a generic one.
+            log.warning(f"CV extraction failed: {e}")
+            return jsonify({"error": str(e)}), 400
         except Exception as e:
             log.warning(f"CV extraction failed: {e}")
             return jsonify({"error": "Could not read that file. Try a PDF, DOCX, or TXT CV."}), 400

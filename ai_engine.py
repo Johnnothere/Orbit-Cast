@@ -89,13 +89,46 @@ def _call(system, user_content, max_tokens=1500):
 # --------------------------------------------------------------------------
 # 1. Text extraction - CVs arrive as PDF / DOCX / TXT
 # --------------------------------------------------------------------------
+# Below this many non-whitespace characters, treat a PDF extraction as having
+# failed rather than pass near-empty text to the classifier - which just
+# produces a confusing "doesn't look like a CV" for what's actually an
+# extraction problem (scanned image, or a font encoding pdfplumber can't map).
+MIN_PDF_TEXT_CHARS = 40
+
+
+def _extract_pdf_pdfplumber(file_bytes: bytes) -> str:
+    import pdfplumber
+    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+        return "\n".join((page.extract_text() or "") for page in pdf.pages)
+
+
+def _extract_pdf_pypdf(file_bytes: bytes) -> str:
+    from pypdf import PdfReader
+    reader = PdfReader(io.BytesIO(file_bytes))
+    return "\n".join((page.extract_text() or "") for page in reader.pages)
+
+
 def extract_text(file_bytes: bytes, filename: str) -> str:
     name = (filename or "").lower()
 
     if name.endswith(".pdf"):
-        import pdfplumber
-        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-            return "\n".join((page.extract_text() or "") for page in pdf.pages)
+        # Two extraction libraries parse PDF internals differently (font
+        # encoding, ToUnicode maps, layout reconstruction) - some CVs that
+        # export cleanly from one tool extract as empty/garbled from the
+        # other. Try both, keep whichever got more actual text.
+        texts = []
+        for extractor in (_extract_pdf_pdfplumber, _extract_pdf_pypdf):
+            try:
+                texts.append(extractor(file_bytes))
+            except Exception as exc:
+                log.warning(f"{extractor.__name__} failed: {exc}")
+        best = max(texts, key=lambda t: len(t.strip())) if texts else ""
+        if len(best.strip()) < MIN_PDF_TEXT_CHARS:
+            raise ValueError(
+                "No readable text found in this PDF - it may be a scanned image "
+                "with no text layer. Try a DOCX/TXT version, or paste your CV as text."
+            )
+        return best
 
     if name.endswith(".docx"):
         import docx
