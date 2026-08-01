@@ -151,56 +151,67 @@ def scrape_rusi():
             events.append({"title": title, "date": date, "url": url, "source": "RUSI"})
     return events
 
-@source("BISI", "🔍", "Intelligence & Security")
-def scrape_bisi():
-    events = []
-    soup = fetch("https://bisi.org.uk/events")
+def _scrape_article_time_list(url, base, source_name, limit=20, keep=None):
+    """Both BISI and Intelligence Forums publish events as <article> blocks
+    with the title in an <h1> and a machine-readable <time datetime="...">.
+
+    The previous scrapers looked for h2/h3/h4 and free-text dates, which is
+    why both silently returned zero for months despite the sites being alive
+    and full of relevant events. The <time datetime> attribute is an exact
+    ISO date, so this needs no date guessing at all.
+
+    `keep` is an optional predicate on the title, used to drop events these
+    orgs run outside London."""
+    events, seen = [], set()
+    soup = fetch(url)
     if not soup:
         return events
     for art in soup.select("article"):
-        h = art.select_one("h2, h3, h4")
+        h = art.select_one("h1, h2, h3")
+        t = art.select_one("time[datetime]")
         a = art.select_one("a[href]")
-        d = art.select_one("time, .date, [class*=date]")
-        title = h.get_text(strip=True) if h else None
-        url   = fix_url(a["href"] if a else "", "https://bisi.org.uk")
-        date  = d.get_text(strip=True) if d else None
-        if is_valid_event(title) and is_valid_url(url):
-            events.append({"title": title, "date": date, "url": url, "source": "BISI"})
-    return events[:20]
+        if not (h and t and a):
+            continue
+        title = h.get_text(" ", strip=True)
+        iso = (t.get("datetime") or "")[:10]
+        link = fix_url(a["href"], base)
+        if not (is_valid_event(title) and is_valid_url(link)):
+            continue
+        if not _is_future(iso):
+            continue
+        if keep and not keep(title):
+            continue
+        if title.lower() in seen:
+            continue
+        seen.add(title.lower())
+        events.append({"title": title, "date": iso, "url": link, "source": source_name})
+    return events[:limit]
+
+
+@source("BISI", "🔍", "Intelligence & Security")
+def scrape_bisi():
+    return _scrape_article_time_list(
+        "https://bisi.org.uk/events", "https://bisi.org.uk", "BISI", limit=20)
+
+
+# Intelligence Forums runs the same forum in several UK cities (IF London, IF
+# Birmingham, IF Leeds, IF Glasgow...). Only London ones - and webinars, which
+# anyone in London can attend - belong in a London aggregator.
+_IF_KEEP = re.compile(r"\b(london|webinar|online|virtual)\b", re.IGNORECASE)
+
 
 @source("Intelligence Forums", "🧠", "Intelligence & Security")
 def scrape_intelligence_forums():
-    events = []
-    soup = fetch("https://www.intelligence-forums.com/upcoming-forums")
-    if not soup:
-        return events
-    for art in soup.select("article"):
-        h = art.select_one("h2, h3, h4")
-        a = art.select_one("a[href]")
-        d = art.select_one("time, .date, [class*=date]")
-        title = h.get_text(strip=True) if h else None
-        url   = fix_url(a["href"] if a else "", "https://www.intelligence-forums.com")
-        date  = d.get_text(strip=True) if d else None
-        if is_valid_event(title) and is_valid_url(url):
-            events.append({"title": title, "date": date, "url": url, "source": "Intelligence Forums"})
-    return events[:15]
+    return _scrape_article_time_list(
+        "https://www.intelligence-forums.com/upcoming-forums",
+        "https://www.intelligence-forums.com", "Intelligence Forums",
+        limit=15, keep=lambda t: bool(_IF_KEEP.search(t)))
 
-@source("OSMOSIS", "🕵️", "Intelligence & Security")
-def scrape_osmosis():
-    events = []
-    soup = fetch("https://osmosiscon.com/")
-    if not soup:
-        return events
-    for el in soup.select("[class*=event], .session, article"):
-        h = el.select_one("h2, h3, h4, .title")
-        a = el.select_one("a[href]")
-        d = el.select_one("time, .date, [class*=date]")
-        title = h.get_text(strip=True) if h else None
-        url   = fix_url(a["href"] if a else "", "https://osmosiscon.com")
-        date  = d.get_text(strip=True) if d else None
-        if is_valid_event(title) and is_valid_url(url):
-            events.append({"title": title, "date": date, "url": url, "source": "OSMOSIS"})
-    return events[:10]
+
+# RETIRED: OSMOSIS. osmosiscon.com now redirects to osmosisassociation.org and
+# the events it lists are US-based ("OSMOSISCon Florida", "OSMOSIS Expo: DC").
+# It's a genuine OSINT organisation, but it isn't running London events, so it
+# has nothing to contribute to a London aggregator.
 
 # ─────────────────────────────────────────────
 # DEFENCE & GEOPOLITICS
@@ -227,19 +238,34 @@ def scrape_ldc():
 
 @source("Infosecurity Europe", "🔐", "Cyber & Infosec")
 def scrape_infosec_europe():
+    """Infosecurity Europe - the major annual infosec expo at ExCeL London.
+
+    The old scraper walked card/article/session elements on an /en-gb.html URL
+    and found nothing. The site publishes the event as a single schema.org
+    JSON-LD block instead, which is both more reliable and gives an exact
+    start date, so we read that."""
     events = []
-    soup = fetch("https://www.infosecurityeurope.com/en-gb.html")
+    soup = fetch("https://www.infosecurityeurope.com/")
     if not soup:
         return events
-    for el in soup.select("[class*=card], article, .session"):
-        h     = el.select_one("h2, h3, h4, .title")
-        a     = el.select_one("a[href]")
-        d     = el.select_one("time, .date, [class*=date]")
-        title = h.get_text(strip=True) if h else None
-        url   = fix_url(a["href"] if a else "", "https://www.infosecurityeurope.com")
-        date  = d.get_text(strip=True) if d else None
-        if is_valid_event(title) and is_valid_url(url):
-            events.append({"title": title, "date": date, "url": url, "source": "Infosecurity Europe"})
+    for script in soup.select('script[type="application/ld+json"]'):
+        try:
+            data = json.loads(script.string or "")
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for item in (data if isinstance(data, list) else [data]):
+            if not isinstance(item, dict) or "Event" not in str(item.get("@type", "")):
+                continue
+            # Title carries SEO branding ("Europe's Leading Cyber Security
+            # Event | Infosecurity Europe") - keep the part that names the event.
+            raw_title = (item.get("name") or "").strip()
+            title = raw_title.split("|")[-1].strip() if "|" in raw_title else raw_title
+            iso = str(item.get("startDate") or "")[:10]
+            if not (title and _is_future(iso)):
+                continue
+            events.append({"title": title, "date": iso,
+                           "url": "https://www.infosecurityeurope.com/",
+                           "source": "Infosecurity Europe", "location": "ExCeL London"})
     return events[:10]
 
 # ─────────────────────────────────────────────
