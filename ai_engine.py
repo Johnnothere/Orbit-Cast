@@ -593,12 +593,29 @@ def analyze_upload(file_text: str, events: list) -> dict:
 
     compact_events = build_compact_events(events)
 
-    try:
-        recs = score_events(data["profile"], compact_events)
-        recs = critique_recommendations(data["profile"], recs)
-    except Exception as exc:
-        log.warning(f"score_events failed, returning profile with no recommendations: {exc}")
+    # Scoring is a model call and can fail transiently (truncated/invalid JSON,
+    # API hiccup). Retry once before giving up - measured ~1 in 4 analyses
+    # returning zero purely from a transient failure, on a profile whose top
+    # match otherwise scored 87-90 consistently.
+    #
+    # And critically: DO NOT let a failure masquerade as "no matches". The
+    # frontend tells the user "that's an honest result, not a failure", which
+    # is a lie if scoring never actually completed. scoring_failed makes the
+    # difference explicit so the UI can say "try again" instead.
+    recs, scoring_failed = [], False
+    for attempt in (1, 2):
+        try:
+            recs = score_events(data["profile"], compact_events)
+            recs = critique_recommendations(data["profile"], recs)
+            scoring_failed = False
+            break
+        except Exception as exc:
+            scoring_failed = True
+            log.warning(f"score_events failed (attempt {attempt}/2): {exc}")
+    if scoring_failed:
+        log.warning("scoring failed twice - reporting as failure, not as 'no matches'")
         recs = []
+    data["scoring_failed"] = scoring_failed
 
     # Enrich with the real event object and cap at the honesty-rule max.
     by_id = {e["id"]: e for e in compact_events}
