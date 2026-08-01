@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ORBITCAST — Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f3f2ef;--surface:#ffffff;--sf2:#f8f7f5;--border:#e5e4e0;--border2:#cfcec9;
+  --text:#18181b;--t2:#6b7280;--t3:#a3a3a3;--blue:#2563eb;
+  --ok:#059669;--warn:#d97706;--dead:#dc2626;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{overflow-x:hidden;}
+body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',sans-serif;min-height:100vh;font-size:14px;line-height:1.5;}
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;height:52px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:100;}
+.logo{font-family:'IBM Plex Mono',monospace;font-weight:500;font-size:.9rem;letter-spacing:.06em;display:flex;align-items:center;gap:8px;}
+.logo-mark{width:7px;height:7px;border-radius:50%;background:var(--blue);}
+.hd-tag{font-family:'IBM Plex Mono',monospace;font-size:.62rem;color:var(--t3);background:var(--sf2);border:1px solid var(--border);padding:2px 8px;border-radius:10px;}
+.hd-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
+
+main{max-width:920px;margin:0 auto;padding:28px 24px 80px;}
+
+/* GATE */
+#gate{max-width:380px;margin:120px auto;padding:28px;background:var(--surface);border:1px solid var(--border);border-radius:10px;text-align:center;}
+#gate h1{font-family:'IBM Plex Mono',monospace;font-size:1rem;margin-bottom:6px;}
+#gate p{color:var(--t2);font-size:.8rem;margin-bottom:18px;}
+#gate input{width:100%;height:38px;border:1px solid var(--border2);border-radius:6px;padding:0 12px;font-family:'IBM Plex Mono',monospace;font-size:.85rem;background:var(--sf2);color:var(--text);outline:none;margin-bottom:10px;}
+#gate input:focus{border-color:var(--blue);}
+#gate button{width:100%;height:38px;border:none;border-radius:6px;background:var(--blue);color:#fff;font-family:'IBM Plex Sans',sans-serif;font-weight:600;font-size:.85rem;cursor:pointer;}
+#gate .err{color:var(--dead);font-size:.75rem;margin-top:10px;min-height:16px;}
+
+/* TABS */
+.tabs{display:flex;gap:6px;margin-bottom:22px;border-bottom:1px solid var(--border);}
+.tab{font-family:'IBM Plex Mono',monospace;font-size:.72rem;padding:10px 16px;background:none;border:none;border-bottom:2px solid transparent;color:var(--t2);cursor:pointer;transition:all .15s;}
+.tab.active{color:var(--blue);border-bottom-color:var(--blue);}
+.tab:hover:not(.active){color:var(--text);}
+.panel{display:none;}
+.panel.active{display:block;}
+
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px;}
+.card h2{font-family:'IBM Plex Mono',monospace;font-size:.82rem;margin-bottom:4px;}
+.card .hint{color:var(--t2);font-size:.76rem;margin-bottom:16px;}
+
+/* DROPZONE */
+.drop{border:2px dashed var(--border2);border-radius:8px;padding:28px;text-align:center;cursor:pointer;transition:all .15s;font-size:.8rem;color:var(--t2);}
+.drop.drag{border-color:var(--blue);background:rgba(37,99,235,.04);color:var(--blue);}
+.drop input{display:none;}
+
+/* FORM */
+label{display:block;font-family:'IBM Plex Mono',monospace;font-size:.66rem;text-transform:uppercase;letter-spacing:.06em;color:var(--t3);margin:14px 0 5px;}
+label:first-child{margin-top:0;}
+textarea,input[type=text],select{width:100%;border:1px solid var(--border2);border-radius:6px;padding:9px 11px;font-family:'IBM Plex Sans',sans-serif;font-size:.83rem;background:var(--sf2);color:var(--text);outline:none;resize:vertical;}
+textarea:focus,input:focus,select:focus{border-color:var(--blue);}
+.rules-box{font-family:'IBM Plex Mono',monospace;font-size:.76rem;min-height:360px;line-height:1.6;}
+
+.btn{font-family:'IBM Plex Sans',sans-serif;font-weight:600;font-size:.8rem;padding:9px 18px;border:none;border-radius:6px;cursor:pointer;background:var(--blue);color:#fff;}
+.btn.secondary{background:var(--sf2);color:var(--t2);border:1px solid var(--border2);}
+.btn.danger{background:#fff;color:var(--dead);border:1px solid rgba(220,38,38,.3);}
+.btn:disabled{opacity:.5;cursor:not-allowed;}
+.row-btns{display:flex;gap:10px;margin-top:16px;}
+.msg{font-family:'IBM Plex Mono',monospace;font-size:.72rem;margin-top:12px;min-height:16px;}
+.msg.ok{color:var(--ok);}
+.msg.err{color:var(--dead);}
+
+/* EXAMPLES LIST */
+.ex-row{border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:10px;}
+.ex-top{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+.badge{font-family:'IBM Plex Mono',monospace;font-size:.62rem;padding:2px 9px;border-radius:10px;text-transform:uppercase;letter-spacing:.04em;}
+.badge.good{background:rgba(5,150,105,.1);color:var(--ok);}
+.badge.bad{background:rgba(220,38,38,.1);color:var(--dead);}
+.badge.borderline{background:rgba(217,119,6,.1);color:var(--warn);}
+.ex-src{font-family:'IBM Plex Mono',monospace;font-size:.62rem;color:var(--t3);margin-left:auto;}
+.ex-body p{font-size:.8rem;margin-bottom:4px;}
+.ex-body b{color:var(--t2);font-weight:600;}
+.ex-del{font-family:'IBM Plex Mono',monospace;font-size:.65rem;color:var(--dead);background:none;border:none;cursor:pointer;padding:2px 6px;}
+.empty{color:var(--t3);font-size:.8rem;text-align:center;padding:30px 0;}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <h1>ORBITCAST — Admin</h1>
+  <p>Enter the admin secret to unlock the dashboard.</p>
+  <input id="secret-input" type="password" placeholder="ADMIN_SECRET" autocomplete="off">
+  <button id="unlock-btn">Unlock</button>
+  <div class="err" id="gate-err"></div>
+</div>
+
+<div id="app" style="display:none">
+  <header>
+    <div class="logo"><span class="logo-mark"></span>ORBITCAST</div>
+    <span class="hd-tag">admin</span>
+    <div class="hd-right">
+      <button class="btn secondary" id="lock-btn" style="font-size:.68rem;padding:6px 12px;">Lock</button>
+    </div>
+  </header>
+  <main>
+    <div class="tabs">
+      <button class="tab active" data-tab="upload">Upload Dataset</button>
+      <button class="tab" data-tab="examples">Examples</button>
+      <button class="tab" data-tab="rules">Scoring Rules</button>
+    </div>
+
+    <!-- UPLOAD -->
+    <div class="panel active" id="panel-upload">
+      <div class="card">
+        <h2>Upload a dataset document</h2>
+        <p class="hint">A PDF, DOCX, or TXT of CV-to-event judgments (even messy notes) - Claude structures it into examples automatically.</p>
+        <label class="drop" id="dropzone">
+          <input type="file" id="file-input" accept=".pdf,.docx,.txt">
+          <span id="drop-label">Drag a file here, or click to choose</span>
+        </label>
+        <div class="msg" id="upload-msg"></div>
+      </div>
+    </div>
+
+    <!-- EXAMPLES -->
+    <div class="panel" id="panel-examples">
+      <div class="card">
+        <h2>Add a single example manually</h2>
+        <p class="hint">No document needed - describe one person and how an event judgment played out.</p>
+        <label>Person / profile summary</label>
+        <textarea id="ex-summary" rows="2" placeholder="e.g. Backend engineer, 4 years, recently shipped two LLM fine-tuning projects"></textarea>
+        <label>Event context</label>
+        <textarea id="ex-context" rows="2" placeholder="e.g. Weekend hackathon on agentic tool-use"></textarea>
+        <label>Judgment</label>
+        <select id="ex-judgment">
+          <option value="good">good</option>
+          <option value="bad">bad</option>
+          <option value="borderline">borderline</option>
+        </select>
+        <label>Reasoning (the "ideal why")</label>
+        <textarea id="ex-why" rows="2" placeholder="Specific, evidence-tied reasoning for this judgment"></textarea>
+        <div class="row-btns"><button class="btn" id="add-ex-btn">Add example</button></div>
+        <div class="msg" id="add-ex-msg"></div>
+      </div>
+
+      <div class="card">
+        <h2>Stored examples</h2>
+        <p class="hint">The RAG knowledge base. Delete anything that's wrong or low quality.</p>
+        <div id="examples-list"></div>
+      </div>
+    </div>
+
+    <!-- RULES -->
+    <div class="panel" id="panel-rules">
+      <div class="card">
+        <h2>Scoring rules</h2>
+        <p class="hint">This is the guidance Claude follows when judging fit. The JSON output format is fixed elsewhere and can't be broken by editing this.</p>
+        <span id="rules-status" class="hd-tag" style="display:inline-block;margin-bottom:10px;"></span>
+        <textarea id="rules-box" class="rules-box"></textarea>
+        <div class="row-btns">
+          <button class="btn" id="save-rules-btn">Save</button>
+          <button class="btn secondary" id="reset-rules-btn">Reset to default</button>
+        </div>
+        <div class="msg" id="rules-msg"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const SECRET_KEY = "oc_admin_secret";
+let SECRET = sessionStorage.getItem(SECRET_KEY) || "";
+
+function api(path, opts = {}) {
+  opts.headers = Object.assign({ "X-Admin-Secret": SECRET }, opts.headers || {});
+  return fetch(path, opts).then(async r => {
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || `Request failed (${r.status})`);
+    return data;
+  });
+}
+
+async function tryUnlock(secret) {
+  SECRET = secret;
+  await api("/api/admin/config"); // throws on 401
+  sessionStorage.setItem(SECRET_KEY, secret);
+  document.getElementById("gate").style.display = "none";
+  document.getElementById("app").style.display = "block";
+  loadExamples();
+  loadRules();
+}
+
+document.getElementById("unlock-btn").onclick = async () => {
+  const val = document.getElementById("secret-input").value.trim();
+  const err = document.getElementById("gate-err");
+  err.textContent = "";
+  if (!val) return;
+  try {
+    await tryUnlock(val);
+  } catch (e) {
+    err.textContent = "Wrong secret, or ADMIN_SECRET isn't set on the server.";
+  }
+};
+document.getElementById("secret-input").addEventListener("keydown", e => {
+  if (e.key === "Enter") document.getElementById("unlock-btn").click();
+});
+document.getElementById("lock-btn").onclick = () => {
+  sessionStorage.removeItem(SECRET_KEY);
+  location.reload();
+};
+
+if (SECRET) {
+  tryUnlock(SECRET).catch(() => { sessionStorage.removeItem(SECRET_KEY); });
+}
+
+// TABS
+document.querySelectorAll(".tab").forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("panel-" + btn.dataset.tab).classList.add("active");
+  };
+});
+
+// UPLOAD
+const dropzone = document.getElementById("dropzone");
+const fileInput = document.getElementById("file-input");
+const uploadMsg = document.getElementById("upload-msg");
+
+["dragover", "dragenter"].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.add("drag"); }));
+["dragleave", "drop"].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove("drag"); }));
+dropzone.addEventListener("drop", e => {
+  if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener("change", () => {
+  if (fileInput.files.length) uploadFile(fileInput.files[0]);
+});
+
+async function uploadFile(file) {
+  uploadMsg.className = "msg";
+  uploadMsg.textContent = `Uploading ${file.name}...`;
+  const form = new FormData();
+  form.append("file", file);
+  try {
+    const data = await api("/api/admin/ingest", { method: "POST", body: form });
+    uploadMsg.className = "msg ok";
+    uploadMsg.textContent = `Found ${data.found}, stored ${data.stored}, skipped ${data.skipped}.`;
+    loadExamples();
+  } catch (e) {
+    uploadMsg.className = "msg err";
+    uploadMsg.textContent = e.message;
+  }
+}
+
+// EXAMPLES
+async function loadExamples() {
+  const list = document.getElementById("examples-list");
+  list.innerHTML = `<div class="empty">Loading…</div>`;
+  try {
+    const data = await api("/api/admin/examples");
+    if (!data.examples.length) {
+      list.innerHTML = `<div class="empty">No examples yet.</div>`;
+      return;
+    }
+    list.innerHTML = data.examples.map(ex => `
+      <div class="ex-row" data-id="${ex.id}">
+        <div class="ex-top">
+          <span class="badge ${ex.judgment}">${ex.judgment}</span>
+          <span class="ex-src">${escapeHtml(ex.source || "manual")}</span>
+          <button class="ex-del" data-id="${ex.id}">Delete</button>
+        </div>
+        <div class="ex-body">
+          <p><b>Person:</b> ${escapeHtml(ex.profile_summary || "")}</p>
+          ${ex.event_context ? `<p><b>Event:</b> ${escapeHtml(ex.event_context)}</p>` : ""}
+          ${ex.ideal_why ? `<p><b>Why:</b> ${escapeHtml(ex.ideal_why)}</p>` : ""}
+        </div>
+      </div>
+    `).join("");
+    list.querySelectorAll(".ex-del").forEach(btn => {
+      btn.onclick = async () => {
+        if (!confirm("Delete this example?")) return;
+        await api(`/api/admin/examples/${btn.dataset.id}`, { method: "DELETE" });
+        loadExamples();
+      };
+    });
+  } catch (e) {
+    list.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+document.getElementById("add-ex-btn").onclick = async () => {
+  const msg = document.getElementById("add-ex-msg");
+  const payload = {
+    profile_summary: document.getElementById("ex-summary").value.trim(),
+    event_context: document.getElementById("ex-context").value.trim(),
+    judgment: document.getElementById("ex-judgment").value,
+    ideal_why: document.getElementById("ex-why").value.trim(),
+  };
+  msg.className = "msg";
+  msg.textContent = "Saving...";
+  try {
+    await api("/api/admin/examples", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    msg.className = "msg ok";
+    msg.textContent = "Added.";
+    document.getElementById("ex-summary").value = "";
+    document.getElementById("ex-context").value = "";
+    document.getElementById("ex-why").value = "";
+    loadExamples();
+  } catch (e) {
+    msg.className = "msg err";
+    msg.textContent = e.message;
+  }
+};
+
+// RULES
+async function loadRules() {
+  const box = document.getElementById("rules-box");
+  const status = document.getElementById("rules-status");
+  try {
+    const data = await api("/api/admin/config");
+    box.value = data.rules;
+    status.textContent = data.is_custom ? "custom (overriding default)" : "default";
+  } catch (e) {
+    status.textContent = "error loading";
+  }
+}
+
+document.getElementById("save-rules-btn").onclick = async () => {
+  const msg = document.getElementById("rules-msg");
+  msg.className = "msg";
+  msg.textContent = "Saving...";
+  try {
+    const data = await api("/api/admin/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rules: document.getElementById("rules-box").value }),
+    });
+    msg.className = "msg ok";
+    msg.textContent = "Saved - live on the next analysis.";
+    document.getElementById("rules-status").textContent = data.is_custom ? "custom (overriding default)" : "default";
+  } catch (e) {
+    msg.className = "msg err";
+    msg.textContent = e.message;
+  }
+};
+
+document.getElementById("reset-rules-btn").onclick = async () => {
+  if (!confirm("Reset scoring rules to the built-in default?")) return;
+  const msg = document.getElementById("rules-msg");
+  try {
+    const data = await api("/api/admin/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reset: true }),
+    });
+    document.getElementById("rules-box").value = data.rules;
+    document.getElementById("rules-status").textContent = "default";
+    msg.className = "msg ok";
+    msg.textContent = "Reset to default.";
+  } catch (e) {
+    msg.className = "msg err";
+    msg.textContent = e.message;
+  }
+};
+
+function escapeHtml(s) {
+  return (s || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+</script>
+</body>
+</html>

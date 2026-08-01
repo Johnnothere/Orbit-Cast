@@ -251,10 +251,22 @@ def api_forget():
 # ADMIN — RAG example ingestion (mirrors "upload a doc to train it")
 # ─────────────────────────────────────────────
 
+def _admin_authorized() -> bool:
+    return bool(ADMIN_SECRET) and request.headers.get("X-Admin-Secret") == ADMIN_SECRET
+
+
+@app.route("/admin")
+def admin_dashboard():
+    # The page itself carries no secret data - it just prompts for the admin
+    # secret client-side and attaches it as a header on every API call below.
+    # Every route that actually reads/writes anything re-checks that header.
+    return render_template("admin.html")
+
+
 @app.route("/api/admin/ingest", methods=["POST"])
 @limiter.limit("30 per hour")
 def api_admin_ingest():
-    if not ADMIN_SECRET or request.headers.get("X-Admin-Secret") != ADMIN_SECRET:
+    if not _admin_authorized():
         return jsonify({"error": "Unauthorized"}), 401
     file = request.files.get("file")
     if not file or not file.filename:
@@ -268,6 +280,77 @@ def api_admin_ingest():
         return jsonify({"error": "That file looks empty."}), 400
     result = rag.ingest_document(text, file.filename, reviewed_by=request.headers.get("X-Admin-User"))
     return jsonify(result)
+
+
+@app.route("/api/admin/examples", methods=["GET"])
+@limiter.limit("120 per hour")
+def api_admin_list_examples():
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    return jsonify({"examples": db.list_labeled_examples()})
+
+
+@app.route("/api/admin/examples", methods=["POST"])
+@limiter.limit("60 per hour")
+def api_admin_add_example():
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    profile_summary = (data.get("profile_summary") or "").strip()
+    event_context = (data.get("event_context") or "").strip()
+    judgment = (data.get("judgment") or "").strip()
+    ideal_why = (data.get("ideal_why") or "").strip()
+    if not profile_summary or judgment not in ("good", "bad", "borderline"):
+        return jsonify({"error": "profile_summary and a valid judgment (good/bad/borderline) are required."}), 400
+    embedding = rag.embed_text(f"{profile_summary}\n{event_context}")
+    if embedding is None:
+        return jsonify({"error": "Could not embed this example - is VOYAGE_API_KEY configured?"}), 503
+    example_id = db.insert_labeled_example(
+        source="manual", profile_summary=profile_summary, profile_json=None,
+        event_context=event_context, judgment=judgment, ideal_why=ideal_why,
+        embedding=embedding, reviewed_by=request.headers.get("X-Admin-User"),
+    )
+    if example_id is None:
+        return jsonify({"error": "Could not save that example."}), 500
+    return jsonify({"id": example_id})
+
+
+@app.route("/api/admin/examples/<int:example_id>", methods=["DELETE"])
+@limiter.limit("60 per hour")
+def api_admin_delete_example(example_id):
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    ok = db.delete_labeled_example(example_id)
+    return jsonify({"ok": ok}), (200 if ok else 404)
+
+
+@app.route("/api/admin/config", methods=["GET"])
+@limiter.limit("120 per hour")
+def api_admin_get_config():
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    custom = db.get_config(ai_engine.CONFIG_KEY_SCORING_RULES)
+    return jsonify({
+        "rules": custom if custom else ai_engine.DEFAULT_SCORING_RULES,
+        "is_custom": bool(custom),
+        "default_rules": ai_engine.DEFAULT_SCORING_RULES,
+    })
+
+
+@app.route("/api/admin/config", methods=["POST"])
+@limiter.limit("30 per hour")
+def api_admin_set_config():
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    if data.get("reset"):
+        db.delete_config(ai_engine.CONFIG_KEY_SCORING_RULES)
+        return jsonify({"ok": True, "rules": ai_engine.DEFAULT_SCORING_RULES, "is_custom": False})
+    rules = (data.get("rules") or "").strip()
+    if not rules:
+        return jsonify({"error": "rules text cannot be empty - use reset instead to clear an override."}), 400
+    db.set_config(ai_engine.CONFIG_KEY_SCORING_RULES, rules)
+    return jsonify({"ok": True, "rules": rules, "is_custom": True})
 
 
 # ─────────────────────────────────────────────

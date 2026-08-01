@@ -234,11 +234,19 @@ def extract_profile(file_text: str) -> dict:
 # --------------------------------------------------------------------------
 # 4. PASS 2 - match the profile to events, honestly, with why-now reasoning
 # --------------------------------------------------------------------------
-SCORING_SYSTEM_PROMPT = """You are OrbitCast's event-matching engine. You receive an \
+# The scoring prompt is split in three so the admin dashboard can override the
+# middle section (the actual judgment guidance) without touching the parts
+# that keep the app itself working: the role framing and the JSON schema.
+# Swapping in bad "rules" text can make recommendations worse, but it can't
+# break parsing - build_scoring_prompt() always re-wraps whatever rules text
+# is active in the same fixed header/footer.
+SCORING_HEADER = """You are OrbitCast's event-matching engine. You receive an \
 already-built profile of a person (from a separate reading step) and a catalog of \
 real events. Your ONE job: score honest fit and explain it.
 
-HONESTY RULES - this is the entire point of the product:
+"""
+
+DEFAULT_SCORING_RULES = """HONESTY RULES - this is the entire point of the product:
 - Be selective. Most events will NOT be a strong fit. Return AT MOST 4 \
   recommendations - 2-4 strong ones is correct and expected, not 15. If nothing fits \
   well, return an empty list.
@@ -270,7 +278,9 @@ started a data analytics course - this is a reasonable stretch event, not a clea
 fit. Worth attending, but not central to where they're headed."
 
 Keep every text field to ONE tight sentence, two at most. Specific and evidence-tied \
-beats long - a sharp one-sentence "why" is worth more than a paragraph.
+beats long - a sharp one-sentence "why" is worth more than a paragraph."""
+
+SCORING_FOOTER = """
 
 Return ONLY valid JSON - no markdown, no backticks, no preamble - in EXACTLY this schema:
 {
@@ -288,6 +298,26 @@ Return ONLY valid JSON - no markdown, no backticks, no preamble - in EXACTLY thi
   ]
 }"""
 
+CONFIG_KEY_SCORING_RULES = "scoring_rules"
+
+
+def get_scoring_rules() -> str:
+    """The active rules text: an admin override from ai_config if one exists,
+    otherwise the built-in default. Never raises - a DB hiccup just means the
+    default rules apply, same as before this override existed."""
+    try:
+        import db
+        custom = db.get_config(CONFIG_KEY_SCORING_RULES)
+        if custom and custom.strip():
+            return custom
+    except Exception as exc:
+        log.warning(f"get_scoring_rules: falling back to default ({exc})")
+    return DEFAULT_SCORING_RULES
+
+
+def build_scoring_prompt() -> str:
+    return SCORING_HEADER + get_scoring_rules() + SCORING_FOOTER
+
 
 def score_events(profile: dict, compact_events: list) -> list:
     # Soonest first, capped - a smaller, closer-dated candidate pool is both a more
@@ -298,7 +328,7 @@ def score_events(profile: dict, compact_events: list) -> list:
     # RAG: pull in past human-reviewed judgments for people similar to this
     # profile, if the retrieval layer is configured. Never lets a retrieval
     # failure sink the analysis - falls straight back to the static few-shot
-    # examples already baked into SCORING_SYSTEM_PROMPT.
+    # examples already baked into the active scoring rules block.
     rag_block = ""
     if rag is not None:
         try:
@@ -314,7 +344,7 @@ def score_events(profile: dict, compact_events: list) -> list:
         f"{json.dumps(catalog, ensure_ascii=False)}"
         + (f"\n\n{rag_block}" if rag_block else "")
     )
-    data = _call(SCORING_SYSTEM_PROMPT, user_content, max_tokens=4096)
+    data = _call(build_scoring_prompt(), user_content, max_tokens=4096)
     valid_ids = {e["id"] for e in catalog}
     recs = [
         r for r in data.get("recommendations", [])
