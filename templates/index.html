@@ -152,8 +152,9 @@ header.nav.solid{border-bottom:1px solid color-mix(in oklab,var(--hairline) 70%,
 .nav-link{background:none;border:none;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px;
   text-transform:uppercase;letter-spacing:.2em;color:var(--muted-foreground);transition:color .2s;padding:.25rem;}
 .nav-link:hover,.nav-link.active{color:var(--foreground);}
-.nav-cta{border:none;cursor:pointer;border-radius:999px;padding:.5rem 1rem;font-size:12px;font-weight:600;
-  letter-spacing:-.01em;color:var(--primary-foreground);background:var(--gradient-lux);transition:transform .3s;}
+.nav-cta{border:none;cursor:pointer;border-radius:999px;padding:.5rem 1.125rem;font-family:'IBM Plex Mono',monospace;
+  font-size:10px;font-weight:600;letter-spacing:.16em;color:var(--primary-foreground);
+  background:var(--gradient-lux);transition:transform .3s;}
 .nav-cta:hover{transform:translateY(-2px);}
 
 /* ============================================================
@@ -305,8 +306,20 @@ footer.site{border-top:1px solid var(--hairline);}
    (kept information-dense on purpose - a live listings feed,
     not a marketing surface - restyled into the new system)
    ============================================================ */
-.browse-shell{display:none;padding-top:4.5rem;}
+.browse-shell{display:none;padding-top:4.5rem;position:relative;}
 .browse-shell.show{display:block;}
+/* faint atmosphere so the browse views read as the same product as the
+   landing page rather than a bare admin table */
+.browse-atmos{position:absolute;inset:0 0 auto 0;height:22rem;pointer-events:none;z-index:0;overflow:hidden;}
+.browse-atmos .aurora{opacity:.42;}
+.layout,.view-tabs{position:relative;z-index:1;}
+
+/* shared section header, same eyebrow + display type as the landing page */
+.browse-head{padding:1.75rem 1.5rem .25rem;}
+.browse-head h2{margin-top:.5rem;font-size:2rem;}
+@media(min-width:640px){.browse-head h2{font-size:2.5rem;}}
+.browse-head p{margin-top:.625rem;max-width:34rem;font-size:.875rem;line-height:1.65;color:var(--muted-foreground);}
+.browse-head-row{display:flex;align-items:flex-end;justify-content:space-between;gap:1rem;flex-wrap:wrap;}
 .layout{display:grid;grid-template-columns:230px 1fr;min-height:calc(100vh - 4.5rem);width:100%;}
 .layout.full-width{grid-template-columns:1fr;}
 .sidebar{border-right:1px solid var(--hairline);padding:1.5rem 0;position:sticky;top:4.5rem;
@@ -405,7 +418,8 @@ footer.site{border-top:1px solid var(--hairline);}
 .cal-hero{max-width:72rem;}
 .cal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem;flex-wrap:wrap;gap:.75rem;}
 .cal-header-left{display:flex;align-items:baseline;gap:.75rem;}
-.cal-title{font-family:'IBM Plex Sans',sans-serif;font-size:2rem;font-weight:600;letter-spacing:-.045em;}
+.cal-title{font-size:2rem;}
+@media(min-width:640px){.cal-title{font-size:2.5rem;}}
 .cal-year{font-family:'IBM Plex Mono',monospace;font-size:1rem;color:var(--muted-foreground);}
 .cal-header-right{display:flex;gap:.5rem;}
 .cal-btn{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;
@@ -464,8 +478,6 @@ footer.site{border-top:1px solid var(--hairline);}
 .hack-view{display:none;padding:1.5rem;}
 .hack-view.show{display:block;}
 .hack-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:.75rem;}
-.hack-title{font-family:'IBM Plex Sans',sans-serif;font-size:1.5rem;font-weight:600;letter-spacing:-.04em;
-  display:flex;align-items:center;gap:.625rem;}
 .hack-badge{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;
   background:color-mix(in oklab,var(--primary) 9%,transparent);color:var(--primary);
   border:1px solid color-mix(in oklab,var(--primary) 20%,transparent);padding:.25rem .625rem;border-radius:999px;}
@@ -563,7 +575,7 @@ footer.site{border-top:1px solid var(--hairline);}
       <button class="nav-link" id="tabEvents" onclick="switchView('events')">Events</button>
       <button class="nav-link" id="tabCalendar" onclick="switchView('calendar')">Calendar</button>
       <button class="nav-link" id="tabHackathons" onclick="switchView('hackathons')">Hackathons</button>
-      <button class="nav-cta sheen" id="navCta" onclick="scrollToConsole()">Begin</button>
+      <button class="nav-cta sheen" id="navCta" onclick="scrollToConsole()">BEGIN</button>
     </div>
   </div>
 </header>
@@ -759,6 +771,7 @@ footer.site{border-top:1px solid var(--hairline);}
 
 <!-- ============ BROWSE SHELL ============ -->
 <div class="browse-shell" id="browseShell">
+  <div class="browse-atmos"><div class="aurora"></div></div>
   <div class="layout" id="layoutRoot">
     <nav class="sidebar" id="sidebar">
       <div class="nav-section">
@@ -784,6 +797,15 @@ footer.site{border-top:1px solid var(--hairline);}
       </div>
 
       <div id="eventsView" style="display:none">
+        <div class="browse-head">
+          <div class="browse-head-row">
+            <div>
+              <span class="label-xs">Browse &mdash; Events</span>
+              <h2 class="display-xl">The <span class="serif-accent" style="color:var(--primary)">catalog</span></h2>
+            </div>
+            <p>Everything currently tracked across London, newest first. Filter it, save what matters, export to your calendar.</p>
+          </div>
+        </div>
         <div class="controls">
           <label class="ctrl-label"><input type="checkbox" id="cbUpcoming" checked onchange="render()"> Upcoming</label>
           <div class="ctrl-sep"></div>
@@ -812,9 +834,12 @@ footer.site{border-top:1px solid var(--hairline);}
 
       <div class="cal-view" id="calView">
         <div class="cal-hero">
+          <div class="browse-head" style="padding:0 0 1.25rem;">
+            <span class="label-xs">Browse &mdash; Calendar</span>
+          </div>
           <div class="cal-header">
             <div class="cal-header-left">
-              <span class="cal-title" id="calTitle">June</span>
+              <span class="cal-title display-xl" id="calTitle">June</span>
               <span class="cal-year" id="calYearLabel">2026</span>
             </div>
             <div class="cal-header-right">
@@ -833,8 +858,17 @@ footer.site{border-top:1px solid var(--hairline);}
       </div>
 
       <div class="hack-view" id="hackathonsView">
+        <div class="browse-head" style="padding:0 0 1.25rem;">
+          <div class="browse-head-row">
+            <div>
+              <span class="label-xs">Browse &mdash; Hackathons</span>
+              <h2 class="display-xl">Build <span class="serif-accent" style="color:var(--primary)">weekends</span></h2>
+            </div>
+            <p>Auto-detected from every source by title, so new ones appear without anyone maintaining a list.</p>
+          </div>
+        </div>
         <div class="hack-header">
-          <div class="hack-title display-xl">⚡ London Hackathons <span class="hack-badge" id="hackCount">0 upcoming</span></div>
+          <span class="hack-badge" id="hackCount">0 upcoming</span>
           <label class="ctrl-label"><input type="checkbox" id="cbHackUpcoming" checked onchange="renderHackathons()"> Upcoming only</label>
         </div>
         <div class="hack-grid" id="hackGrid"></div>
@@ -1126,7 +1160,13 @@ function getFiltered(){
     if(upcomingOnly&&!isUp(e))return false;
     if(savedOnly&&!saved.has(e.id))return false;
     if(q&&![e.title,e.src,e.cat].join(' ').toLowerCase().includes(q))return false;
-    if(dateRange!=='all'&&e.date){
+    if(dateRange!=='all'){
+      // An undated event cannot satisfy a specific date range. Previously the
+      // whole block was skipped when e.date was null, so every undated event
+      // matched EVERY range - picking "Today" returned 24 real events plus 21
+      // undated ones (45), while the calendar correctly showed 24 for the
+      // same day. Undated events belong under "All dates" only.
+      if(!e.date)return false;
       const today=new Date(NOW.getFullYear(),NOW.getMonth(),NOW.getDate());
       const evDay=new Date(e.date.getFullYear(),e.date.getMonth(),e.date.getDate());
       const diff=(evDay-today)/86400000;
