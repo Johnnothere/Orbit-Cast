@@ -17,6 +17,61 @@ log = logging.getLogger("event-radar")
 # stale the moment nobody updates it.
 HACKATHON_RE = re.compile(r"\b(hackathon|buildathon|hack\s?night|hack\s?day)\b", re.IGNORECASE)
 
+# Several otherwise-good sources are global: the Claude Community calendar in
+# particular publishes "Portland | ...", "Taipei | ...", "New York | ..." into
+# what is meant to be a London-only catalog. Filtering is deliberately
+# CONSERVATIVE - an event is only dropped when it positively names a different
+# city. Anything with no city at all is kept, because these sources are
+# London-scoped by default and silently dropping real London events would be
+# a worse failure than letting an occasional stray through.
+_NON_LONDON_CITIES = re.compile(
+    r"\b(portland|san francisco|sf bay|silicon valley|taipei|chennai|new york|nyc|brooklyn"
+    r"|atlanta|anchorage|adelaide|bhopal|san diego|seattle|boston|austin|denver|phoenix"
+    r"|chicago|miami|los angeles|toronto|vancouver|montreal|sydney|melbourne|brisbane|perth"
+    r"|berlin|munich|hamburg|paris|lyon|amsterdam|rotterdam|madrid|barcelona|lisbon|milan"
+    r"|rome|zurich|geneva|vienna|prague|warsaw|stockholm|oslo|copenhagen|helsinki|dublin"
+    r"|dubai|abu dhabi|riyadh|jeddah|doha|kuwait|cairo|tel aviv|istanbul|ankara"
+    r"|bangkok|manila|jakarta|kuala lumpur|singapore|hong kong|shanghai|beijing|shenzhen"
+    r"|tokyo|osaka|seoul|mumbai|new delhi|bangalore|bengaluru|hyderabad|pune|kolkata"
+    r"|lagos|nairobi|accra|johannesburg|cape town|sao paulo|rio de janeiro|buenos aires"
+    r"|mexico city|bogota|santiago|lima"
+    r"|manchester|birmingham|leeds|glasgow|edinburgh|bristol|liverpool|cardiff|belfast"
+    r"|newcastle|sheffield|nottingham|oxford|cambridge|brighton|philippines|qatar)\b",
+    re.IGNORECASE,
+)
+
+
+# Some global calendars label every event with a "City | Title" prefix. For
+# those, the prefix is authoritative and a denylist is the wrong tool - new
+# cities appear faster than any list can be maintained (Durham, Nuremberg and
+# Wellington all slipped past a 90-city list on the first run). Where the
+# convention holds, require the city to BE London instead.
+_CITY_PREFIXED_SOURCES = {"Claude Community"}
+# Deliberately matches ANY characters before the pipe, not just ASCII letters:
+# an [A-Za-z] class silently let "Medellín" through on the first run. Whatever
+# label sits in that slot is the city for these sources.
+_CITY_PREFIX_RE = re.compile(r"^\s*([^|]{2,28})\s*\|")
+
+
+def is_london(ev, source_name: str = None) -> bool:
+    """True unless the event positively identifies itself as somewhere else.
+
+    Conservative by design: an event is only dropped when it names a city that
+    isn't London. Anything with no location signal is kept, because these
+    sources are London-scoped by default and silently dropping real London
+    events is a worse failure than letting an occasional stray through."""
+    hay = f"{ev.get('title','')} {ev.get('location','')}"
+
+    if source_name in _CITY_PREFIXED_SOURCES:
+        m = _CITY_PREFIX_RE.match(ev.get("title", "") or "")
+        if m:
+            return bool(re.search(r"\blondon\b", m.group(1), re.IGNORECASE))
+        # no prefix at all - fall through to the generic check
+
+    if re.search(r"\blondon\b", hay, re.IGNORECASE):
+        return True                       # explicitly London - always keep
+    return not _NON_LONDON_CITIES.search(hay)
+
 TELEGRAM_TOKEN   = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 SEEN_FILE        = Path("seen_events.json")

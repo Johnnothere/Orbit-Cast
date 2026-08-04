@@ -79,7 +79,7 @@ def run_scrape_background():
             return
         _scraping = True
     try:
-        from scraper import SOURCES, event_id, HACKATHON_RE
+        from scraper import SOURCES, event_id, HACKATHON_RE, is_london
         all_events, summary_data = [], []
         lock = threading.Lock()
 
@@ -88,14 +88,22 @@ def run_scrape_background():
                 events = src["fn"]()
                 enriched = []
                 for ev in events:
+                    # This is a London catalog. Some sources (notably the
+                    # Claude Community calendar) are global and publish
+                    # "Portland | ...", "Taipei | ..." events; drop anything
+                    # that names a different city.
+                    if not is_london(ev, src["name"]):
+                        continue
                     # Auto-tag hackathons from title, regardless of source -
                     # keeps the category live instead of relying on a
                     # hand-maintained list that goes stale.
                     category = "Hackathons" if HACKATHON_RE.search(ev.get("title", "")) else src["category"]
                     enriched.append({**ev, "id": event_id(ev.get("title", ""), ev.get("url", "")),
                                       "emoji": src["emoji"], "category": category})
+                # count reflects what actually made it into the catalog, so the
+                # dashboard doesn't claim events that were filtered out
                 summary  = {"source": src["name"], "emoji": src["emoji"],
-                            "category": src["category"], "count": len(events)}
+                            "category": src["category"], "count": len(enriched)}
                 return enriched, summary
             except Exception as e:
                 log.error(f"Scraper {src['name']} failed: {e}")
