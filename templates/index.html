@@ -286,6 +286,35 @@ header.nav.solid{border-bottom:1px solid color-mix(in oklab,var(--hairline) 70%,
 .empty-card p{margin:.75rem auto 0;max-width:28rem;font-size:.875rem;line-height:1.7;color:var(--muted-foreground);}
 .empty-icon{margin:0 auto;display:flex;height:3rem;width:3rem;align-items:center;justify-content:center;
   border-radius:999px;border:1px solid var(--hairline);color:var(--muted-foreground);}
+/* orientation - the "what this field actually is" block shown before matches
+   when someone gave us an ambition rather than a track record */
+.orient{border-radius:2rem;padding:2rem;}
+@media(min-width:640px){.orient{padding:2.5rem;}}
+.orient-lede{margin-top:1.5rem;font-size:1rem;line-height:1.8;color:color-mix(in oklab,var(--foreground) 88%,transparent);}
+.orient-block{margin-top:2rem;padding-top:1.5rem;border-top:1px solid var(--hairline);}
+.orient-block > ul{list-style:none;margin-top:1rem;display:grid;gap:.875rem;}
+.orient-block > ul > li{padding-left:1.125rem;font-size:.875rem;line-height:1.75;
+  border-left:1px solid color-mix(in oklab,var(--primary) 30%,transparent);
+  color:color-mix(in oklab,var(--foreground) 88%,transparent);}
+.orient-block > p{margin-top:.75rem;font-size:.875rem;line-height:1.75;color:color-mix(in oklab,var(--foreground) 85%,transparent);}
+.orient-src{margin-top:1.5rem;display:flex;flex-wrap:wrap;gap:.5rem;}
+.orient-src a{border-radius:999px;padding:.3125rem .75rem;font-size:11px;line-height:1.4;text-decoration:none;
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--muted-foreground);border:1px solid var(--hairline);background:var(--secondary);transition:color .2s,border-color .2s;}
+.orient-src a:hover{color:var(--primary);border-color:color-mix(in oklab,var(--primary) 45%,transparent);}
+/* follow-up questions - answering re-runs the analysis with the answers appended */
+.q-item{margin-top:1.5rem;}
+.q-item > p{font-size:.9375rem;line-height:1.6;font-weight:500;letter-spacing:-.01em;}
+.q-opts{margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap;}
+.q-opt{cursor:pointer;border-radius:999px;padding:.375rem .875rem;font-size:12px;line-height:1.4;
+  color:var(--muted-foreground);border:1px solid var(--hairline);background:transparent;
+  transition:color .2s,border-color .2s,background .2s;}
+.q-opt:hover{border-color:color-mix(in oklab,var(--primary) 45%,transparent);color:var(--primary);}
+.q-opt[aria-pressed="true"]{border-color:var(--primary);color:var(--primary);
+  background:color-mix(in oklab,var(--primary) 8%,transparent);}
+.q-free{width:100%;margin-top:.5rem;border-radius:.875rem;padding:.5rem .75rem;font:inherit;font-size:.8125rem;
+  outline:none;color:var(--foreground);background:transparent;border:1px solid var(--hairline);}
+.q-free:focus{border-color:color-mix(in oklab,var(--primary) 50%,transparent);}
 .skel-card{border-radius:1.75rem;padding:2rem;}
 .skel-bar{height:.75rem;border-radius:999px;background:var(--secondary);}
 
@@ -723,9 +752,10 @@ footer.site{border-top:1px solid var(--hairline);}
       <div style="margin-top:1.5rem;">
         <span class="label-xs">or describe yourself</span>
         <textarea class="ai-textarea" id="aiInput" style="margin-top:.75rem;"
-          placeholder="I'm a software engineer with 5 years in fintech, now moving into AI product management. Interested in defence tech and deep tech investing. Currently building a side project using LLMs…"
+          placeholder="A sentence is enough. &quot;I'm a 21 year old psychology student and I want to get into intelligence&quot; works — you'll get what that field actually looks like right now, the questions worth answering, and matches anyway."
           oninput="updateCharCount()"></textarea>
         <div class="ai-tips">
+          <span class="ai-tip" tabindex="0" role="button" onclick="setAiTip('I am a 21 year old college student studying psychology and I want to get into intelligence')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">Starting out</span>
           <span class="ai-tip" tabindex="0" role="button" onclick="setAiTip('Software engineer with 3 years Python & ML experience, interested in AI/product roles')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">Tech &amp; AI</span>
           <span class="ai-tip" tabindex="0" role="button" onclick="setAiTip('Business professional seeking networking with founders and investors in London')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">Business</span>
           <span class="ai-tip" tabindex="0" role="button" onclick="setAiTip('Cybersecurity analyst interested in threat intelligence and infosec conferences')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">Security</span>
@@ -1308,6 +1338,7 @@ function setAiTip(t){document.getElementById('aiInput').value=t;updateCharCount(
 
 const AI_PROGRESS_STEPS=[
   'Reading your background…','Checking honesty on strengths & gaps…',
+  'Checking what\'s currently true about the field…',
   'Matching against the live catalog…','Auditing recommendations for generic flattery…',
 ];
 function aiSkeleton(){
@@ -1334,9 +1365,31 @@ function tierFor(score){
   if(score>=75)return{label:'Solid match',cls:'solid'};
   return{label:'Fit',cls:'fit'};
 }
-async function submitAI(){
+// Answers from the "Sharpen this" card, appended to the original input on rerun.
+// A single extra POST is the whole refine loop — no session state to keep in sync.
+function pickQ(btn){
+  const on=btn.getAttribute('aria-pressed')==='true';
+  btn.parentElement.querySelectorAll('.q-opt').forEach(b=>b.setAttribute('aria-pressed','false'));
+  btn.setAttribute('aria-pressed',on?'false':'true');
+}
+function refineAI(){
+  const parts=[];
+  document.querySelectorAll('#aiRefine .q-item').forEach(item=>{
+    const picked=item.querySelector('.q-opt[aria-pressed="true"]');
+    const free=(item.querySelector('.q-free')||{}).value||'';
+    const answer=[picked?picked.textContent.trim():'',free.trim()].filter(Boolean).join(' — ');
+    if(answer)parts.push(item.dataset.q+' '+answer);
+  });
+  if(!parts.length){toast('Pick or type at least one answer first');return;}
+  submitAI(parts.join('\n'));
+}
+
+async function submitAI(extra){
   const input=document.getElementById('aiInput').value.trim();
   if(!cvFileData&&input.length<10){toast('Upload a CV or tell us a bit about yourself');return;}
+  // `extra` arrives only from refineAI(). Guard the type — submitAI is also wired
+  // straight to an onclick, which would otherwise hand us a MouseEvent.
+  const answers=(typeof extra==='string')?extra.trim():'';
   const btn=document.getElementById('aiSubmitBtn');
   const progress=document.getElementById('aiProgress');
   document.getElementById('aiResults').innerHTML=aiSkeleton();
@@ -1353,7 +1406,8 @@ async function submitAI(){
   try{
     const form=new FormData();
     if(cvFileData)form.append('file',cvFileData);
-    if(input)form.append('text',input);
+    const text=answers?(input+'\n\nAlso, answering your follow-ups:\n'+answers):input;
+    if(text)form.append('text',text);
     const res=await fetch('/api/analyze',{method:'POST',body:form});
     const data=await res.json();
     if(!res.ok){toast(data.error||'Something went wrong');document.getElementById('aiResults').innerHTML='';return;}
@@ -1373,17 +1427,18 @@ function renderAIResults(data){
   const container=document.getElementById('aiResults');
 
   if(!data.is_cv){
-    // analysis_failed means WE broke, not that the document failed
-    // classification. Never tell someone their valid CV isn't a CV because
-    // our API call fell over.
+    // is_cv now means "we found a usable person", not "this file is literally a
+    // CV" — a one-line self-description is a valid input. Only genuinely
+    // person-free input lands here. And analysis_failed means WE broke, which
+    // must never be rendered as a verdict on what they submitted.
     const broke=!!data.analysis_failed;
     container.innerHTML='<div class="results"><div class="empty-card card-lux">'
       +'<div class="empty-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
       +(broke?'<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>':'<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>')
       +'</svg></div>'
-      +'<h2>'+(broke?'We couldn\'t finish':'This isn\'t a CV')+'</h2>'
-      +'<p>'+esc(data.message_if_not_cv||'Every upload is classified before it is matched. Cover letters, reports and stray PDFs stop here — no profile is invented.')+'</p>'
-      +'<p class="label-xs" style="margin-top:1.5rem">'+(broke?'analysis failed · your cv was not rejected':'stopped at gate one · nothing generated')+'</p>'
+      +'<h2>'+(broke?'We couldn\'t finish':'We couldn\'t find you in that')+'</h2>'
+      +'<p>'+esc(data.message_if_not_cv||'There\'s no person in what you sent — it reads as a document rather than as you. Upload a CV, or just type a sentence about who you are and what you\'re trying to get into.')+'</p>'
+      +'<p class="label-xs" style="margin-top:1.5rem">'+(broke?'analysis failed · nothing was rejected':'nothing to profile · no profile invented')+'</p>'
       +'</div></div>';
     container.scrollIntoView({behavior:'smooth',block:'start'});
     return;
@@ -1391,22 +1446,70 @@ function renderAIResults(data){
 
   const p=data.profile||{};
   const recs=data.recommendations||[];
+  const thin=data.evidence_level==='thin';
+  const or_=data.orientation;
 
   let html='<div class="results">';
+
+  // Orientation first. Someone who told us an ambition rather than a history is
+  // asking a bigger question than "which four events" — the list on its own
+  // answers something they didn't ask.
+  if(or_){
+    html+='<div class="orient card-lux rise">'
+      +'<div class="res-head"><h2 class="display-xl">Before the list &mdash; '
+      +'<span class="serif-accent" style="color:var(--primary)">'+esc(or_.field_name||data.field||'the field')+'</span></h2>'
+      +'<span class="label-xs">checked against current reporting</span></div>'
+      +'<p class="orient-lede">'+esc(or_.field_reality||'')+'</p>';
+    if(or_.honest_truths&&or_.honest_truths.length){
+      html+='<div class="orient-block"><span class="label-xs">what\'s honestly true right now</span><ul>'
+        +or_.honest_truths.map(t=>'<li>'+esc(t)+'</li>').join('')
+        +'</ul></div>';
+    }
+    if(or_.what_events_do){
+      html+='<div class="orient-block"><span class="label-xs">what going to these actually does</span>'
+        +'<p>'+esc(or_.what_events_do)+'</p></div>';
+    }
+    if(or_.sources&&or_.sources.length){
+      html+='<div class="orient-src">'
+        +or_.sources.map(s=>'<a href="'+esc(s.url)+'" target="_blank" rel="noopener">'+esc(s.title||s.url)+' &#8599;</a>').join('')
+        +'</div>';
+    }
+    html+='</div>';
+  }
 
   // profile
   html+='<div class="res-card card-lux rise">'
     +'<div class="res-head"><h2 class="display-xl">Your profile'+(p.seniority?' <span class="serif-accent" style="color:var(--primary)">'+esc(p.seniority)+'</span>':'')+'</h2>'
-    +'<span class="label-xs">grounded in cv evidence</span></div>'
+    +'<span class="label-xs">'+(thin?'read from what you told us':'grounded in cv evidence')+'</span></div>'
     +'<div class="profile-grid">'
     +'<div class="profile-col strong"><div style="display:flex;align-items:center;gap:.5rem"><span class="dot-2 lux-fill"></span><h3>Strong in</h3></div><ul>'
-    +((p.strengths&&p.strengths.length)?p.strengths.map(s=>'<li>'+esc(s)+'</li>').join(''):'<li style="border:none;padding:0;color:var(--muted-foreground)">No specific strengths surfaced.</li>')
+    +((p.strengths&&p.strengths.length)?p.strengths.map(s=>'<li>'+esc(s)+'</li>').join(''):'<li style="border:none;padding:0;color:var(--muted-foreground)">'+(thin?'Nothing to point at yet &mdash; you told us where you\'re going, not where you\'ve been.':'No specific strengths surfaced.')+'</li>')
     +'</ul></div>'
     +'<div class="profile-col thin"><div style="display:flex;align-items:center;gap:.5rem"><span class="dot-2" style="background:color-mix(in oklab,var(--muted-foreground) 40%,transparent)"></span><h3>Thin on</h3></div><ul>'
     +((p.gaps&&p.gaps.length)?p.gaps.map(g=>'<li>'+esc(g)+'</li>').join(''):'<li style="border:none;padding:0">No notable gaps detected.</li>')
     +'</ul></div></div>'
     +(p.trajectory?'<div class="trajectory"><span class="label-xs">where you\'re headed</span><p>'+esc(p.trajectory)+'</p></div>':'')
     +'</div>';
+
+  // Follow-up questions. Shown alongside the results, never instead of them —
+  // the answer comes first, and this sharpens it if they want it sharpened.
+  const qs=data.clarifying_questions||[];
+  if(qs.length){
+    html+='<div class="res-card card-lux rise" id="aiRefine">'
+      +'<div class="res-head"><h2 class="display-xl">Sharpen '
+      +'<span class="serif-accent" style="color:var(--primary)">this</span></h2>'
+      +'<span class="label-xs">optional · answers rerun the match</span></div>'
+      +'<p style="margin-top:1rem;font-size:.875rem;line-height:1.7;color:var(--muted-foreground)">'
+      +'We matched on what you gave us. These are the things that would most change the answer &mdash; pick or type, then rerun.</p>';
+    qs.forEach((q,i)=>{
+      html+='<div class="q-item" data-q="'+esc(q.question)+'"><p>'+esc(q.question)+'</p><div class="q-opts">'
+        +(q.options||[]).map(o=>'<button type="button" class="q-opt" aria-pressed="false" onclick="pickQ(this)">'+esc(o)+'</button>').join('')
+        +'</div><input class="q-free" type="text" maxlength="160" placeholder="or say it in your own words…"></div>';
+    });
+    html+='<button class="btn-lux sheen" style="margin-top:1.75rem" onclick="refineAI()">'
+      +'Rerun with this <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>'
+      +'</div>';
+  }
 
   // matches
   html+='<div><div class="res-head"><h2 class="display-xl">'
@@ -1417,11 +1520,13 @@ function renderAIResults(data){
     if(data.scoring_failed){
       html+='<div class="empty-card card-lux" style="margin-top:1.25rem">'
         +'<p style="font-size:1.125rem;font-weight:500;letter-spacing:-.02em">The matching step didn\'t complete.</p>'
-        +'<p>This is a failure on our side, not a verdict on your CV &mdash; we didn\'t get to score the catalog against it. Your profile above is still valid. Please try again.</p></div>';
+        +'<p>This is a failure on our side, not a verdict on what you sent &mdash; we didn\'t get to score the catalog against it. Your profile above is still valid. Please try again.</p></div>';
     }else{
       html+='<div class="empty-card card-lux" style="margin-top:1.25rem">'
         +'<p style="font-size:1.125rem;font-weight:500;letter-spacing:-.02em">Nothing clears the bar.</p>'
-        +'<p>An honest result, not a failure. Nothing in the live catalog crossed 65 against your record.</p></div>';
+        +'<p>An honest result, not a failure. Nothing in the live catalog crossed 65 against '
+        +(thin?'where you\'re trying to go. That\'s about this week\'s catalog, not about you — the questions above are the fastest way to change it.':'your record.')
+        +'</p></div>';
     }
   }else{
     html+='<div style="margin-top:1.25rem;display:grid;gap:.75rem">';

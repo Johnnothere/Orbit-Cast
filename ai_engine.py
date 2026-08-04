@@ -1,14 +1,23 @@
 """
-OrbitCast AI - upload classification + honest CV analysis + event matching.
+OrbitCast AI - input classification + honest profile reading + event matching.
 
 The whole design goal here is HONESTY: read the real person, recommend only
-genuine matches, ground every claim in actual CV evidence, and be willing to
-say "nothing here strongly fits you."
+genuine matches, ground every claim in what they actually gave us, and be
+willing to say "nothing here strongly fits you."
 
-Three-pass pipeline, each pass one focused Claude call:
-  1. extract_profile   - classify the doc, read the person (incl. trajectory)
-  2. score_events       - match profile to events, honestly, with why-now
-  3. critique_recommendations - drop any why-statement that isn't evidence-specific
+Input is a CV OR a self-description in their own words, however short. Both are
+first-class - "I'm a 21 year old psychology student who wants to get into
+intelligence" is the single most common thing a real user types, and it is a
+question, not a malformed CV. Only genuinely person-free input stops at the gate.
+
+Pipeline, each pass one focused Claude call:
+  1. extract_profile          - classify the input, read the person, and (when the
+                                input is thin) draft the questions worth asking back
+  2. build_orientation        - ONLY for thin inputs: what the field is, what's
+                                honestly true about breaking in right now (grounded
+                                with web search), and what events do and don't do
+  3. score_events             - match profile to events, honestly, with why-now
+  4. critique_recommendations - drop any why-statement that isn't evidence-specific
 
 Deps used on demand:  anthropic, pdfplumber, python-docx
 """
@@ -18,6 +27,7 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import date
 
 from anthropic import Anthropic
@@ -330,50 +340,90 @@ def select_catalog(compact_events: list, cap: int = None) -> list:
 # 3. PASS 1 - classify + extract a structured, evidence-grounded profile
 # --------------------------------------------------------------------------
 PROFILE_SYSTEM_PROMPT = """You are OrbitCast's profile-reading engine. You do ONE job: \
-read an uploaded document and, if it's a CV, produce an honest, evidence-grounded \
-profile of the person. You do not see events or make recommendations - that's a \
-separate step done by someone else.
+read what a person gave us and produce an honest, evidence-grounded profile of them. \
+You do not see events or make recommendations - that's a separate step done by someone else.
 
-STEP 1 - CLASSIFY the document. Decide if it is a CV / resume or something else \
-(cover letter, report, random PDF, image-of-text, etc.). Be strict: a CV has a \
-person's work/education history, skills, and contact-style details. If it is not \
-clearly a CV, set is_cv=false and STOP - do not invent a profile.
+STEP 1 - CLASSIFY the input into exactly one of three kinds:
 
-STEP 2 - If and only if it IS a CV, read the actual person:
-- Ground EVERY statement in concrete evidence from the CV. Reference the specific \
-  role, project, skill, or detail you are inferring from. No generic flattery like \
-  "passionate innovator." If you cannot point to evidence, do not say it.
-- Give an honest read INCLUDING gaps, not just strengths. If the CV is strong on X \
-  but thin on Y, say it plainly.
-- Infer seniority from actual signals (years, titles, scope of responsibility) - \
-  student, junior, mid, senior, or exec. Do not guess beyond what the CV supports.
-- Read their TRAJECTORY, not just their history: is there a recent pivot, a newly \
-  acquired skill, a stated career gap they're closing, a change in the kind of work \
-  they're taking on? This should point at where they seem to be headed next, cited \
-  against a specific, concrete detail in the CV (e.g. "moved from pure backend work \
-  to two recent ML-adjacent projects" - not "seems ambitious"). If there's no clear \
-  trajectory signal, leave it empty rather than inventing one.
+- "cv": a CV / resume. Work or education history, skills, contact-style details.
+
+- "self_description": the person describing THEMSELVES or their situation in their own \
+  words, at any length. This includes a single sentence. "I am a 21 year old college \
+  student studying psychology and I wanna get into intelligence" is a self_description \
+  and is a completely valid, extremely common way to use this product. So is "founder \
+  looking for co-founders", "career changer moving from teaching into data", or a bare \
+  "cybersecurity, London, junior". If there is a real person with a real situation, \
+  direction, or interest in the text, it is a self_description - even if it is short, \
+  informal, misspelled, or contains almost no detail.
+
+- "unusable": there is no person in it at all. A recipe, a news article, a product \
+  manual, a legal contract, random characters, an empty extraction. This is the ONLY \
+  kind that stops here.
+
+Do NOT classify something as "unusable" because it is short, thin, or not a CV. \
+Thin is normal. Thin is what most people type. Thin is handled at STEP 2 by saying \
+so honestly and asking questions - not by refusing.
+
+STEP 2 - Read the actual person:
+- Ground EVERY statement in what they actually gave you. Reference the specific role, \
+  project, skill, course, or stated goal you are inferring from. No generic flattery \
+  like "passionate innovator." If you cannot point to something they said, do not say it.
+- Give an honest read INCLUDING gaps. For a thin self_description the biggest honest \
+  gap is usually the thinness itself - say plainly what you do not know about them \
+  rather than filling it in. "No stated technical background" is an honest gap; \
+  inventing one is not.
+- Infer seniority from actual signals. For a student who says they are a student, \
+  "student" is the answer - that is a fact they gave you, not a guess.
+- Read their TRAJECTORY - where they seem to be headed. For a CV this is a pivot or a \
+  newly acquired skill cited against a concrete detail. For a self_description their \
+  stated ambition IS the trajectory, and you should treat it as real: "wants to move \
+  from psychology into intelligence work" is a trajectory, not a guess.
+
+STEP 3 - Set "evidence_level":
+- "rich": you have enough to judge this person's fit properly (a CV, or a detailed \
+  self-description with concrete background).
+- "thin": you are working mostly from a stated ambition with little or no track record. \
+  This is not a failure state. It changes how the match should be framed downstream, \
+  and it is what triggers the orientation and follow-up questions.
+
+STEP 4 - If evidence_level is "thin", write "clarifying_questions": 2-3 questions whose \
+answers would MOST change which events we recommend. Ask like a knowledgeable person \
+would in conversation - specific, not a form. Each question gets 3-4 short suggested \
+answers the person can pick from, plus they can always write their own. Ask about things \
+that genuinely change the recommendation (what draws them to the field, what they've \
+already done, what they want out of the next six months, technical vs policy leaning). \
+Do NOT ask for their name, email, or anything we do not use. If evidence_level is \
+"rich", return an empty list - do not manufacture questions.
 
 Keep strengths/gaps/interests items and the trajectory read to ONE tight sentence \
 each. Specific beats long.
 
 Return ONLY valid JSON - no markdown, no backticks, no preamble - in EXACTLY this schema:
 {
-  "is_cv": boolean,
-  "confidence": number,            // 0-1, how sure you are it is a CV
-  "document_type": string,         // "cv" | "cover_letter" | "report" | "other"
-  "message_if_not_cv": string,     // short friendly note shown to user if is_cv=false, else ""
+  "input_kind": string,            // "cv" | "self_description" | "unusable"
+  "confidence": number,            // 0-1, how sure you are of the classification
+  "document_type": string,         // "cv" | "self_description" | "other"
+  "message_if_not_cv": string,     // short friendly note, ONLY if input_kind="unusable", else ""
+  "evidence_level": string,        // "rich" | "thin"
+  "field": string,                 // the industry/field they are aiming at, in plain words
+                                    // (e.g. "intelligence and national security analysis").
+                                    // Empty string if genuinely unclear.
+  "clarifying_questions": [
+     { "question": string, "options": [string] }   // 3-4 short options each
+  ],
   "profile": {
-     "summary": string,            // honest 2-3 sentence read, evidence-grounded
-     "strengths": [string],        // each tied to specific CV evidence
-     "gaps": [string],             // honest and specific
-     "interests": [string],        // inferred professional interests, evidence-based
+     "summary": string,            // honest 2-3 sentence read, grounded in what they said
+     "strengths": [string],        // each tied to something specific they told us
+     "gaps": [string],             // honest and specific, including "we don't know X yet"
+     "interests": [string],        // stated or clearly implied professional interests
      "seniority": string,          // "student" | "junior" | "mid" | "senior" | "exec"
+     "aspiration": string,         // what they are trying to move toward, in their terms;
+                                    // empty string if they didn't state a direction
      "trajectory": string          // where they're headed next, grounded in a specific
-                                    // CV detail; empty string if no clear signal
+                                    // detail; empty string if no clear signal
   }
 }
-If is_cv is false, profile fields are empty strings/lists."""
+If input_kind is "unusable", profile fields are empty strings/lists."""
 
 
 def _empty_result(message: str, failed: bool = False) -> dict:
@@ -383,20 +433,171 @@ def _empty_result(message: str, failed: bool = False) -> dict:
     is both false and the single most damaging thing this product can say."""
     return {
         "is_cv": False,
+        "input_kind": "unusable",
+        "evidence_level": "thin",
+        "field": "",
+        "clarifying_questions": [],
+        "orientation": None,
         "confidence": 0.0,
         "document_type": "unknown",
         "message_if_not_cv": message,
         "analysis_failed": failed,
         "profile": {"summary": "", "strengths": [], "gaps": [], "interests": [],
-                    "seniority": "", "trajectory": ""},
+                    "seniority": "", "aspiration": "", "trajectory": ""},
         "recommendations": [],
     }
 
 
 def extract_profile(file_text: str) -> dict:
-    user_content = f"DOCUMENT TEXT:\n{file_text[:12000]}"
+    user_content = f"WHAT THE PERSON GAVE US:\n{file_text[:12000]}"
     data = _call(PROFILE_SYSTEM_PROMPT, user_content, max_tokens=2000)
+
+    # `is_cv` is the flag the rest of the app and the frontend already branch on.
+    # It now means "we have a usable person", not literally "this file is a CV" -
+    # a one-line self-description is a valid input, not a rejection. Only
+    # input_kind="unusable" closes the gate.
+    kind = data.get("input_kind") or ("cv" if data.get("is_cv") else "unusable")
+    data["input_kind"] = kind
+    data["is_cv"] = kind in ("cv", "self_description")
+    data.setdefault("evidence_level", "rich" if kind == "cv" else "thin")
+    data.setdefault("field", "")
+    data.setdefault("clarifying_questions", [])
     data.setdefault("recommendations", [])
+    data.setdefault("profile", {})
+    data["profile"].setdefault("aspiration", "")
+
+    # Guard the questions shape - the frontend renders these directly.
+    qs = []
+    for q in data.get("clarifying_questions") or []:
+        if isinstance(q, dict) and (q.get("question") or "").strip():
+            opts = [str(o).strip() for o in (q.get("options") or []) if str(o).strip()]
+            qs.append({"question": q["question"].strip(), "options": opts[:4]})
+    data["clarifying_questions"] = qs[:3]
+    return data
+
+
+# --------------------------------------------------------------------------
+# 3b. Orientation - for someone with an ambition and no track record yet
+# --------------------------------------------------------------------------
+# A thin profile ("21, psychology student, wants to get into intelligence") is the
+# most common input this product gets, and a list of four events answers a question
+# that person has not asked yet. Before the matches, they need to know what the
+# field actually is, what's honestly true about getting into it, and what an event
+# does and doesn't do for them. That last part matters: events are a weak lever
+# compared to a clearance, a language, or a degree, and saying otherwise sells them
+# something. This runs Claude with web search so "currently true" means currently
+# true, not true as of the training cutoff.
+ORIENTATION_SYSTEM_PROMPT = """You are OrbitCast's orientation writer. Someone has told \
+us they want to get into a field and they do not yet have a track record in it. Before \
+we show them events, you tell them the truth about the field as it stands RIGHT NOW.
+
+You have web search. USE IT - run 2-4 searches for current hiring conditions, entry \
+routes, and recent developments in this field, weighted to the UK/London where the \
+field is location-dependent. Your knowledge of "the current state" of an industry goes \
+stale; search is how you fix that. Prefer sources from the last 12 months.
+
+Write three things:
+
+1. "field_reality" - what this industry actually is and what the work actually looks \
+like day to day. Correct the popular image of it if the popular image is wrong (it \
+usually is). 3-4 sentences.
+
+2. "honest_truths" - 3-4 separate, specific, uncomfortable-if-necessary truths about \
+getting in, as it stands now. These must be CONCRETE and CURRENT: actual entry routes, \
+actual gatekeeping requirements (citizenship, clearance, language, a specific degree), \
+actual timelines, actual competition, what the market is doing this year. Anchor them \
+in what you found. Do not write encouragement. Do not write "it's competitive but with \
+passion anything is possible" - that is filler and it helps nobody. If the honest \
+answer is "this route effectively requires something they do not have", say that, and \
+say what the realistic alternative route is.
+
+3. "what_events_do" - what attending events in this space will and will not do for \
+them, specifically. Be straight about the ceiling: events build familiarity with the \
+language of a field, surface people who are already in it, and occasionally produce a \
+referral. They do not substitute for the actual gate (a clearance, a qualification, a \
+technical skill). Name what they should be doing ALONGSIDE events, given where they \
+are. 3-4 sentences.
+
+Write in plain, direct, second-person prose ("you"). No bullet-point voice, no hype, \
+no hedging into meaninglessness. Assume the reader is smart and would rather hear it \
+straight.
+
+Return ONLY valid JSON - no markdown, no backticks, no preamble - in EXACTLY this schema:
+{
+  "field_name": string,            // the field, named plainly
+  "field_reality": string,
+  "honest_truths": [string],       // 3-4 items, each one specific sentence or two
+  "what_events_do": string,
+  "sources": [                     // the pages you actually used, 2-4 of them
+     { "title": string, "url": string }
+  ]
+}"""
+
+# Web search is slow and costs money, and the honest truths about an industry do not
+# change hour to hour. Cache per field for the day - a Railway dyno holds this fine,
+# and a cold start just means one more search.
+_ORIENTATION_TTL = 12 * 3600
+_orientation_cache: dict = {}
+
+
+def _call_with_search(system: str, user_content: str, max_tokens: int = 3000) -> dict:
+    """Same contract as _call(), but with the server-side web_search tool enabled.
+    The tool runs on Anthropic's side; we only have to keep re-sending when the
+    server pauses a long tool turn."""
+    client = _get_client()
+    tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": 5}]
+    messages = [{"role": "user", "content": user_content}]
+
+    resp = None
+    for _ in range(4):  # bounded: a paused turn resumes, it doesn't loop forever
+        resp = client.messages.create(
+            model=MODEL, max_tokens=max_tokens, system=system,
+            tools=tools, messages=messages,
+        )
+        if resp.stop_reason != "pause_turn":
+            break
+        # Re-send the paused assistant turn verbatim; the server resumes it.
+        messages = [{"role": "user", "content": user_content},
+                    {"role": "assistant", "content": resp.content}]
+
+    raw = "".join(b.text for b in resp.content
+                  if getattr(b, "type", "") == "text").strip()
+    return json.loads(_extract_json_object(raw))
+
+
+def build_orientation(field: str, profile: dict) -> dict:
+    """None on any failure - orientation is an addition to the answer, never a
+    precondition for it. If search or the model falls over, the person still gets
+    their profile and their matches."""
+    key = (field or "").strip().lower()[:80]
+    if not key:
+        return None
+
+    hit = _orientation_cache.get(key)
+    if hit and (time.time() - hit["at"]) < _ORIENTATION_TTL:
+        return hit["data"]
+
+    user_content = (
+        f"TODAY'S DATE: {date.today().isoformat()}\n"
+        f"FIELD THEY WANT TO GET INTO: {field}\n\n"
+        "WHO THEY ARE (JSON):\n"
+        f"{json.dumps(profile, ensure_ascii=False)}\n\n"
+        "Search for the current state of this field, then write their orientation."
+    )
+    try:
+        data = _call_with_search(ORIENTATION_SYSTEM_PROMPT, user_content)
+    except Exception as exc:
+        log.warning(f"Orientation pass failed, continuing without it: {exc}")
+        return None
+
+    if not isinstance(data, dict) or not data.get("field_reality"):
+        return None
+    data["honest_truths"] = [str(t) for t in (data.get("honest_truths") or [])][:4]
+    data["sources"] = [
+        s for s in (data.get("sources") or [])
+        if isinstance(s, dict) and s.get("url")
+    ][:4]
+    _orientation_cache[key] = {"at": time.time(), "data": data}
     return data
 
 
@@ -445,6 +646,22 @@ A "maybe, not a yes": if the fit is real but thin, score it in the low 65-72 ran
 and say so honestly, e.g. "Their background is mostly non-technical, but they've \
 started a data analytics course - this is a reasonable stretch event, not a clear \
 fit. Worth attending, but not central to where they're headed."
+
+WHEN THE PROFILE SAYS evidence_level IS "thin":
+This person told us where they want to go and has little or no track record there \
+yet - a student, a career changer, someone starting out. They are a real user with a \
+real question, not a bad input. Two failure modes to avoid, in both directions:
+- Do NOT score everything low just because they have no CV. The question you are \
+  answering for them is different: "would being in this room move this person toward \
+  the direction they stated?" A genuinely entry-accessible event in their target \
+  field is a strong match for them even though they have no experience in it.
+- Do NOT inflate. Score an advanced practitioner event low for a beginner and say \
+  why - being in a room you cannot follow is worth less than being in one you can. \
+  Prefer events that are introductory, community-run, open to outsiders, or \
+  adjacent-and-learnable over expert-level or invite-shaped ones.
+Ground "why" in what they actually stated (their field of study, their stated goal, \
+their age/stage) rather than a track record they do not have, and say plainly in \
+"why_now" what this specific room gets them at their specific starting point.
 
 Keep every text field to ONE tight sentence, two at most. Specific and evidence-tied \
 beats long - a sharp one-sentence "why" is worth more than a paragraph."""
@@ -544,6 +761,15 @@ Examples of what to KEEP (keep_it=true):
 - Text that names a specific project, role, skill, or trajectory detail from the
   profile and ties it to why this specific event matters now.
 
+IF the profile says evidence_level is "thin", judge against what that person actually
+told us - their field of study, their stated goal, their stage - because that is the
+whole evidence base that exists. "A psychology undergraduate with no security
+background gets an accessible first look at how the field talks about itself" is
+SPECIFIC and passes. Do not reject a recommendation for failing to cite a career
+history the person never claimed to have - that would silently return nothing to
+exactly the users who most need an answer. Still reject text that could apply to
+anyone regardless of what they said.
+
 Do not rewrite good text. Do not soften scores. Only decide keep/reject per item.
 
 Return ONLY valid JSON - no markdown, no backticks, no preamble - in EXACTLY this schema:
@@ -616,7 +842,24 @@ def analyze_upload(file_text: str, events: list) -> dict:
 
     if not data.get("is_cv"):
         data["recommendations"] = []
+        data.setdefault("orientation", None)
+        data.setdefault("clarifying_questions", [])
         return data
+
+    # Someone with an ambition and no track record needs context before they need
+    # a list. This is additive and never blocks the matches - build_orientation
+    # returns None rather than raising if search or the model has a bad minute.
+    data["orientation"] = None
+    if data.get("evidence_level") == "thin":
+        field = (data.get("field") or "").strip() \
+            or (data.get("profile", {}).get("aspiration") or "").strip()
+        if field:
+            data["orientation"] = build_orientation(field, data["profile"])
+
+    # evidence_level lives at the top level but the scorer needs it to pick which
+    # question it's answering (fit-to-record vs fit-to-direction).
+    scoring_profile = {**data["profile"],
+                       "evidence_level": data.get("evidence_level", "rich")}
 
     compact_events = build_compact_events(events)
 
@@ -632,8 +875,8 @@ def analyze_upload(file_text: str, events: list) -> dict:
     recs, scoring_failed = [], False
     for attempt in (1, 2):
         try:
-            recs = score_events(data["profile"], compact_events)
-            recs = critique_recommendations(data["profile"], recs)
+            recs = score_events(scoring_profile, compact_events)
+            recs = critique_recommendations(scoring_profile, recs)
             scoring_failed = False
             break
         except Exception as exc:
