@@ -28,6 +28,7 @@ import logging
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
 from anthropic import Anthropic
@@ -859,16 +860,6 @@ def analyze_upload(file_text: str, events: list) -> dict:
         data.setdefault("clarifying_questions", [])
         return data
 
-    # Someone with an ambition and no track record needs context before they need
-    # a list. This is additive and never blocks the matches - build_orientation
-    # returns None rather than raising if search or the model has a bad minute.
-    data["orientation"] = None
-    if data.get("evidence_level") == "thin":
-        field = (data.get("field") or "").strip() \
-            or (data.get("profile", {}).get("aspiration") or "").strip()
-        if field:
-            data["orientation"] = build_orientation(field, data["profile"])
-
     # evidence_level lives at the top level but the scorer needs it to pick which
     # question it's answering (fit-to-record vs fit-to-direction).
     scoring_profile = {**data["profile"],
@@ -876,28 +867,53 @@ def analyze_upload(file_text: str, events: list) -> dict:
 
     compact_events = build_compact_events(events)
 
-    # Scoring is a model call and can fail transiently (truncated/invalid JSON,
-    # API hiccup). Retry once before giving up - measured ~1 in 4 analyses
-    # returning zero purely from a transient failure, on a profile whose top
-    # match otherwise scored 87-90 consistently.
-    #
-    # And critically: DO NOT let a failure masquerade as "no matches". The
-    # frontend tells the user "that's an honest result, not a failure", which
-    # is a lie if scoring never actually completed. scoring_failed makes the
-    # difference explicit so the UI can say "try again" instead.
-    recs, scoring_failed = [], False
-    for attempt in (1, 2):
-        try:
-            recs = score_events(scoring_profile, compact_events)
-            recs = critique_recommendations(scoring_profile, recs)
-            scoring_failed = False
-            break
-        except Exception as exc:
-            scoring_failed = True
-            log.warning(f"score_events failed (attempt {attempt}/2): {exc}")
-    if scoring_failed:
-        log.warning("scoring failed twice - reporting as failure, not as 'no matches'")
-        recs = []
+    def _do_scoring():
+        # Scoring is a model call and can fail transiently (truncated/invalid
+        # JSON, API hiccup). Retry once before giving up - measured ~1 in 4
+        # analyses returning zero purely from a transient failure, on a
+        # profile whose top match otherwise scored 87-90 consistently.
+        #
+        # And critically: DO NOT let a failure masquerade as "no matches".
+        # The frontend tells the user "that's an honest result, not a
+        # failure", which is a lie if scoring never actually completed.
+        # scoring_failed makes the difference explicit so the UI can say
+        # "try again" instead.
+        recs, failed = [], False
+        for attempt in (1, 2):
+            try:
+                recs = score_events(scoring_profile, compact_events)
+                recs = critique_recommendations(scoring_profile, recs)
+                failed = False
+                break
+            except Exception as exc:
+                failed = True
+                log.warning(f"score_events failed (attempt {attempt}/2): {exc}")
+        if failed:
+            log.warning("scoring failed twice - reporting as failure, not as 'no matches'")
+            recs = []
+        return recs, failed
+
+    orientation_field = None
+    if data.get("evidence_level") == "thin":
+        orientation_field = (data.get("field") or "").strip() \
+            or (data.get("profile", {}).get("aspiration") or "").strip()
+
+    if orientation_field:
+        # Orientation (a web-search call, can run 60-90s) and scoring are
+        # independent - both only need the profile. Sequentially they added
+        # up to 2+ minutes of a user staring at a spinner; run them in
+        # parallel threads so wall-clock time is roughly the slower of the
+        # two, not the sum. build_orientation() never raises - it already
+        # returns None on any failure - so no error handling needed here.
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            orient_future = pool.submit(build_orientation, orientation_field, data["profile"])
+            score_future = pool.submit(_do_scoring)
+            data["orientation"] = orient_future.result()
+            recs, scoring_failed = score_future.result()
+    else:
+        data["orientation"] = None
+        recs, scoring_failed = _do_scoring()
+
     data["scoring_failed"] = scoring_failed
 
     # Enrich with the real event object and cap at the honesty-rule max.
