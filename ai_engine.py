@@ -540,10 +540,18 @@ _ORIENTATION_TTL = 12 * 3600
 _orientation_cache: dict = {}
 
 
-def _call_with_search(system: str, user_content: str, max_tokens: int = 3000) -> dict:
+def _call_with_search(system: str, user_content: str, max_tokens: int = 8000) -> dict:
     """Same contract as _call(), but with the server-side web_search tool enabled.
     The tool runs on Anthropic's side; we only have to keep re-sending when the
-    server pauses a long tool turn."""
+    server pauses a long tool turn.
+
+    max_tokens defaults much higher than a plain _call() because each search's
+    result content counts against it same as any other output - at 3000 the
+    budget was consumed entirely by 2-4 searches' worth of result blocks,
+    leaving zero room for the model to actually write the JSON answer. That
+    produced an empty text block and a confusing "Expecting value" JSON error
+    that masked the real cause (verified live: happened on every orientation
+    call in production)."""
     client = _get_client()
     tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": 5}]
     messages = [{"role": "user", "content": user_content}]
@@ -562,6 +570,11 @@ def _call_with_search(system: str, user_content: str, max_tokens: int = 3000) ->
 
     raw = "".join(b.text for b in resp.content
                   if getattr(b, "type", "") == "text").strip()
+    if not raw:
+        raise ValueError(
+            f"orientation call produced no text (stop_reason={getattr(resp, 'stop_reason', None)}, "
+            f"{len(resp.content) if resp else 0} content blocks) - likely ran out of "
+            f"max_tokens on search results before writing the answer")
     return json.loads(_extract_json_object(raw))
 
 
