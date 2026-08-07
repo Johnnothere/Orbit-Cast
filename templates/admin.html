@@ -75,14 +75,38 @@ textarea:focus,input:focus,select:focus{border-color:var(--blue);}
 .u-table tr.clickable:hover td{background:var(--sf2);}
 .u-id{font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:var(--text);}
 .u-back{font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:var(--blue);background:none;border:none;cursor:pointer;margin-bottom:14px;padding:0;}
-.tl-item{border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px;}
-.tl-top{display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;}
-.tl-time{font-family:'IBM Plex Mono',monospace;font-size:.62rem;color:var(--t3);margin-left:auto;}
-.tl-cv{font-size:.8rem;color:var(--t2);white-space:pre-wrap;background:var(--sf2);border-radius:8px;padding:10px 12px;margin-top:8px;max-height:160px;overflow-y:auto;}
+
+/* summary strip at the top of a user's detail view - the "at a glance"
+   read that was missing entirely before: 23 analyses as a raw scroll of
+   paragraphs told you nothing until you'd read all of them. */
+.u-stats{display:flex;gap:22px;flex-wrap:wrap;margin:14px 0 4px;padding:14px 16px;background:var(--sf2);border-radius:12px;}
+.u-stat b{display:block;font-family:'IBM Plex Mono',monospace;font-size:1.15rem;color:var(--navy);}
+.u-stat span{font-size:.68rem;color:var(--t2);text-transform:uppercase;letter-spacing:.05em;}
+
+/* each analysis is a <details> element, collapsed by default - the fix
+   for "how can I understand anything from this": scan 23 one-line
+   summaries in one screen, open only the ones worth reading in full. */
+.tl-item{border:1px solid var(--border);border-radius:12px;margin-bottom:8px;overflow:hidden;}
+.tl-item[open]{border-color:var(--border2);}
+.tl-item > summary{list-style:none;cursor:pointer;padding:12px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.tl-item > summary::-webkit-details-marker{display:none;}
+.tl-item > summary:hover{background:var(--sf2);}
+.tl-caret{font-size:.65rem;color:var(--t3);transition:transform .15s;flex-shrink:0;}
+.tl-item[open] .tl-caret{transform:rotate(90deg);}
+.tl-summary-text{flex:1;min-width:0;font-size:.8rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.tl-rec-count{font-family:'IBM Plex Mono',monospace;font-size:.66rem;color:var(--t2);background:var(--sf2);border-radius:10px;padding:2px 8px;flex-shrink:0;}
+.tl-time{font-family:'IBM Plex Mono',monospace;font-size:.62rem;color:var(--t3);flex-shrink:0;}
+.tl-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.tl-body{padding:0 16px 16px;border-top:1px solid var(--border);}
+.tl-body p.summary-full{font-size:.82rem;line-height:1.6;margin:12px 0;}
+.tl-cv{font-size:.78rem;color:var(--t2);white-space:pre-wrap;background:var(--sf2);border-radius:8px;padding:10px 12px;margin-top:8px;max-height:200px;overflow-y:auto;}
 .tl-rec{border-top:1px solid var(--border);margin-top:10px;padding-top:10px;}
-.tl-rec p{font-size:.76rem;margin-bottom:3px;}
+.tl-rec-top{display:flex;align-items:center;gap:8px;margin-bottom:4px;}
+.tl-rec-top b{font-size:.82rem;}
+.tl-rec p{font-size:.76rem;margin-bottom:3px;line-height:1.5;}
 .tl-rec b{color:var(--t2);font-weight:600;}
-.fit-num{font-family:'IBM Plex Mono',monospace;font-weight:600;color:var(--blue);}
+.fit-pill{font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:.68rem;color:var(--ok);background:rgba(5,150,105,.1);border-radius:10px;padding:2px 8px;flex-shrink:0;}
+.fit-pill.mid{color:var(--warn);background:rgba(217,119,6,.1);}
 
 /* EXAMPLES LIST */
 .ex-row{border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px;}
@@ -452,6 +476,15 @@ async function loadUsers() {
   }
 }
 
+function oneLine(s, max = 90) {
+  s = (s || "").replace(/\s+/g, " ").trim();
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
+}
+
+function fitPillClass(score) {
+  return (score ?? 0) >= 80 ? "" : "mid";
+}
+
 async function showUserDetail(oc_uid) {
   document.getElementById("users-list-card").style.display = "none";
   const card = document.getElementById("user-detail-card");
@@ -469,34 +502,57 @@ async function showUserDetail(oc_uid) {
     let html = "";
     if (!data.analyses.length && !data.interactions.length) {
       html = `<div class="empty">${c.consented ? "Consented, but no activity recorded yet." : "Declined consent - nothing else is stored for this ID."}</div>`;
+      body.innerHTML = html;
+      return;
     }
 
+    // At-a-glance stats first - this is the whole fix. 23 analyses used to
+    // mean reading 23 paragraphs before you knew anything; now you see the
+    // shape of this person's usage in one row.
+    const totalRecs = data.analyses.reduce((n, a) => n + a.recommendations.length, 0);
+    const zeroMatch = data.analyses.filter(a => a.recommendations.length === 0).length;
+    html += `<div class="u-stats">
+        <div class="u-stat"><b>${data.analyses.length}</b><span>Analyses</span></div>
+        <div class="u-stat"><b>${totalRecs}</b><span>Total matches</span></div>
+        <div class="u-stat"><b>${zeroMatch}</b><span>Zero-match runs</span></div>
+        <div class="u-stat"><b>${data.interactions.length}</b><span>Event clicks</span></div>
+      </div>`;
+
     if (data.analyses.length) {
-      html += `<h2 style="margin:18px 0 10px;font-size:.85rem;">Analyses (${data.analyses.length})</h2>`;
-      html += data.analyses.map(a => `
-        <div class="tl-item">
-          <div class="tl-top">
-            <span class="badge ${a.is_cv ? "good" : "bad"}">${a.is_cv ? "usable" : "unusable"}</span>
+      html += `<h2 style="margin:18px 0 10px;font-size:.85rem;">Analyses (${data.analyses.length}) &mdash; click to expand</h2>`;
+      html += data.analyses.map(a => {
+        const summaryText = (a.profile && a.profile.summary) || oneLine(a.cv_text) || "(no text)";
+        return `
+        <details class="tl-item">
+          <summary>
+            <span class="tl-caret">&#9656;</span>
+            <span class="tl-summary-text">${escapeHtml(oneLine(summaryText))}</span>
+            ${!a.is_cv ? `<span class="badge bad">no person found</span>` : ""}
+            <span class="tl-rec-count">${a.recommendations.length} match${a.recommendations.length === 1 ? "" : "es"}</span>
             <span class="tl-time">${fmtDate(a.created_at)}</span>
+          </summary>
+          <div class="tl-body">
+            ${a.profile && a.profile.summary ? `<p class="summary-full">${escapeHtml(a.profile.summary)}</p>` : ""}
+            <details><summary style="cursor:pointer;font-size:.72rem;color:var(--t2);">Raw input text</summary>
+              <div class="tl-cv">${escapeHtml(a.cv_text || "")}</div>
+            </details>
+            ${a.recommendations.length ? a.recommendations.map(r => `
+              <div class="tl-rec">
+                <div class="tl-rec-top"><b>${escapeHtml(r.title || r.event_id || "")}</b>
+                  <span class="fit-pill ${fitPillClass(r.fit_score)}">fit ${r.fit_score ?? "—"}</span></div>
+                ${r.why ? `<p><b>Why:</b> ${escapeHtml(r.why)}</p>` : ""}
+              </div>
+            `).join("") : `<p style="font-size:.76rem;color:var(--t3);margin-top:8px;">No recommendations cleared the bar.</p>`}
           </div>
-          ${a.profile && a.profile.summary ? `<p style="font-size:.8rem;">${escapeHtml(a.profile.summary)}</p>` : ""}
-          <details><summary style="cursor:pointer;font-size:.72rem;color:var(--t2);">Raw input text</summary>
-            <div class="tl-cv">${escapeHtml(a.cv_text || "")}</div>
-          </details>
-          ${a.recommendations.length ? a.recommendations.map(r => `
-            <div class="tl-rec">
-              <p><b>${escapeHtml(r.title || r.event_id || "")}</b> &nbsp;<span class="fit-num">${r.fit_score ?? "—"}</span></p>
-              ${r.why ? `<p><b>Why:</b> ${escapeHtml(r.why)}</p>` : ""}
-            </div>
-          `).join("") : `<p style="font-size:.76rem;color:var(--t3);margin-top:8px;">No recommendations cleared the bar.</p>`}
-        </div>
-      `).join("");
+        </details>
+      `;
+      }).join("");
     }
 
     if (data.interactions.length) {
       html += `<h2 style="margin:18px 0 10px;font-size:.85rem;">Interactions (${data.interactions.length})</h2>`;
       html += data.interactions.map(i => `
-        <div class="tl-item">
+        <div class="tl-item" style="padding:12px 16px;">
           <div class="tl-top">
             <span class="badge borderline">${escapeHtml(i.event_type)}</span>
             <span style="font-size:.8rem;">${escapeHtml(i.event_title || "(event deleted)")}</span>
