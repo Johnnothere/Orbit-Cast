@@ -8,6 +8,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<!-- Leaflet: renders the per-recommendation mini map (OpenStreetMap tiles,
+     no API key, no billing account) — only loaded/used for users who grant
+     location access; see initMiniMap(). -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <style>
 /* ============================================================
    DESIGN TOKENS  (oklch light blue/white system)
@@ -281,6 +286,12 @@ header.nav.solid{border-bottom:1px solid color-mix(in oklab,var(--hairline) 70%,
   font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.2em;
   color:var(--primary);transition:opacity .2s;}
 .match-link:hover{opacity:.7;}
+/* per-recommendation map + distance — only rendered when the user granted
+   location and the venue geocoded; see hasMap in renderAIResults(). */
+.match-map{margin-top:1.25rem;height:180px;border-radius:1rem;overflow:hidden;border:1px solid var(--hairline);}
+.match-distance{margin-top:.75rem;font-size:.8125rem;color:var(--muted-foreground);}
+.match-distance a{color:var(--primary);text-decoration:none;}
+.match-distance a:hover{text-decoration:underline;}
 .empty-card{border-radius:2rem;padding:3rem 2rem;text-align:center;}
 .empty-card h2{margin-top:1.5rem;font-size:1.5rem;font-weight:500;letter-spacing:-.02em;}
 .empty-card p{margin:.75rem auto 0;max-width:28rem;font-size:.875rem;line-height:1.7;color:var(--muted-foreground);}
@@ -912,11 +923,22 @@ footer.site{border-top:1px solid var(--hairline);}
 <div class="consent-banner card-lux" id="consentBanner" style="display:none">
   <div class="consent-text">
     <strong>Help OrbitCastAI improve?</strong>
-    <span>With your OK, we'll save your CV analysis and which recommendations you click through to, so the matching engine gets better calibrated over time. Nothing is shared or sold, and you can revoke this and delete everything anytime from your browser.</span>
+    <span>With your OK, we'll keep your CV or resume — as submitted, alongside the extracted analysis — and which recommendations you click through to, so the matching engine gets better calibrated over time and your own experience improves. We set one cookie to recognise your browser between visits; nothing here is shared or sold to anyone. You can revoke this and delete everything tied to your browser anytime from Settings.</span>
   </div>
   <div class="consent-actions">
     <button class="btn-sm" onclick="setConsent(false)">Decline</button>
     <button class="btn-lux" style="padding:.625rem 1.25rem;font-size:.8125rem;" onclick="setConsent(true)">Accept</button>
+  </div>
+</div>
+
+<div class="consent-banner card-lux" id="locationBanner" style="display:none">
+  <div class="consent-text">
+    <strong>Show how far events are from you?</strong>
+    <span>Separate from the above — with your OK, we'll use your device's location to show distance and get-directions on each recommendation, and place them on a map. This never affects which events are recommended to you either way, and you can decline just this while keeping everything else.</span>
+  </div>
+  <div class="consent-actions">
+    <button class="btn-sm" onclick="setLocationConsent(false)">Decline</button>
+    <button class="btn-lux" style="padding:.625rem 1.25rem;font-size:.8125rem;" onclick="setLocationConsent(true)">Share location</button>
   </div>
 </div>
 
@@ -950,6 +972,11 @@ function persistSaved(){try{localStorage.setItem('oc_saved',JSON.stringify([...s
 const saved=loadSaved();
 let calY,calM,selDay=null;
 let lastRunTs=null,currentView='ai';
+// Set once location is granted (either freshly this session, or a stored
+// fix returned by GET /api/location on a returning visit). Distance/map on
+// recommendation cards read this directly rather than round-tripping
+// through the server on every render.
+let OC_USER_LOC=null;
 let cvFileData=null;
 
 // ── UTILS ────────────────────────────────────────────────
@@ -1249,7 +1276,7 @@ function evRow(e){
   const tm=eventTime(e);
   return '<div class="ev'+(past?' past':'')+'" style="--cat:'+catCol+'">'
     +'<div class="ev-time"><span class="soon '+ta.cls+'">'+esc(ta.txt)+'</span>'+(dt?'<span class="dt">'+esc(dt)+'</span>':'')+'<span class="tm">'+esc(tm)+'</span></div>'
-    +'<div class="ev-body"><a class="ev-title" href="'+esc(e.url)+'" target="_blank" rel="noopener">'+esc(e.title)+'</a><div class="ev-src">'+esc(e.emoji)+' '+esc(e.src)+' · '+esc(e.cat)+'</div></div>'
+    +'<div class="ev-body"><a class="ev-title" href="'+esc(e.url)+'" target="_blank" rel="noopener">'+esc(e.title)+'</a><div class="ev-src">'+esc(e.emoji)+' '+esc(e.src)+' · '+esc(e.cat)+(e.location&&e.location.toLowerCase()!=='london'?' · '+esc(e.location):'')+'</div></div>'
     +'<div class="ev-right"><button class="ic-btn" onclick="dlICS(\''+e.id+'\')" title="Add to calendar">📅</button><button class="ic-btn '+(saved.has(e.id)?'saved':'')+'" onclick="toggleStar(\''+e.id+'\',this)" title="Save">☆</button><button class="ic-btn" onclick="openLink(\''+esc(e.url)+'\')" title="View">↗</button></div>'
     +'</div>';
 }
@@ -1445,7 +1472,19 @@ function renderAIResults(data){
   }
 
   const p=data.profile||{};
-  const recs=data.recommendations||[];
+  // The backend selects and ranks these by fit_score (best match first) -
+  // that ranking stays intact in the data and on each card's score. But
+  // showing 4 cards in fit order jumps around chronologically (Dec, then
+  // June, then August) which reads as broken when you're trying to plan
+  // your calendar. Re-sort only the display order, chronologically, undated
+  // last - the fit score on each card still tells you which one is best.
+  const recs=(data.recommendations||[]).slice().sort((a,b)=>{
+    const da=parseDate(a.date), db_=parseDate(b.date);
+    if(!da&&!db_)return 0;
+    if(!da)return 1;
+    if(!db_)return -1;
+    return da-db_;
+  });
   const thin=data.evidence_level==='thin';
   const or_=data.orientation;
 
@@ -1541,16 +1580,28 @@ function renderAIResults(data){
         r.prepare?['Prepare',r.prepare]:null,
         r.benefit?['Benefit',r.benefit]:null,
       ].filter(Boolean);
+      // A map only renders for someone who granted location AND whose event
+      // venue geocoded (server-side: ai_engine only sets distance_km when
+      // both held) AND this specific page load actually has that location
+      // in hand client-side (OC_USER_LOC populated by checkLocation() on
+      // boot - it can lag behind the server on a very first page load).
+      const hasMap=r.distance_km!=null&&r.event_lat!=null&&r.event_lng!=null&&!!OC_USER_LOC;
+      const mapId='rec-map-'+i+'-'+Math.random().toString(36).slice(2,8);
       html+='<div class="match card-lux rise" style="animation-delay:'+(i*70)+'ms">'
         +'<div class="match-top"><div style="min-width:0">'
         +'<div class="match-meta"><span class="label-xs">'+esc(r.category||'')+'</span>'
-        +'<span class="mono" style="font-size:11px;color:var(--muted-foreground)">'+esc(fmtRecDate(r.date))+'</span></div>'
+        +'<span class="mono" style="font-size:11px;color:var(--muted-foreground)">'+esc(fmtRecDate(r.date))+'</span>'
+        +(r.location?'<span class="mono" style="font-size:11px;color:var(--muted-foreground)">&middot; '+esc(r.location)+'</span>':'')
+        +'</div>'
         +'<h3>'+esc(r.title||'')+'</h3></div>'
         +'<div class="match-score"><span class="num lux-text tabular">'+fit+'</span>'
         +'<p class="label-xs" style="margin-top:.25rem">'+tier.label+'</p></div></div>'
         +'<div class="meter"><i style="width:'+fit+'%;'+barStyle+'"></i></div>'
         +'<p class="match-why">'+esc(r.why||'')+'</p>'
         +(extras.length?'<div class="match-details">'+extras.map(([k,v])=>'<div class="match-detail"><b>'+k+'</b>'+esc(v)+'</div>').join('')+'</div>':'')
+        +(hasMap?'<div class="match-map" id="'+mapId+'" data-user-lat="'+OC_USER_LOC.lat+'" data-user-lng="'+OC_USER_LOC.lng+'" data-ev-lat="'+r.event_lat+'" data-ev-lng="'+r.event_lng+'"></div>':'')
+        +(r.distance_km!=null?'<p class="match-distance">'+r.distance_km+' km away'
+          +(r.directions_url?' &middot; <a href="'+esc(r.directions_url)+'" target="_blank" rel="noopener">Get directions</a>':'')+'</p>':'')
         +(r.url?'<a class="match-link" href="'+esc(r.url)+'" target="_blank" rel="noopener"'+(r.recommendation_id?' onclick="trackView('+JSON.stringify(r.recommendation_id)+')"':'')+'>View event <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></a>':'')
         +'</div>';
     });
@@ -1560,6 +1611,23 @@ function renderAIResults(data){
 
   container.innerHTML=html;
   container.scrollIntoView({behavior:'smooth',block:'start'});
+  container.querySelectorAll('.match-map').forEach(el=>initMiniMap(el));
+}
+
+// Renders a small Leaflet map with two pins (you / the event) into `el`.
+// Leaflet + OpenStreetMap tiles - no API key, no billing account. Only
+// ever called for cards where the backend already confirmed both points
+// exist (see hasMap above), so this never has to handle a missing pin.
+function initMiniMap(el){
+  if(typeof L==='undefined')return; // CDN blocked/offline - fail silently, the distance text still shows
+  const uLat=+el.dataset.userLat, uLng=+el.dataset.userLng;
+  const eLat=+el.dataset.evLat, eLng=+el.dataset.evLng;
+  const map=L.map(el,{scrollWheelZoom:false,attributionControl:true}).fitBounds([[uLat,uLng],[eLat,eLng]],{padding:[24,24]});
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    maxZoom:18,attribution:'&copy; OpenStreetMap contributors'
+  }).addTo(map);
+  L.circleMarker([uLat,uLng],{radius:7,color:'#fff',weight:2,fillColor:'#2563eb',fillOpacity:1}).addTo(map).bindPopup('You');
+  L.marker([eLat,eLng]).addTo(map).bindPopup('Event');
 }
 
 // ── .ICS ────────────────────────────────────────────────
@@ -1607,13 +1675,65 @@ async function initConsent(){
   try{
     const res=await fetch('/api/consent');
     const data=await res.json();
-    if(data.decision===null)document.getElementById('consentBanner').style.display='flex';
+    if(data.decision===null){
+      document.getElementById('consentBanner').style.display='flex';
+      return; // ask this one first - the location prompt follows once it's answered
+    }
   }catch{/* never block the app on this */}
+  checkLocationPrompt();
 }
 async function setConsent(accepted){
   document.getElementById('consentBanner').style.display='none';
   try{await fetch('/api/consent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accepted})});}catch{}
   toast(accepted?'Thanks — this helps OrbitCastAI improve over time':'Got it — nothing will be tracked or saved');
+  checkLocationPrompt();
+}
+
+// ── LOCATION (separate consent from the CV/analysis one above) ──────────
+async function checkLocationPrompt(){
+  try{
+    const res=await fetch('/api/location');
+    const data=await res.json();
+    if(data.decision===null){
+      document.getElementById('locationBanner').style.display='flex';
+    }else if(data.decision===true&&typeof data.lat==='number'){
+      OC_USER_LOC={lat:data.lat,lng:data.lng}; // returning visit - reuse the stored fix, no re-prompt
+    }
+  }catch{/* never block the app on this */}
+}
+function setLocationConsent(accepted){
+  document.getElementById('locationBanner').style.display='none';
+  if(!accepted){
+    postLocationDecision(false);
+    toast('Got it — recommendations will show without distance');
+    return;
+  }
+  if(!navigator.geolocation){
+    toast('Your browser doesn\'t support location');
+    return;
+  }
+  // This triggers the browser's own native permission dialog - our banner
+  // above is the app-level "why", this is the OS-level "are you sure".
+  navigator.geolocation.getCurrentPosition(
+    pos=>{
+      OC_USER_LOC={lat:pos.coords.latitude,lng:pos.coords.longitude};
+      postLocationDecision(true,pos.coords.latitude,pos.coords.longitude,pos.coords.accuracy);
+      toast('Thanks — recommendations will now show distance and directions');
+    },
+    err=>{
+      // Consent given at our banner but the OS/browser prompt was denied
+      // or failed - record the decline honestly rather than pretending.
+      postLocationDecision(false);
+      toast('Location wasn\'t available — recommendations will show without distance');
+    },
+    {enableHighAccuracy:false,timeout:8000,maximumAge:600000}
+  );
+}
+async function postLocationDecision(accepted,lat,lng,accuracy){
+  try{
+    await fetch('/api/location',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({accepted,lat,lng,accuracy})});
+  }catch{/* best-effort */}
 }
 
 // ── CALENDAR ────────────────────────────────────────────

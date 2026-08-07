@@ -439,6 +439,28 @@ function escapeHtml(s) {
   return (s || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// A plain <a href> can't carry the X-Admin-Secret header, so fetch the
+// bytes ourselves and hand the browser a blob to save - same auth as every
+// other admin call, just for a binary response instead of JSON.
+async function downloadRawFile(analysisId) {
+  try {
+    const r = await fetch(`/api/admin/analyses/${analysisId}/raw`, { headers: { "X-Admin-Secret": SECRET } });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || `Request failed (${r.status})`); }
+    const disposition = r.headers.get("Content-Disposition") || "";
+    const match = disposition.match(/filename="?([^"]+)"?/);
+    const filename = match ? match[1] : `resume-${analysisId}`;
+    const blob = await r.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
 // USERS
 function fmtDate(iso) {
   if (!iso) return "—";
@@ -536,6 +558,7 @@ async function showUserDetail(oc_uid) {
             <details><summary style="cursor:pointer;font-size:.72rem;color:var(--t2);">Raw input text</summary>
               <div class="tl-cv">${escapeHtml(a.cv_text || "")}</div>
             </details>
+            ${a.has_raw_file ? `<button class="ex-del" style="color:var(--blue);margin-top:8px;padding:2px 0;" onclick="downloadRawFile(${a.id})">&#8595; Download original file</button>` : ""}
             ${a.recommendations.length ? a.recommendations.map(r => `
               <div class="tl-rec">
                 <div class="tl-rec-top"><b>${escapeHtml(r.title || r.event_id || "")}</b>
