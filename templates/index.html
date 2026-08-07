@@ -550,21 +550,7 @@ footer.site{border-top:1px solid var(--hairline);}
 .consent-text strong{font-size:.875rem;font-weight:600;letter-spacing:-.01em;}
 .consent-text span{font-size:.8125rem;color:var(--muted-foreground);line-height:1.6;}
 .consent-actions{display:flex;gap:.5rem;flex-shrink:0;}
-
-/* privacy settings modal */
-.settings-overlay{position:fixed;inset:0;z-index:4000;background:oklch(0.15 0.03 260/0.45);
-  backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:1.25rem;animation:rise .2s ease;}
-.settings-modal{width:100%;max-width:32rem;max-height:85vh;overflow-y:auto;border-radius:1.5rem;padding:1.75rem;}
-.settings-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem;}
-.settings-row{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;padding-top:1.25rem;}
-.settings-row-text{flex:1;display:flex;flex-direction:column;gap:.25rem;}
-.settings-row-text strong{font-size:.875rem;font-weight:600;letter-spacing:-.01em;}
-.settings-row-text span{font-size:.8125rem;color:var(--muted-foreground);line-height:1.6;}
-.settings-row-state{font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.1em;
-  color:var(--muted-foreground);white-space:nowrap;padding-top:.2rem;}
-.settings-actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.75rem;}
-.settings-danger{margin-top:1.75rem;padding-top:1.5rem;border-top:1px solid var(--hairline);
-  display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;}
+.consent-text a{color:var(--primary);}
 
 @media(prefers-reduced-motion:reduce){
   .aurora,.marquee-track,.pulse-ring,.scanline::before,.ic-spin,.rise{animation:none!important;}
@@ -630,9 +616,6 @@ footer.site{border-top:1px solid var(--hairline);}
       <button class="nav-link" id="tabEvents" onclick="switchView('events')">Events</button>
       <button class="nav-link" id="tabCalendar" onclick="switchView('calendar')">Calendar</button>
       <button class="nav-link" id="tabHackathons" onclick="switchView('hackathons')">Hackathons</button>
-      <button class="nav-link" id="tabSettings" onclick="openSettings()" title="Privacy settings" aria-label="Privacy settings">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      </button>
       <button class="nav-cta sheen" id="navCta" onclick="scrollToConsole()">BEGIN</button>
     </div>
   </div>
@@ -938,66 +921,18 @@ footer.site{border-top:1px solid var(--hairline);}
 
 <div class="toast-wrap" id="toastWrap"></div>
 
+<!-- Single startup banner - covers both CV/analysis storage and location in
+     one accept/decline, per feedback that two separate banners plus a
+     Settings panel was too much friction. Full terms live at /privacy;
+     accepting here means accepting both uses described there. -->
 <div class="consent-banner card-lux" id="consentBanner" style="display:none">
   <div class="consent-text">
-    <strong>Help OrbitCastAI improve?</strong>
-    <span>With your OK, we'll keep your CV or resume — as submitted, alongside the extracted analysis — and which recommendations you click through to, so the matching engine gets better calibrated over time and your own experience improves. We set one cookie to recognise your browser between visits; nothing here is shared or sold to anyone. You can revoke this and delete everything tied to your browser anytime from Settings.</span>
+    <strong>Before you start</strong>
+    <span>With your OK, OrbitCastAI keeps your CV/resume as submitted, your extracted profile, and which recommendations you click — so matching improves over time — and, if your browser allows it, uses your location to show distance and a map on recommendations (this never changes which events you're shown). One cookie recognises your browser between visits; nothing is sold or shared. Full details in our <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</span>
   </div>
   <div class="consent-actions">
-    <button class="btn-sm" onclick="setConsent(false)">Decline</button>
-    <button class="btn-lux" style="padding:.625rem 1.25rem;font-size:.8125rem;" onclick="setConsent(true)">Accept</button>
-  </div>
-</div>
-
-<div class="consent-banner card-lux" id="locationBanner" style="display:none">
-  <div class="consent-text">
-    <strong>Show how far events are from you?</strong>
-    <span>Separate from the above — with your OK, we'll use your device's location to show distance and get-directions on each recommendation, and place them on a map. This never affects which events are recommended to you either way, and you can decline just this while keeping everything else.</span>
-  </div>
-  <div class="consent-actions">
-    <button class="btn-sm" onclick="setLocationConsent(false)">Decline</button>
-    <button class="btn-lux" style="padding:.625rem 1.25rem;font-size:.8125rem;" onclick="setLocationConsent(true)">Share location</button>
-  </div>
-</div>
-
-<!-- Privacy settings — lets someone who already answered either banner
-     change their mind. The consent banner text has always promised this
-     ("...from Settings") but nothing actually implemented it until now. -->
-<div class="settings-overlay" id="settingsOverlay" style="display:none" onclick="if(event.target===this)closeSettings()">
-  <div class="settings-modal card-lux">
-    <div class="settings-hd">
-      <h2 class="display-xl" style="font-size:1.5rem;">Privacy settings</h2>
-      <button class="ic-btn" onclick="closeSettings()" aria-label="Close">✕</button>
-    </div>
-    <div class="settings-row">
-      <div class="settings-row-text">
-        <strong>Save my CV &amp; analysis history</strong>
-        <span>Keeps your resume as submitted, your extracted profile, and which recommendations you click through to.</span>
-      </div>
-      <div class="settings-row-state" id="setConsentState">—</div>
-    </div>
-    <div class="settings-actions">
-      <button class="btn-sm" onclick="setConsent(false).then(refreshSettings)">Decline</button>
-      <button class="btn-lux" style="padding:.625rem 1.25rem;font-size:.8125rem;" onclick="setConsent(true).then(refreshSettings)">Accept</button>
-    </div>
-    <div class="settings-row" style="margin-top:1.5rem;">
-      <div class="settings-row-text">
-        <strong>Show distance &amp; map on recommendations</strong>
-        <span>Uses your device's location. Never affects which events are recommended — only how they're displayed.</span>
-      </div>
-      <div class="settings-row-state" id="setLocationState">—</div>
-    </div>
-    <div class="settings-actions">
-      <button class="btn-sm" onclick="setLocationConsent(false);setTimeout(refreshSettings,400)">Decline</button>
-      <button class="btn-lux" style="padding:.625rem 1.25rem;font-size:.8125rem;" onclick="setLocationConsent(true);setTimeout(refreshSettings,1200)">Share location</button>
-    </div>
-    <div class="settings-danger">
-      <div class="settings-row-text">
-        <strong>Delete everything</strong>
-        <span>Permanently erases every analysis, recommendation, interaction, and location tied to this browser. Cannot be undone.</span>
-      </div>
-      <button class="btn-sm" style="color:var(--destructive,#dc2626);border-color:currentColor;" onclick="forgetMe()">Delete my data</button>
-    </div>
+    <button class="btn-sm" onclick="respondToConsent(false)">Decline</button>
+    <button class="btn-lux" style="padding:.625rem 1.25rem;font-size:.8125rem;" onclick="respondToConsent(true)">Accept</button>
   </div>
 </div>
 
@@ -1731,109 +1666,57 @@ function trackView(recommendationId){
   }catch{/* best-effort, never block the click */}
 }
 async function initConsent(){
-  try{
-    const res=await fetch('/api/consent');
-    const data=await res.json();
-    if(data.decision===null){
-      document.getElementById('consentBanner').style.display='flex';
-      return; // ask this one first - the location prompt follows once it's answered
-    }
-  }catch{/* never block the app on this */}
-  checkLocationPrompt();
-}
-async function setConsent(accepted){
-  document.getElementById('consentBanner').style.display='none';
-  try{await fetch('/api/consent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accepted})});}catch{}
-  toast(accepted?'Thanks — this helps OrbitCastAI improve over time':'Got it — nothing will be tracked or saved');
-  checkLocationPrompt();
-}
-
-// ── LOCATION (separate consent from the CV/analysis one above) ──────────
-async function checkLocationPrompt(){
-  try{
-    const res=await fetch('/api/location');
-    const data=await res.json();
-    if(data.decision===null){
-      document.getElementById('locationBanner').style.display='flex';
-    }else if(data.decision===true&&typeof data.lat==='number'){
-      OC_USER_LOC={lat:data.lat,lng:data.lng}; // returning visit - reuse the stored fix, no re-prompt
-    }
-  }catch{/* never block the app on this */}
-}
-function setLocationConsent(accepted){
-  document.getElementById('locationBanner').style.display='none';
-  if(!accepted){
-    postLocationDecision(false);
-    toast('Got it — recommendations will show without distance');
-    return;
-  }
-  if(!navigator.geolocation){
-    toast('Your browser doesn\'t support location');
-    return;
-  }
-  // This triggers the browser's own native permission dialog - our banner
-  // above is the app-level "why", this is the OS-level "are you sure".
-  navigator.geolocation.getCurrentPosition(
-    pos=>{
-      OC_USER_LOC={lat:pos.coords.latitude,lng:pos.coords.longitude};
-      postLocationDecision(true,pos.coords.latitude,pos.coords.longitude,pos.coords.accuracy);
-      toast('Thanks — recommendations will now show distance and directions');
-    },
-    err=>{
-      // Consent given at our banner but the OS/browser prompt was denied
-      // or failed - record the decline honestly rather than pretending.
-      postLocationDecision(false);
-      toast('Location wasn\'t available — recommendations will show without distance');
-    },
-    {enableHighAccuracy:false,timeout:8000,maximumAge:600000}
-  );
-}
-async function postLocationDecision(accepted,lat,lng,accuracy){
-  try{
-    await fetch('/api/location',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({accepted,lat,lng,accuracy})});
-  }catch{/* best-effort */}
-}
-
-// ── PRIVACY SETTINGS ─────────────────────────────────────
-// The consent banner text has always said "revoke this anytime from
-// Settings" - this is that Settings. Without it, declining either banner
-// (or answering before understanding what it does) was permanent with no
-// way back short of clearing cookies, which is what someone hit here.
-async function openSettings(){
-  document.getElementById('settingsOverlay').style.display='flex';
-  document.getElementById('consentBanner').style.display='none';
-  document.getElementById('locationBanner').style.display='none';
-  await refreshSettings();
-}
-function closeSettings(){
-  document.getElementById('settingsOverlay').style.display='none';
-}
-async function refreshSettings(){
+  // One banner, shown once, on first visit only - if either decision is
+  // already on record for this browser, nothing is shown again. Reviewing
+  // or changing a past decision, or deleting everything, now lives on the
+  // /privacy page instead of a second in-app surface.
   try{
     const [c,l]=await Promise.all([
       fetch('/api/consent').then(r=>r.json()),
       fetch('/api/location').then(r=>r.json()),
     ]);
-    const cState=document.getElementById('setConsentState');
-    cState.textContent=c.decision===true?'On':(c.decision===false?'Off':'Not answered');
-    const lState=document.getElementById('setLocationState');
-    lState.innerHTML=(l.decision===true&&typeof l.lat==='number')?'On · location on file'
-      :(l.decision===true?'On':(l.decision===false?'Off':'Not answered'));
-  }catch{
-    document.getElementById('setConsentState').textContent='—';
-    document.getElementById('setLocationState').textContent='—';
-  }
+    if(c.decision===null){
+      document.getElementById('consentBanner').style.display='flex';
+      return;
+    }
+    if(l.decision===true&&typeof l.lat==='number'){
+      OC_USER_LOC={lat:l.lat,lng:l.lng}; // returning visit - reuse the stored fix, no re-prompt
+    }
+  }catch{/* never block the app on this */}
 }
-async function forgetMe(){
-  if(!confirm('This permanently deletes every analysis, recommendation, and location tied to this browser. This cannot be undone. Continue?'))return;
-  try{
-    await fetch('/api/forget',{method:'POST'});
-    toast('Done — everything tied to this browser has been deleted');
-    closeSettings();
-  }catch{
-    toast('Something went wrong — please try again');
+
+// One Accept/Decline answers both the CV/analysis storage question and the
+// location question together - declining skips the geolocation call
+// entirely; accepting attempts it, and a location-specific failure (OS
+// permission denied, unsupported browser) is recorded as just that part
+// declining, without touching the CV/analysis decision the person did say
+// yes to.
+async function respondToConsent(accepted){
+  document.getElementById('consentBanner').style.display='none';
+  try{await fetch('/api/consent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accepted})});}catch{}
+  if(!accepted){
+    try{await fetch('/api/location',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accepted:false})});}catch{}
+    toast('Got it — nothing will be tracked or saved');
+    return;
   }
+  toast('Thanks — this helps OrbitCastAI improve over time');
+  if(!navigator.geolocation)return;
+  // This triggers the browser's own native permission dialog - the banner
+  // just answered is the app-level "why", this is the OS-level "are you sure".
+  navigator.geolocation.getCurrentPosition(
+    pos=>{
+      OC_USER_LOC={lat:pos.coords.latitude,lng:pos.coords.longitude};
+      fetch('/api/location',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({accepted:true,lat:pos.coords.latitude,lng:pos.coords.longitude,accuracy:pos.coords.accuracy})}).catch(()=>{});
+    },
+    ()=>{
+      // Accepted overall but the OS/browser location prompt was denied or
+      // failed - record just the location half as declined, honestly,
+      // rather than silently pretending it succeeded.
+      fetch('/api/location',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accepted:false})}).catch(()=>{});
+    },
+    {enableHighAccuracy:false,timeout:8000,maximumAge:600000}
+  );
 }
 
 // ── CALENDAR ────────────────────────────────────────────
