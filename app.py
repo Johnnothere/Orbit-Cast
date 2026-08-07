@@ -366,6 +366,28 @@ def api_admin_set_config():
     return jsonify({"ok": True, "rules": rules, "is_custom": True})
 
 
+@app.route("/api/admin/users", methods=["GET"])
+@limiter.limit("120 per hour")
+def api_admin_list_users():
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    return jsonify({"users": db.list_users()})
+
+
+@app.route("/api/admin/users/<oc_uid>", methods=["GET"])
+@limiter.limit("120 per hour")
+def api_admin_get_user(oc_uid):
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    activity = db.get_user_activity(oc_uid)
+    if activity is None:
+        return jsonify({
+            "error": "No record for that ID - either it's never been issued, "
+                     "or that browser was never asked for consent."
+        }), 404
+    return jsonify(activity)
+
+
 # ─────────────────────────────────────────────
 # STARTUP
 # ─────────────────────────────────────────────

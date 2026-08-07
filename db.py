@@ -160,6 +160,138 @@ def save_recommendations(analysis_id, recommendations: list):
         return [None] * len(recommendations)
 
 
+def _iso(dt):
+    """timestamptz columns come back as datetime objects - stringify to ISO
+    8601 explicitly rather than relying on Flask's jsonify default encoder,
+    so the admin frontend always gets something JS's `new Date()` parses."""
+    return dt.isoformat() if dt else None
+
+
+def list_users(limit: int = 200):
+    """Admin dashboard: one row per oc_uid ever asked for consent (whether
+    they said yes or no), with activity counts, most recently active first.
+    A user who declined consent shows up with consented=false and zero
+    counts - everything downstream of that decision was never written."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return []
+            cur.execute(
+                """
+                select c.oc_uid, c.consented, c.consented_at,
+                       count(distinct a.id) as analyses_count,
+                       count(distinct i.id) as interactions_count,
+                       greatest(c.consented_at, max(a.created_at), max(i.created_at)) as last_active
+                from consent c
+                left join analyses a on a.oc_uid = c.oc_uid
+                left join interactions i on i.oc_uid = c.oc_uid
+                group by c.oc_uid, c.consented, c.consented_at
+                order by last_active desc
+                limit %s
+                """,
+                (limit,),
+            )
+            cols = ["oc_uid", "consented", "consented_at", "analyses_count",
+                    "interactions_count", "last_active"]
+            rows = []
+            for r in cur.fetchall():
+                d = dict(zip(cols, r))
+                d["consented_at"] = _iso(d["consented_at"])
+                d["last_active"] = _iso(d["last_active"])
+                rows.append(d)
+            return rows
+    except Exception as exc:
+        log.warning(f"list_users failed: {exc}")
+        return []
+
+
+def get_user_activity(oc_uid: str):
+    """The full timeline for one oc_uid: consent decision, every analysis
+    they ran (each with its recommendations nested), and every interaction
+    (event clicks). Returns None if this oc_uid has no consent record at
+    all - i.e. it was never issued a cookie that reached /api/consent, so
+    there is nothing to show, distinct from a real user with zero activity."""
+    if not oc_uid:
+        return None
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+
+            cur.execute(
+                "select oc_uid, consented, consented_at, updated_at from consent where oc_uid = %s",
+                (oc_uid,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            consent = dict(zip(["oc_uid", "consented", "consented_at", "updated_at"], row))
+            consent["consented_at"] = _iso(consent["consented_at"])
+            consent["updated_at"] = _iso(consent["updated_at"])
+
+            cur.execute(
+                """
+                select id, created_at, is_cv, cv_text, profile
+                from analyses where oc_uid = %s order by created_at desc
+                """,
+                (oc_uid,),
+            )
+            a_cols = ["id", "created_at", "is_cv", "cv_text", "profile"]
+            analyses = [dict(zip(a_cols, r)) for r in cur.fetchall()]
+            for a in analyses:
+                a["created_at"] = _iso(a["created_at"])
+                # profile is jsonb - psycopg2-binary auto-decodes it to a
+                # dict, but guard the off chance it comes back as a raw
+                # string rather than crash the whole admin view over it.
+                if isinstance(a["profile"], str):
+                    try:
+                        a["profile"] = json.loads(a["profile"])
+                    except Exception:
+                        pass
+
+            analysis_ids = [a["id"] for a in analyses]
+            recs_by_analysis = {aid: [] for aid in analysis_ids}
+            if analysis_ids:
+                cur.execute(
+                    """
+                    select id, analysis_id, event_id, title, category, fit_score,
+                           why, why_now, prepare, benefit, created_at
+                    from recommendations
+                    where analysis_id = any(%s)
+                    order by fit_score desc nulls last
+                    """,
+                    (analysis_ids,),
+                )
+                r_cols = ["id", "analysis_id", "event_id", "title", "category", "fit_score",
+                          "why", "why_now", "prepare", "benefit", "created_at"]
+                for r in cur.fetchall():
+                    rec = dict(zip(r_cols, r))
+                    rec["created_at"] = _iso(rec["created_at"])
+                    recs_by_analysis.setdefault(rec["analysis_id"], []).append(rec)
+            for a in analyses:
+                a["recommendations"] = recs_by_analysis.get(a["id"], [])
+
+            cur.execute(
+                """
+                select i.id, i.recommendation_id, i.event_type, i.created_at, r.title
+                from interactions i
+                left join recommendations r on r.id = i.recommendation_id
+                where i.oc_uid = %s
+                order by i.created_at desc
+                """,
+                (oc_uid,),
+            )
+            i_cols = ["id", "recommendation_id", "event_type", "created_at", "event_title"]
+            interactions = [dict(zip(i_cols, r)) for r in cur.fetchall()]
+            for i in interactions:
+                i["created_at"] = _iso(i["created_at"])
+
+            return {"consent": consent, "analyses": analyses, "interactions": interactions}
+    except Exception as exc:
+        log.warning(f"get_user_activity failed: {exc}")
+        return None
+
+
 # --------------------------------------------------------------------------
 # Interactions (implicit signal)
 # --------------------------------------------------------------------------
