@@ -41,17 +41,26 @@ def init_security(app):
         response.headers["X-Content-Type-Options"] = "nosniff"
         # Control referrer information
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        # Permissions policy — lock down browser features
+        # Permissions policy — lock down browser features.
+        # geolocation=(self): the opt-in location feature (map + distance
+        # to events) needs navigator.geolocation from this origin. It was
+        # geolocation=() before, which blocks the API at the browser level
+        # regardless of any in-page consent UI - that had to change first,
+        # or the location consent banner would prompt for something the
+        # browser silently refuses to ever grant.
         response.headers["Permissions-Policy"] = (
-            "geolocation=(), camera=(), microphone=(), payment=()"
+            "geolocation=(self), camera=(), microphone=(), payment=()"
         )
         # Content Security Policy
         # 'unsafe-inline' is needed for the inline <script> and <style> blocks.
         # To remove it: move all JS/CSS to external files and add a nonce.
+        # unpkg.com is whitelisted for Leaflet (the map library) - map tiles
+        # themselves are plain <img> requests, already covered by the
+        # existing broad img-src https: allowance.
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline'; "
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "script-src 'self' 'unsafe-inline' https://unpkg.com; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "
             "font-src https://fonts.gstatic.com; "
             "img-src 'self' data: https:; "
             "connect-src 'self'; "

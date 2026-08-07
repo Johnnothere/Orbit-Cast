@@ -25,12 +25,14 @@ Deps used on demand:  anthropic, pdfplumber, python-docx
 import io
 import json
 import logging
+import math
 import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
+import requests
 from anthropic import Anthropic
 
 log = logging.getLogger("orbitcast.ai")
@@ -296,6 +298,7 @@ def build_compact_events(events: list) -> list:
             "emoji": e.get("emoji", ""),
             "format": _infer_format(e.get("title", "")),
             "description": (e.get("description", "") or "")[:400],
+            "location": e.get("location", ""),
         })
     return compact
 
@@ -819,9 +822,83 @@ def critique_recommendations(profile: dict, recommendations: list) -> list:
 
 
 # --------------------------------------------------------------------------
+# 5b. Event geocoding + distance - free, keyless: OpenStreetMap's Nominatim
+# for text -> lat/lng, plain Haversine for distance. No Google Maps API key,
+# no billing account, nothing for the operator to configure. A "get
+# directions" link still deep-links to Google Maps for real turn-by-turn
+# routing - that needs no API key either, it's just a URL scheme.
+# --------------------------------------------------------------------------
+_GEOCODE_CACHE: dict = {}          # location text -> {lat,lng} | None (negative-cached too)
+_NOMINATIM_LAST_CALL = [0.0]       # single-element list = mutable closure cell
+_NOMINATIM_MIN_INTERVAL = 1.05     # Nominatim's usage policy: max 1 req/sec
+
+
+def geocode_location(location_text: str):
+    """Text -> {"lat":.., "lng":..} via OpenStreetMap Nominatim, or None if
+    it can't be resolved or the lookup fails. Cached in-memory per unique
+    location string - event locations are a small, slow-changing set (a few
+    dozen venues), so this rarely makes a real network call after warmup.
+    Never raises: geocoding is a nice-to-have (map + distance), not
+    something that should be able to break a recommendation."""
+    text = (location_text or "").strip()
+    if not text or text.lower() == "london":
+        return None  # too vague to place a pin - "London" alone isn't a venue
+    if text in _GEOCODE_CACHE:
+        return _GEOCODE_CACHE[text]
+
+    elapsed = time.time() - _NOMINATIM_LAST_CALL[0]
+    if elapsed < _NOMINATIM_MIN_INTERVAL:
+        time.sleep(_NOMINATIM_MIN_INTERVAL - elapsed)
+    _NOMINATIM_LAST_CALL[0] = time.time()
+
+    result = None
+    try:
+        resp = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"format": "json", "q": text, "limit": 1, "countrycodes": "gb"},
+            # Nominatim's usage policy requires an identifying User-Agent -
+            # an unlabelled default requests UA gets blocked.
+            headers={"User-Agent": "OrbitCastAI/1.0 (event recommendation app)"},
+            timeout=5,
+        )
+        rows = resp.json()
+        if rows:
+            result = {"lat": float(rows[0]["lat"]), "lng": float(rows[0]["lon"])}
+    except Exception as exc:
+        log.warning(f"geocode_location failed for {text!r}: {exc}")
+
+    _GEOCODE_CACHE[text] = result
+    return result
+
+
+def _haversine_km(lat1, lng1, lat2, lng2) -> float:
+    r = 6371.0  # Earth radius, km
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = math.radians(lat2 - lat1), math.radians(lng2 - lng1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def directions_url(origin_lat, origin_lng, dest_lat, dest_lng) -> str:
+    """A plain Google Maps deep link - no API key, no billing account.
+    Opens the Maps app on mobile or maps.google.com on desktop with real
+    turn-by-turn transit/walking directions already loaded."""
+    return (
+        "https://www.google.com/maps/dir/?api=1"
+        f"&origin={origin_lat},{origin_lng}&destination={dest_lat},{dest_lng}"
+        "&travelmode=transit"
+    )
+
+
+# --------------------------------------------------------------------------
 # 6. Orchestration - the single entry point the route calls
 # --------------------------------------------------------------------------
-def analyze_upload(file_text: str, events: list) -> dict:
+def analyze_upload(file_text: str, events: list, user_location: dict = None) -> dict:
+    """user_location, when the person has granted it, is {"lat":.., "lng":..}
+    - used only to attach a distance and directions link to each
+    recommendation. Never required: every path below degrades to no
+    distance/no map rather than failing when it's absent or a geocode
+    lookup can't resolve a venue."""
     if not file_text or not file_text.strip():
         return _empty_result("That file looks empty - try a PDF, DOCX, or TXT CV.")
 
@@ -921,10 +998,26 @@ def analyze_upload(file_text: str, events: list) -> dict:
     enriched = []
     for r in recs[:MAX_RECOMMENDATIONS]:
         ev = by_id.get(r["event_id"], {})
-        enriched.append({**r, "category": ev.get("category", ""),
-                          "date": ev.get("date", ""), "source": ev.get("source", ""),
-                          "url": ev.get("url", ""), "emoji": ev.get("emoji", ""),
-                          "format": ev.get("format", "")})
+        location = ev.get("location", "")
+        row = {**r, "category": ev.get("category", ""),
+               "date": ev.get("date", ""), "source": ev.get("source", ""),
+               "url": ev.get("url", ""), "emoji": ev.get("emoji", ""),
+               "format": ev.get("format", ""), "location": location}
+
+        # Distance + directions, only when the person granted location AND
+        # the venue text resolves to a real point - both best-effort, never
+        # required for a recommendation to render.
+        if user_location and location:
+            geo = geocode_location(location)
+            if geo:
+                row["event_lat"] = geo["lat"]
+                row["event_lng"] = geo["lng"]
+                row["distance_km"] = round(
+                    _haversine_km(user_location["lat"], user_location["lng"],
+                                  geo["lat"], geo["lng"]), 1)
+                row["directions_url"] = directions_url(
+                    user_location["lat"], user_location["lng"], geo["lat"], geo["lng"])
+        enriched.append(row)
 
     data["recommendations"] = enriched
     return data

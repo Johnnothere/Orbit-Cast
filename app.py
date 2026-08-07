@@ -204,7 +204,16 @@ def api_analyze():
     if not events:
         return jsonify({"error": "No events available. Try refreshing first."}), 404
 
-    result = ai_engine.analyze_upload(file_text, events)
+    # Read-only cookie peek (does not mint one) - only used to look up a
+    # location this browser already granted, so recommendations can carry a
+    # distance + directions link. None on any first visit or decline; the
+    # analysis runs identically either way.
+    _existing_oc_uid = request.cookies.get("oc_uid")
+    user_location = None
+    if _existing_oc_uid and db.get_location_consent(_existing_oc_uid):
+        user_location = db.get_latest_location(_existing_oc_uid)
+
+    result = ai_engine.analyze_upload(file_text, events, user_location=user_location)
 
     resp = jsonify(result)
     oc_uid = ensure_oc_uid(resp)
@@ -213,6 +222,11 @@ def api_analyze():
     if db.get_consent(oc_uid):
         try:
             analysis_id = db.save_analysis(oc_uid, result.get("is_cv", False), file_text, result.get("profile"))
+            # The original file, byte-for-byte, stored alongside the
+            # extracted-text row above - same consent gate, additive only.
+            # The extraction pipeline above is untouched by this.
+            if file and file.filename and analysis_id is not None:
+                db.save_raw_file(analysis_id, file.filename, file.mimetype, file_bytes)
             recs = result.get("recommendations", [])
             rec_ids = db.save_recommendations(analysis_id, recs)
             for rec, rec_id in zip(recs, rec_ids):
@@ -240,6 +254,35 @@ def api_consent():
     oc_uid = ensure_oc_uid(resp)
     db.set_consent(oc_uid, accepted)
     return resp
+
+@app.route("/api/location", methods=["GET", "POST"])
+def api_location():
+    if request.method == "GET":
+        oc_uid = request.cookies.get("oc_uid")
+        decision = db.get_location_consent(oc_uid) if oc_uid else None
+        # On a returning visit where location was already granted, hand back
+        # the last known fix so the page doesn't have to re-prompt the OS
+        # geolocation dialog on every load just to draw the map/distance.
+        loc = db.get_latest_location(oc_uid) if (oc_uid and decision) else None
+        return jsonify({"decision": decision, "lat": loc["lat"] if loc else None,
+                         "lng": loc["lng"] if loc else None})
+
+    data = request.get_json(silent=True) or {}
+    accepted = bool(data.get("accepted"))
+    resp = jsonify({"ok": True, "decision": accepted})
+    oc_uid = ensure_oc_uid(resp)
+    # location_consented lives on the consent row, so that row must exist
+    # first - it does by the time this can fire, since the location prompt
+    # only ever appears after the general consent banner has been answered.
+    if db.get_consent(oc_uid) is None:
+        db.set_consent(oc_uid, False)
+    db.set_location_consent(oc_uid, accepted)
+    if accepted:
+        lat, lng = data.get("lat"), data.get("lng")
+        if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
+            db.save_user_location(oc_uid, lat, lng, data.get("accuracy"))
+    return resp
+
 
 @app.route("/api/track", methods=["POST"])
 @limiter.limit("200 per hour")
@@ -364,6 +407,22 @@ def api_admin_set_config():
         return jsonify({"error": "rules text cannot be empty - use reset instead to clear an override."}), 400
     db.set_config(ai_engine.CONFIG_KEY_SCORING_RULES, rules)
     return jsonify({"ok": True, "rules": rules, "is_custom": True})
+
+
+@app.route("/api/admin/analyses/<int:analysis_id>/raw", methods=["GET"])
+@limiter.limit("60 per hour")
+def api_admin_download_raw(analysis_id):
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    raw = db.get_raw_file(analysis_id)
+    if raw is None:
+        return jsonify({"error": "No original file stored for this analysis - it may have been a "
+                                  "pasted-text submission, or predates this feature."}), 404
+    resp = make_response(raw["file_bytes"])
+    resp.headers["Content-Type"] = raw["content_type"] or "application/octet-stream"
+    safe_name = (raw["filename"] or "resume").replace('"', "")
+    resp.headers["Content-Disposition"] = f'attachment; filename="{safe_name}"'
+    return resp
 
 
 @app.route("/api/admin/users", methods=["GET"])

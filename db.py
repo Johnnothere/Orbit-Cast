@@ -94,6 +94,88 @@ def set_consent(oc_uid: str, consented: bool) -> bool:
         return False
 
 
+def get_location_consent(oc_uid: str):
+    """Same True/False/None contract as get_consent, but for the separate
+    location permission - granting GPS access is a different decision from
+    letting us save a CV, so it gets its own yes/no rather than piggybacking
+    on the general consent flag."""
+    if not oc_uid:
+        return None
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute("select location_consented from consent where oc_uid = %s", (oc_uid,))
+            row = cur.fetchone()
+            return row[0] if row else None
+    except Exception as exc:
+        log.warning(f"get_location_consent failed: {exc}")
+        return None
+
+
+def set_location_consent(oc_uid: str, consented: bool) -> bool:
+    """Requires a consent row to already exist (i.e. the general consent
+    banner must have been shown first) since location_consented lives on
+    that same table - the app's flow enforces this ordering."""
+    if not oc_uid:
+        return False
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                """
+                update consent
+                set location_consented = %s, location_consented_at = now()
+                where oc_uid = %s
+                """,
+                (consented, oc_uid),
+            )
+            return cur.rowcount > 0
+    except Exception as exc:
+        log.warning(f"set_location_consent failed: {exc}")
+        return False
+
+
+def save_user_location(oc_uid: str, lat: float, lng: float, accuracy_m: float = None) -> bool:
+    if not oc_uid:
+        return False
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                "insert into user_locations (oc_uid, lat, lng, accuracy_m) values (%s, %s, %s, %s)",
+                (oc_uid, lat, lng, accuracy_m),
+            )
+            return True
+    except Exception as exc:
+        log.warning(f"save_user_location failed: {exc}")
+        return False
+
+
+def get_latest_location(oc_uid: str):
+    """The most recent fix for this oc_uid, or None if they never granted
+    location or a lookup failed. Used to compute distance-to-event; never
+    raises, so a DB hiccup just means recommendations render without
+    distances rather than breaking the analysis."""
+    if not oc_uid:
+        return None
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute(
+                "select lat, lng from user_locations where oc_uid = %s order by created_at desc limit 1",
+                (oc_uid,),
+            )
+            row = cur.fetchone()
+            return {"lat": row[0], "lng": row[1]} if row else None
+    except Exception as exc:
+        log.warning(f"get_latest_location failed: {exc}")
+        return None
+
+
 def forget(oc_uid: str) -> bool:
     """GDPR delete: wipes every row tied to this oc_uid, consent record included."""
     if not oc_uid:
@@ -129,6 +211,60 @@ def save_analysis(oc_uid: str, is_cv: bool, cv_text: str, profile: dict):
             return cur.fetchone()[0]
     except Exception as exc:
         log.warning(f"save_analysis failed: {exc}")
+        return None
+
+
+def save_raw_file(analysis_id, filename: str, content_type: str, file_bytes: bytes):
+    """Stores the ORIGINAL uploaded file byte-for-byte, alongside the
+    extracted-text analysis row it belongs to. Only ever called after the
+    same consent check that gates save_analysis - this is additive storage
+    for the same purpose, not a separate consent surface."""
+    if analysis_id is None or not file_bytes:
+        return None
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute(
+                """
+                insert into raw_files (analysis_id, filename, content_type, file_bytes, size_bytes)
+                values (%s, %s, %s, %s, %s)
+                returning id
+                """,
+                # psycopg2 auto-adapts a plain `bytes` value to bytea - no
+                # explicit Binary() wrapper needed (registered by default on
+                # import, matching the lazy-import style the rest of this
+                # module uses for the psycopg2 dependency).
+                (analysis_id, filename, content_type, file_bytes, len(file_bytes)),
+            )
+            return cur.fetchone()[0]
+    except Exception as exc:
+        log.warning(f"save_raw_file failed: {exc}")
+        return None
+
+
+def get_raw_file(analysis_id):
+    """Returns {filename, content_type, file_bytes} for the admin download
+    route, or None if this analysis has no stored original file (text-only
+    submission, consent declined, or it predates this feature)."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute(
+                """
+                select filename, content_type, file_bytes
+                from raw_files where analysis_id = %s
+                order by created_at desc limit 1
+                """,
+                (analysis_id,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            return {"filename": row[0], "content_type": row[1], "file_bytes": bytes(row[2])}
+    except Exception as exc:
+        log.warning(f"get_raw_file failed: {exc}")
         return None
 
 
@@ -231,12 +367,13 @@ def get_user_activity(oc_uid: str):
 
             cur.execute(
                 """
-                select id, created_at, is_cv, cv_text, profile
-                from analyses where oc_uid = %s order by created_at desc
+                select a.id, a.created_at, a.is_cv, a.cv_text, a.profile,
+                       exists(select 1 from raw_files rf where rf.analysis_id = a.id) as has_raw_file
+                from analyses a where a.oc_uid = %s order by a.created_at desc
                 """,
                 (oc_uid,),
             )
-            a_cols = ["id", "created_at", "is_cv", "cv_text", "profile"]
+            a_cols = ["id", "created_at", "is_cv", "cv_text", "profile", "has_raw_file"]
             analyses = [dict(zip(a_cols, r)) for r in cur.fetchall()]
             for a in analyses:
                 a["created_at"] = _iso(a["created_at"])
