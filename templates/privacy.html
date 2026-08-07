@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy Policy & Terms — OrbitCastAI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f4f7fd;--card:#ffffff;--hairline:#e2e8f4;--text:#12142a;--muted:#65667a;--primary:#2563eb;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',sans-serif;line-height:1.7;font-size:15px;}
+main{max-width:44rem;margin:0 auto;padding:3rem 1.5rem 6rem;}
+a.back{font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:var(--primary);text-decoration:none;}
+h1{font-size:1.75rem;font-weight:600;letter-spacing:-.02em;margin:1.25rem 0 .5rem;}
+.updated{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2.5rem;}
+h2{font-size:1.05rem;font-weight:600;letter-spacing:-.01em;margin:2.25rem 0 .75rem;}
+p,li{color:color-mix(in oklab,var(--text) 88%,transparent);margin-bottom:.75rem;}
+ul{padding-left:1.25rem;margin-bottom:.75rem;}
+strong{font-weight:600;}
+.card{background:var(--card);border:1px solid var(--hairline);border-radius:1.25rem;padding:1.5rem 1.75rem;margin:1.5rem 0;}
+.danger{border-color:color-mix(in oklab,#dc2626 25%,var(--hairline));}
+button{font-family:'IBM Plex Sans',sans-serif;font-weight:600;font-size:.85rem;padding:.7rem 1.25rem;border-radius:999px;
+  border:1px solid color-mix(in oklab,#dc2626 40%,transparent);background:#fff;color:#dc2626;cursor:pointer;}
+button:hover{background:#fef2f2;}
+.msg{font-family:'IBM Plex Mono',monospace;font-size:.75rem;margin-top:.75rem;color:var(--muted);}
+.note{font-size:.8rem;color:var(--muted);font-style:italic;}
+</style>
+</head>
+<body>
+<main>
+  <a class="back" href="/">&larr; Back to OrbitCastAI</a>
+  <h1>Privacy Policy &amp; Terms</h1>
+  <p class="updated">Last updated 7 August 2026</p>
+
+  <p>This page explains, in plain language, what OrbitCastAI collects, why, and what choices you have. It applies whenever you use the site at this domain.</p>
+
+  <h2>1. What we collect, and only with your OK</h2>
+  <p>Nothing described below is collected unless you accept the banner shown on your first visit. Declining means none of this is stored — the app still works, matching you to events in that single session, but nothing persists after you leave.</p>
+  <p>If you accept, we keep:</p>
+  <ul>
+    <li><strong>Your CV or resume</strong>, as submitted (the original file, plus the text OrbitCastAI extracted from it).</li>
+    <li><strong>Your extracted profile</strong> — the honest read of strengths, gaps, and trajectory OrbitCastAI generated from what you gave us.</li>
+    <li><strong>Which recommendations you were shown, and which you clicked through to</strong> — used only to calibrate the matching engine over time.</li>
+    <li><strong>Your location, if you separately allow it</strong> — used only to show distance and a map on recommendations. This never changes which events are recommended to you.</li>
+  </ul>
+
+  <h2>2. Cookies</h2>
+  <p>We set one cookie (<code>oc_uid</code>) so your browser is recognised between visits. It's a random identifier — not your name, email, or any other identity. It is not used for advertising and is not shared with any ad network or data broker.</p>
+
+  <h2>3. What we don't do</h2>
+  <ul>
+    <li>We don't sell or share your data with any third party.</li>
+    <li>We don't use your CV, profile, or location for anything beyond running and improving OrbitCastAI's own matching engine.</li>
+    <li>We don't require an account, email, or real-name identity to use the service.</li>
+  </ul>
+
+  <h2>4. How matching works</h2>
+  <p>OrbitCastAI reads your CV or self-description, scores it honestly against a live catalog of events, and shows only the ones that genuinely fit — often none. Recommendations are ranked by fit, not by anything you pay for or anyone else's promotion.</p>
+
+  <h2>5. Your rights</h2>
+  <p>You can request deletion of everything tied to your browser at any time — no reason needed, no account required. This permanently erases your stored CV/resume, profile, analyses, recommendations, click history, and location, and cannot be undone.</p>
+
+  <div class="card danger">
+    <p style="margin-bottom:1rem;"><strong>Delete everything tied to this browser</strong></p>
+    <button onclick="forgetMe()">Delete my data</button>
+    <div class="msg" id="forgetMsg"></div>
+  </div>
+
+  <h2>6. Changes to this policy</h2>
+  <p>If what we collect or why changes materially, the "Last updated" date above will change and, where the change is significant, the consent banner will be shown again.</p>
+
+  <p class="note">This document describes OrbitCastAI's actual data handling as implemented in the product. It is not a substitute for legal advice on your specific regulatory obligations (e.g. UK GDPR) — consult counsel before relying on it as your sole compliance documentation.</p>
+</main>
+<script>
+async function forgetMe(){
+  if(!confirm('This permanently deletes every analysis, recommendation, and location tied to this browser. This cannot be undone. Continue?'))return;
+  const msg=document.getElementById('forgetMsg');
+  msg.textContent='Deleting…';
+  try{
+    await fetch('/api/forget',{method:'POST'});
+    msg.textContent='Done — everything tied to this browser has been deleted.';
+  }catch{
+    msg.textContent='Something went wrong — please try again.';
+  }
+}
+</script>
+</body>
+</html>

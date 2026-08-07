@@ -166,6 +166,10 @@ def dashboard():
     ensure_oc_uid(resp)
     return resp
 
+@app.route("/privacy")
+def privacy_policy():
+    return render_template("privacy.html")
+
 # ─────────────────────────────────────────────
 # ORBITCAST AI  — Claude-powered CV analysis
 # ─────────────────────────────────────────────
