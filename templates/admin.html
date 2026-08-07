@@ -65,6 +65,25 @@ textarea:focus,input:focus,select:focus{border-color:var(--blue);}
 .msg.ok{color:var(--ok);}
 .msg.err{color:var(--dead);}
 
+/* USERS */
+.lookup-row{display:flex;gap:8px;margin-bottom:16px;}
+.lookup-row input{flex:1;font-family:'IBM Plex Mono',monospace;}
+.u-table{width:100%;border-collapse:collapse;font-size:.8rem;}
+.u-table th{text-align:left;font-family:'IBM Plex Mono',monospace;font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;color:var(--t3);padding:8px 10px;border-bottom:1px solid var(--border);}
+.u-table td{padding:10px;border-bottom:1px solid var(--border);vertical-align:middle;}
+.u-table tr.clickable{cursor:pointer;}
+.u-table tr.clickable:hover td{background:var(--sf2);}
+.u-id{font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:var(--text);}
+.u-back{font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:var(--blue);background:none;border:none;cursor:pointer;margin-bottom:14px;padding:0;}
+.tl-item{border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px;}
+.tl-top{display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;}
+.tl-time{font-family:'IBM Plex Mono',monospace;font-size:.62rem;color:var(--t3);margin-left:auto;}
+.tl-cv{font-size:.8rem;color:var(--t2);white-space:pre-wrap;background:var(--sf2);border-radius:8px;padding:10px 12px;margin-top:8px;max-height:160px;overflow-y:auto;}
+.tl-rec{border-top:1px solid var(--border);margin-top:10px;padding-top:10px;}
+.tl-rec p{font-size:.76rem;margin-bottom:3px;}
+.tl-rec b{color:var(--t2);font-weight:600;}
+.fit-num{font-family:'IBM Plex Mono',monospace;font-weight:600;color:var(--blue);}
+
 /* EXAMPLES LIST */
 .ex-row{border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px;}
 .ex-top{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
@@ -102,6 +121,7 @@ textarea:focus,input:focus,select:focus{border-color:var(--blue);}
       <button class="tab active" data-tab="upload">Upload Dataset</button>
       <button class="tab" data-tab="examples">Examples</button>
       <button class="tab" data-tab="rules">Scoring Rules</button>
+      <button class="tab" data-tab="users">Users</button>
     </div>
 
     <!-- UPLOAD -->
@@ -159,6 +179,32 @@ textarea:focus,input:focus,select:focus{border-color:var(--blue);}
         <div class="msg" id="rules-msg"></div>
       </div>
     </div>
+
+    <!-- USERS -->
+    <div class="panel" id="panel-users">
+      <div class="card">
+        <h2>Look up a specific user</h2>
+        <p class="hint">Paste an oc_uid (the value of their <code>oc_uid</code> cookie) to see everything tied to that browser, or click any row below.</p>
+        <div class="lookup-row">
+          <input type="text" id="u-lookup-input" placeholder="oc_uid, e.g. a1b2c3d4e5f6...">
+          <button class="btn" id="u-lookup-btn">Look up</button>
+        </div>
+        <div class="msg" id="u-lookup-msg"></div>
+      </div>
+
+      <div class="card" id="users-list-card">
+        <h2>All users</h2>
+        <p class="hint">Everyone ever asked for consent, most recently active first. Only consented users have analyses/interactions - a decline shows zero activity by design.</p>
+        <div id="users-list"><div class="empty">Loading…</div></div>
+      </div>
+
+      <div class="card" id="user-detail-card" style="display:none;">
+        <button class="u-back" id="u-back-btn">&larr; Back to all users</button>
+        <h2 id="u-detail-id"></h2>
+        <p class="hint" id="u-detail-meta"></p>
+        <div id="user-detail-body"></div>
+      </div>
+    </div>
   </main>
 </div>
 
@@ -183,6 +229,7 @@ async function tryUnlock(secret) {
   document.getElementById("app").style.display = "block";
   loadExamples();
   loadRules();
+  loadUsers();
 }
 
 document.getElementById("unlock-btn").onclick = async () => {
@@ -215,6 +262,7 @@ document.querySelectorAll(".tab").forEach(btn => {
     document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
     btn.classList.add("active");
     document.getElementById("panel-" + btn.dataset.tab).classList.add("active");
+    if (btn.dataset.tab === "users") loadUsers();
   };
 });
 
@@ -366,6 +414,121 @@ document.getElementById("reset-rules-btn").onclick = async () => {
 function escapeHtml(s) {
   return (s || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
+
+// USERS
+function fmtDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return isNaN(d) ? iso : d.toLocaleString();
+}
+
+async function loadUsers() {
+  document.getElementById("users-list-card").style.display = "block";
+  document.getElementById("user-detail-card").style.display = "none";
+  const list = document.getElementById("users-list");
+  list.innerHTML = `<div class="empty">Loading…</div>`;
+  try {
+    const data = await api("/api/admin/users");
+    if (!data.users.length) {
+      list.innerHTML = `<div class="empty">No one has been asked for consent yet.</div>`;
+      return;
+    }
+    list.innerHTML = `<table class="u-table"><thead><tr>
+        <th>oc_uid</th><th>Consented</th><th>Analyses</th><th>Interactions</th><th>Last active</th>
+      </tr></thead><tbody>` + data.users.map(u => `
+        <tr class="clickable" data-uid="${escapeHtml(u.oc_uid)}">
+          <td class="u-id">${escapeHtml(u.oc_uid)}</td>
+          <td>${u.consented ? "yes" : "no"}</td>
+          <td>${u.analyses_count}</td>
+          <td>${u.interactions_count}</td>
+          <td>${fmtDate(u.last_active)}</td>
+        </tr>
+      `).join("") + `</tbody></table>`;
+    list.querySelectorAll("tr[data-uid]").forEach(tr => {
+      tr.onclick = () => showUserDetail(tr.dataset.uid);
+    });
+  } catch (e) {
+    list.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function showUserDetail(oc_uid) {
+  document.getElementById("users-list-card").style.display = "none";
+  const card = document.getElementById("user-detail-card");
+  card.style.display = "block";
+  document.getElementById("u-detail-id").textContent = oc_uid;
+  document.getElementById("u-detail-meta").textContent = "Loading…";
+  const body = document.getElementById("user-detail-body");
+  body.innerHTML = "";
+  try {
+    const data = await api(`/api/admin/users/${encodeURIComponent(oc_uid)}`);
+    const c = data.consent;
+    document.getElementById("u-detail-meta").textContent =
+      `Consent: ${c.consented ? "yes" : "no"} · first seen ${fmtDate(c.consented_at)} · last updated ${fmtDate(c.updated_at)}`;
+
+    let html = "";
+    if (!data.analyses.length && !data.interactions.length) {
+      html = `<div class="empty">${c.consented ? "Consented, but no activity recorded yet." : "Declined consent - nothing else is stored for this ID."}</div>`;
+    }
+
+    if (data.analyses.length) {
+      html += `<h2 style="margin:18px 0 10px;font-size:.85rem;">Analyses (${data.analyses.length})</h2>`;
+      html += data.analyses.map(a => `
+        <div class="tl-item">
+          <div class="tl-top">
+            <span class="badge ${a.is_cv ? "good" : "bad"}">${a.is_cv ? "usable" : "unusable"}</span>
+            <span class="tl-time">${fmtDate(a.created_at)}</span>
+          </div>
+          ${a.profile && a.profile.summary ? `<p style="font-size:.8rem;">${escapeHtml(a.profile.summary)}</p>` : ""}
+          <details><summary style="cursor:pointer;font-size:.72rem;color:var(--t2);">Raw input text</summary>
+            <div class="tl-cv">${escapeHtml(a.cv_text || "")}</div>
+          </details>
+          ${a.recommendations.length ? a.recommendations.map(r => `
+            <div class="tl-rec">
+              <p><b>${escapeHtml(r.title || r.event_id || "")}</b> &nbsp;<span class="fit-num">${r.fit_score ?? "—"}</span></p>
+              ${r.why ? `<p><b>Why:</b> ${escapeHtml(r.why)}</p>` : ""}
+            </div>
+          `).join("") : `<p style="font-size:.76rem;color:var(--t3);margin-top:8px;">No recommendations cleared the bar.</p>`}
+        </div>
+      `).join("");
+    }
+
+    if (data.interactions.length) {
+      html += `<h2 style="margin:18px 0 10px;font-size:.85rem;">Interactions (${data.interactions.length})</h2>`;
+      html += data.interactions.map(i => `
+        <div class="tl-item">
+          <div class="tl-top">
+            <span class="badge borderline">${escapeHtml(i.event_type)}</span>
+            <span style="font-size:.8rem;">${escapeHtml(i.event_title || "(event deleted)")}</span>
+            <span class="tl-time">${fmtDate(i.created_at)}</span>
+          </div>
+        </div>
+      `).join("");
+    }
+
+    body.innerHTML = html;
+  } catch (e) {
+    document.getElementById("u-detail-meta").textContent = "";
+    body.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+document.getElementById("u-back-btn").onclick = () => {
+  document.getElementById("user-detail-card").style.display = "none";
+  document.getElementById("users-list-card").style.display = "block";
+};
+
+document.getElementById("u-lookup-btn").onclick = () => {
+  const msg = document.getElementById("u-lookup-msg");
+  const val = document.getElementById("u-lookup-input").value.trim();
+  msg.className = "msg";
+  msg.textContent = "";
+  if (!val) { msg.className = "msg err"; msg.textContent = "Paste an oc_uid first."; return; }
+  showUserDetail(val).catch(() => {});
+};
+document.getElementById("u-lookup-input").addEventListener("keydown", e => {
+  if (e.key === "Enter") document.getElementById("u-lookup-btn").click();
+});
 </script>
 </body>
 </html>
