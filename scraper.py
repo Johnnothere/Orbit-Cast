@@ -616,6 +616,30 @@ def scrape_cyber_infosec():
 # LUMA DISCOVER
 # ─────────────────────────────────────────────
 
+# Luma's geo-discover endpoint returns EVERY public event within the radius
+# regardless of topic - confirmed live: of ~43 results, the clear majority
+# were hikes, brunches, padel, pottery, wakeboarding, canoeing, picnics.
+# Genuinely relevant ones ("Monad Blitz London Hackathon", "HackWimbledon",
+# "Introduction to Electronics and Computing") were a small minority mixed
+# in. Tagging the whole feed "Builder & Tech Community" was wrong for most
+# of it - same "precision over volume" call as _SECURITY_TITLE_RE above:
+# the API gives us no category/description field to filter on, only the
+# title, so title keywords are what we have. A smaller, genuinely-relevant
+# list beats a padded, mislabelled one.
+_BUILDER_TECH_TITLE_RE = re.compile(
+    r"\b(hack\w*|build\w* ?(circle|night|day|week)"
+    r"|startup\w*|founder\w*|venture capital|\bvc\b|demo ?day|pitch ?night|pitch ?event"
+    r"|developer\w*|\bdevs?\b|software eng\w*|engineering team|programm\w*|coding\w*"
+    r"|no.?code|open source|\bapi\b|saas"
+    r"|artificial intelligence|\bai\b|machine learning|\bml\b|large language model|\bllm\b"
+    r"|web3|blockchain|crypto\w*|\bdefi\b|\bnft\w*|ethereum|solidity|\bxrp\b|\bdao\b"
+    r"|data scien\w*|data analyt\w*|electronics|computer scien\w*|computing"
+    r"|product (manager|management|design)\w*|tech(nology)? (meetup|community|talk|conference|summit)"
+    r"|cybersecurity|cyber ?security|infosec)\b",
+    re.IGNORECASE,
+)
+
+
 @source("Luma London Discover", "✨", "Builder & Tech Community")
 def scrape_luma_discover():
     events = []
@@ -628,13 +652,14 @@ def scrape_luma_discover():
         for entry in r.json().get("entries",[]):
             ev    = entry.get("event",{})
             title = ev.get("name")
+            if not title or not _BUILDER_TECH_TITLE_RE.search(title) or title in seen:
+                continue
             slug  = ev.get("url") or ev.get("api_id","")
             event_url = f"https://lu.ma/{slug}" if slug and not slug.startswith("http") else slug
             start = ev.get("start_at","")
             date  = start[:10] if start else None
-            if title and title not in seen:
-                seen.add(title)
-                events.append({"title": title, "date": date, "url": event_url or "https://lu.ma", "source": "Luma London Discover"})
+            seen.add(title)
+            events.append({"title": title, "date": date, "url": event_url or "https://lu.ma", "source": "Luma London Discover"})
     except Exception as e:
         log.warning(f"Luma Discover failed: {e}")
     return events[:30]
