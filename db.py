@@ -471,12 +471,16 @@ def get_user_activity(oc_uid: str):
             cur.execute(
                 """
                 select a.id, a.created_at, a.is_cv, a.cv_text, a.profile,
-                       exists(select 1 from raw_files rf where rf.analysis_id = a.id) as has_raw_file
-                from analyses a where a.oc_uid = %s order by a.created_at desc
+                       a.evidence_level, a.field,
+                       (select rf.size_bytes from raw_files rf
+                        where rf.analysis_id = a.id order by rf.created_at desc limit 1) as raw_file_size_bytes
+                from analyses a
+                where a.oc_uid = %s order by a.created_at desc
                 """,
                 (oc_uid,),
             )
-            a_cols = ["id", "created_at", "is_cv", "cv_text", "profile", "has_raw_file"]
+            a_cols = ["id", "created_at", "is_cv", "cv_text", "profile",
+                      "evidence_level", "field", "raw_file_size_bytes"]
             analyses = [dict(zip(a_cols, r)) for r in cur.fetchall()]
             for a in analyses:
                 a["created_at"] = _iso(a["created_at"])
@@ -667,6 +671,24 @@ def get_config(key: str):
             return row[0] if row else None
     except Exception as exc:
         log.warning(f"get_config failed: {exc}")
+        return None
+
+
+def get_config_meta(key: str):
+    """Admin-only variant of get_config - also returns when it was last
+    changed, so the Scoring Rules tab can show "custom, edited 3 days ago"
+    instead of just "custom". get_config() itself stays a bare string
+    return since ai_engine.get_scoring_rules() (the production read path)
+    depends on that exact shape."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute("select value, updated_at from ai_config where key = %s", (key,))
+            row = cur.fetchone()
+            return {"value": row[0], "updated_at": _iso(row[1])} if row else None
+    except Exception as exc:
+        log.warning(f"get_config_meta failed: {exc}")
         return None
 
 
