@@ -361,6 +361,9 @@ async function loadExamples() {
           <p><b>Person:</b> ${escapeHtml(ex.profile_summary || "")}</p>
           ${ex.event_context ? `<p><b>Event:</b> ${escapeHtml(ex.event_context)}</p>` : ""}
           ${ex.ideal_why ? `<p><b>Why:</b> ${escapeHtml(ex.ideal_why)}</p>` : ""}
+          <p style="color:var(--t3);font-size:.68rem;margin-top:6px;">
+            ${ex.reviewed_by ? `Added by ${escapeHtml(ex.reviewed_by)} · ` : ""}${fmtDate(ex.created_at)}
+          </p>
         </div>
       </div>
     `).join("");
@@ -411,7 +414,9 @@ async function loadRules() {
   try {
     const data = await api("/api/admin/config");
     box.value = data.rules;
-    status.textContent = data.is_custom ? "custom (overriding default)" : "default";
+    status.textContent = data.is_custom
+      ? `custom (overriding default) · edited ${fmtDate(data.updated_at)}`
+      : "default";
   } catch (e) {
     status.textContent = "error loading";
   }
@@ -486,6 +491,12 @@ function fmtDate(iso) {
   if (!iso) return "—";
   const d = new Date(iso);
   return isNaN(d) ? iso : d.toLocaleString();
+}
+function fmtBytes(n) {
+  if (n == null) return "—";
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / (1024 * 1024)).toFixed(1) + " MB";
 }
 
 // ANALYTICS
@@ -579,9 +590,15 @@ async function showUserDetail(oc_uid) {
     const c = data.consent;
     const locWord = c.location_consented === true ? "granted" : (c.location_consented === false ? "declined" : "not answered");
     const source = c.utm_source || (c.referrer ? new URL(c.referrer, "https://x").hostname : null) || "direct / unknown";
-    document.getElementById("u-detail-meta").textContent =
-      `Consent: ${c.consented ? "yes" : "no"} · first seen ${fmtDate(c.consented_at)} · last updated ${fmtDate(c.updated_at)} · `
-      + `location: ${locWord} · source: ${source}`;
+    const sourceDetails = [
+      c.utm_medium ? `medium: ${c.utm_medium}` : null,
+      c.utm_campaign ? `campaign: ${c.utm_campaign}` : null,
+      c.referrer ? `full referrer: ${c.referrer}` : null,
+    ].filter(Boolean).join(" · ");
+    document.getElementById("u-detail-meta").innerHTML =
+      escapeHtml(`Consent: ${c.consented ? "yes" : "no"} · first seen ${fmtDate(c.consented_at)} · last updated ${fmtDate(c.updated_at)} · `
+      + `location: ${locWord} (${c.location_consented !== null ? fmtDate(c.location_consented_at) : "n/a"}) · source: ${source}`)
+      + (sourceDetails ? `<br><span style="font-size:.72rem;">${escapeHtml(sourceDetails)}</span>` : "");
 
     let html = "";
     if (!data.analyses.length && !data.interactions.length && !data.locations.length) {
@@ -620,27 +637,45 @@ async function showUserDetail(oc_uid) {
     if (data.analyses.length) {
       html += `<h2 style="margin:18px 0 10px;font-size:.85rem;">Analyses (${data.analyses.length}) &mdash; click to expand</h2>`;
       html += data.analyses.map(a => {
-        const summaryText = (a.profile && a.profile.summary) || oneLine(a.cv_text) || "(no text)";
+        const p = a.profile || {};
+        const summaryText = p.summary || oneLine(a.cv_text) || "(no text)";
+        const listField = (label, arr) => (arr && arr.length)
+          ? `<p><b>${label}:</b> ${arr.map(escapeHtml).join(" &middot; ")}</p>` : "";
+        const strField = (label, v) => v ? `<p><b>${label}:</b> ${escapeHtml(v)}</p>` : "";
         return `
         <details class="tl-item">
           <summary>
             <span class="tl-caret">&#9656;</span>
             <span class="tl-summary-text">${escapeHtml(oneLine(summaryText))}</span>
             ${!a.is_cv ? `<span class="badge bad">no person found</span>` : ""}
+            ${a.evidence_level ? `<span class="badge ${a.evidence_level === 'thin' ? 'borderline' : 'good'}">${a.evidence_level}</span>` : ""}
             <span class="tl-rec-count">${a.recommendations.length} match${a.recommendations.length === 1 ? "" : "es"}</span>
             <span class="tl-time">${fmtDate(a.created_at)}</span>
           </summary>
           <div class="tl-body">
-            ${a.profile && a.profile.summary ? `<p class="summary-full">${escapeHtml(a.profile.summary)}</p>` : ""}
+            ${p.summary ? `<p class="summary-full">${escapeHtml(p.summary)}</p>` : ""}
+            ${a.field ? `<p style="font-size:.76rem;color:var(--t2);margin-bottom:8px;"><b>Target field:</b> ${escapeHtml(a.field)}</p>` : ""}
+            <div class="ex-body" style="margin-bottom:8px;">
+              ${strField("Seniority", p.seniority)}
+              ${listField("Strengths", p.strengths)}
+              ${listField("Gaps", p.gaps)}
+              ${listField("Interests", p.interests)}
+              ${strField("Aspiration", p.aspiration)}
+              ${strField("Trajectory", p.trajectory)}
+            </div>
             <details><summary style="cursor:pointer;font-size:.72rem;color:var(--t2);">Raw input text</summary>
               <div class="tl-cv">${escapeHtml(a.cv_text || "")}</div>
             </details>
-            ${a.has_raw_file ? `<button class="ex-del" style="color:var(--blue);margin-top:8px;padding:2px 0;" onclick="downloadRawFile(${a.id})">&#8595; Download original file</button>` : ""}
+            ${a.raw_file_size_bytes != null ? `<button class="ex-del" style="color:var(--blue);margin-top:8px;padding:2px 0;" onclick="downloadRawFile(${a.id})">&#8595; Download original file (${fmtBytes(a.raw_file_size_bytes)})</button>` : ""}
             ${a.recommendations.length ? a.recommendations.map(r => `
               <div class="tl-rec">
                 <div class="tl-rec-top"><b>${escapeHtml(r.title || r.event_id || "")}</b>
+                  ${r.category ? `<span class="ex-src">${escapeHtml(r.category)}</span>` : ""}
                   <span class="fit-pill ${fitPillClass(r.fit_score)}">fit ${r.fit_score ?? "—"}</span></div>
                 ${r.why ? `<p><b>Why:</b> ${escapeHtml(r.why)}</p>` : ""}
+                ${r.why_now ? `<p><b>Why now:</b> ${escapeHtml(r.why_now)}</p>` : ""}
+                ${r.prepare ? `<p><b>Prepare:</b> ${escapeHtml(r.prepare)}</p>` : ""}
+                ${r.benefit ? `<p><b>Benefit:</b> ${escapeHtml(r.benefit)}</p>` : ""}
               </div>
             `).join("") : `<p style="font-size:.76rem;color:var(--t3);margin-top:8px;">No recommendations cleared the bar.</p>`}
           </div>

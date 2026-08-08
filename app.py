@@ -455,11 +455,13 @@ def api_admin_delete_example(example_id):
 def api_admin_get_config():
     if not _admin_authorized():
         return jsonify({"error": "Unauthorized"}), 401
-    custom = db.get_config(ai_engine.CONFIG_KEY_SCORING_RULES)
+    meta = db.get_config_meta(ai_engine.CONFIG_KEY_SCORING_RULES)
+    custom = meta["value"] if meta else None
     return jsonify({
         "rules": custom if custom else ai_engine.DEFAULT_SCORING_RULES,
         "is_custom": bool(custom),
         "default_rules": ai_engine.DEFAULT_SCORING_RULES,
+        "updated_at": meta["updated_at"] if meta else None,
     })
 
 
