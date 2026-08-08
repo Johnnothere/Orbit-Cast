@@ -225,7 +225,8 @@ def api_analyze():
     # gets written, and the response the user sees is identical either way.
     if db.get_consent(oc_uid):
         try:
-            analysis_id = db.save_analysis(oc_uid, result.get("is_cv", False), file_text, result.get("profile"))
+            analysis_id = db.save_analysis(oc_uid, result.get("is_cv", False), file_text, result.get("profile"),
+                                            evidence_level=result.get("evidence_level"), field=result.get("field"))
             # The original file, byte-for-byte, stored alongside the
             # extracted-text row above - same consent gate, additive only.
             # The extraction pipeline above is untouched by this.
@@ -239,6 +240,60 @@ def api_analyze():
         except Exception as e:
             log.warning(f"Persisting analysis failed (non-fatal): {e}")
     return resp
+
+
+@app.route("/api/my-history", methods=["GET"])
+def api_my_history():
+    """Powers the returning-visitor 'reuse my last profile' prompt. Reads
+    the oc_uid from THIS request's own cookie only - there is no way to
+    pass a different oc_uid in, so this can only ever return the calling
+    browser's own data, never anyone else's."""
+    oc_uid = request.cookies.get("oc_uid")
+    if not oc_uid or not db.get_consent(oc_uid):
+        return jsonify({"has_history": False})
+    last = db.get_latest_analysis(oc_uid)
+    if not last:
+        return jsonify({"has_history": False})
+    return jsonify({"has_history": True, "summary": (last["profile"] or {}).get("summary", "")})
+
+
+@app.route("/api/analyze/reuse", methods=["POST"])
+@limiter.limit("30 per hour")
+def api_analyze_reuse():
+    """Re-scores the caller's own last stored profile against the current
+    catalog, without re-running extraction or asking them to resubmit
+    anything - the 'don't make me upload my CV every time' feature. Same
+    consent gate and same own-cookie-only access as /api/my-history."""
+    oc_uid = request.cookies.get("oc_uid")
+    if not oc_uid or not db.get_consent(oc_uid):
+        return jsonify({"error": "No saved profile for this browser."}), 404
+    last = db.get_latest_analysis(oc_uid)
+    if not last:
+        return jsonify({"error": "No saved profile for this browser."}), 404
+
+    cache  = load_events_cache()
+    events = cache.get("events", [])
+    if not events:
+        return jsonify({"error": "No events available. Try refreshing first."}), 404
+
+    user_location = db.get_latest_location(oc_uid) if db.get_location_consent(oc_uid) else None
+    scored = ai_engine.score_and_enrich(last["profile"], last["evidence_level"], last["field"],
+                                         events, user_location=user_location)
+    result = {"is_cv": True, "evidence_level": last["evidence_level"], "field": last["field"],
+              "profile": last["profile"], "clarifying_questions": [], "analysis_failed": False,
+              "message_if_not_cv": "", **scored}
+
+    try:
+        analysis_id = db.save_analysis(oc_uid, True, "[reused previous profile]", last["profile"],
+                                        evidence_level=last["evidence_level"], field=last["field"])
+        recs = result.get("recommendations", [])
+        rec_ids = db.save_recommendations(analysis_id, recs)
+        for rec, rec_id in zip(recs, rec_ids):
+            rec["recommendation_id"] = rec_id
+    except Exception as e:
+        log.warning(f"Persisting reused analysis failed (non-fatal): {e}")
+
+    return jsonify(result)
 
 
 # ─────────────────────────────────────────────
@@ -256,7 +311,18 @@ def api_consent():
     accepted = bool(data.get("accepted"))
     resp = jsonify({"ok": True, "decision": accepted})
     oc_uid = ensure_oc_uid(resp)
-    db.set_consent(oc_uid, accepted)
+    # Traffic source can only come from the client - document.referrer and
+    # any ?utm_* params are properties of the ORIGINAL page load, not of
+    # this fetch() call (whose own Referer header would just be this same
+    # page). Capped length as basic hygiene against an oversized payload;
+    # nothing here is validated against a known list of sources.
+    def _cap(s, n=300):
+        return (s or "").strip()[:n] or None
+    db.set_consent(oc_uid, accepted,
+                    referrer=_cap(data.get("referrer")),
+                    utm_source=_cap(data.get("utm_source"), 100),
+                    utm_medium=_cap(data.get("utm_medium"), 100),
+                    utm_campaign=_cap(data.get("utm_campaign"), 100))
     return resp
 
 @app.route("/api/location", methods=["GET", "POST"])
@@ -427,6 +493,14 @@ def api_admin_download_raw(analysis_id):
     safe_name = (raw["filename"] or "resume").replace('"', "")
     resp.headers["Content-Disposition"] = f'attachment; filename="{safe_name}"'
     return resp
+
+
+@app.route("/api/admin/analytics", methods=["GET"])
+@limiter.limit("120 per hour")
+def api_admin_analytics():
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    return jsonify({"funnel": db.get_funnel_analytics()})
 
 
 @app.route("/api/admin/users", methods=["GET"])
