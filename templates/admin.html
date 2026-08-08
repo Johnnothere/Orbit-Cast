@@ -577,11 +577,14 @@ async function showUserDetail(oc_uid) {
   try {
     const data = await api(`/api/admin/users/${encodeURIComponent(oc_uid)}`);
     const c = data.consent;
+    const locWord = c.location_consented === true ? "granted" : (c.location_consented === false ? "declined" : "not answered");
+    const source = c.utm_source || (c.referrer ? new URL(c.referrer, "https://x").hostname : null) || "direct / unknown";
     document.getElementById("u-detail-meta").textContent =
-      `Consent: ${c.consented ? "yes" : "no"} · first seen ${fmtDate(c.consented_at)} · last updated ${fmtDate(c.updated_at)}`;
+      `Consent: ${c.consented ? "yes" : "no"} · first seen ${fmtDate(c.consented_at)} · last updated ${fmtDate(c.updated_at)} · `
+      + `location: ${locWord} · source: ${source}`;
 
     let html = "";
-    if (!data.analyses.length && !data.interactions.length) {
+    if (!data.analyses.length && !data.interactions.length && !data.locations.length) {
       html = `<div class="empty">${c.consented ? "Consented, but no activity recorded yet." : "Declined consent - nothing else is stored for this ID."}</div>`;
       body.innerHTML = html;
       return;
@@ -598,6 +601,21 @@ async function showUserDetail(oc_uid) {
         <div class="u-stat"><b>${zeroMatch}</b><span>Zero-match runs</span></div>
         <div class="u-stat"><b>${data.interactions.length}</b><span>Event clicks</span></div>
       </div>`;
+
+    if (data.locations.length) {
+      html += `<h2 style="margin:18px 0 10px;font-size:.85rem;">Location on file (${data.locations.length})</h2>`;
+      html += data.locations.map(l => `
+        <div class="tl-item" style="padding:12px 16px;">
+          <div class="tl-top">
+            <a href="https://www.google.com/maps?q=${l.lat},${l.lng}" target="_blank" rel="noopener" style="color:var(--blue);font-family:'IBM Plex Mono',monospace;font-size:.78rem;">${l.lat.toFixed(4)}, ${l.lng.toFixed(4)}</a>
+            ${l.accuracy_m ? `<span style="font-size:.72rem;color:var(--t3);">&plusmn;${Math.round(l.accuracy_m)}m</span>` : ""}
+            <span class="tl-time">${fmtDate(l.created_at)}</span>
+          </div>
+        </div>
+      `).join("");
+    } else if (c.location_consented) {
+      html += `<h2 style="margin:18px 0 10px;font-size:.85rem;">Location on file</h2><div class="empty">Granted, but no fix stored yet (e.g. the browser's own location prompt didn't complete).</div>`;
+    }
 
     if (data.analyses.length) {
       html += `<h2 style="margin:18px 0 10px;font-size:.85rem;">Analyses (${data.analyses.length}) &mdash; click to expand</h2>`;
