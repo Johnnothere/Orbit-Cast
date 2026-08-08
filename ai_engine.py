@@ -126,6 +126,21 @@ def _extract_pdf_pypdf(file_bytes: bytes) -> str:
 
 
 def extract_text(file_bytes: bytes, filename: str) -> str:
+    return _strip_nul(_extract_text_raw(file_bytes, filename))
+
+
+def _strip_nul(text: str) -> str:
+    """Postgres text columns cannot store a literal NUL (0x00) byte at all -
+    not "won't render it", the insert itself raises. Some PDF extractions
+    (font/encoding quirks) and, less often, DOCX or plain-text files can
+    carry one through. Caught live: the analysis itself succeeded end to
+    end (3 real Claude calls, a real result shown to the user) and then
+    silently failed to save, because this was missing at the one place
+    that would have caught it before the text ever reached the database."""
+    return text.replace("\x00", "") if text else text
+
+
+def _extract_text_raw(file_bytes: bytes, filename: str) -> str:
     name = (filename or "").lower()
 
     if name.endswith(".pdf"):

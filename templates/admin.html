@@ -6,6 +6,11 @@
 <title>ORBITCAST — Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<!-- Leaflet: renders a small map under each stored location fix in the
+     Users tab (same library the user-facing recommendation cards use;
+     CSP already allows unpkg.com globally via security.py). -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <style>
 :root{
   --bg:#f3f2ef;--surface:#ffffff;--sf2:#f8f7f5;--border:#e5e4e0;--border2:#cfcec9;
@@ -97,6 +102,16 @@ textarea:focus,input:focus,select:focus{border-color:var(--blue);}
 .tl-rec-count{font-family:'IBM Plex Mono',monospace;font-size:.66rem;color:var(--t2);background:var(--sf2);border-radius:10px;padding:2px 8px;flex-shrink:0;}
 .tl-time{font-family:'IBM Plex Mono',monospace;font-size:.62rem;color:var(--t3);flex-shrink:0;}
 .tl-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.loc-map{height:160px;border-radius:10px;overflow:hidden;margin-top:8px;border:1px solid var(--border);}
+
+/* analytics funnel */
+.funnel-row{display:flex;align-items:center;gap:12px;margin-top:14px;}
+.funnel-label{width:150px;flex-shrink:0;font-size:.8rem;color:var(--t2);}
+.funnel-bar-track{flex:1;height:30px;background:var(--sf2);border-radius:8px;overflow:hidden;}
+.funnel-bar-fill{height:100%;min-width:2px;background:linear-gradient(120deg,var(--navy),var(--blue) 65%,var(--sky));
+  border-radius:8px;display:flex;align-items:center;padding:0 10px;color:#fff;font-family:'IBM Plex Mono',monospace;
+  font-size:.72rem;font-weight:600;white-space:nowrap;transition:width .5s ease;}
+.funnel-pct{width:110px;flex-shrink:0;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:var(--t3);}
 .tl-body{padding:0 16px 16px;border-top:1px solid var(--border);}
 .tl-body p.summary-full{font-size:.82rem;line-height:1.6;margin:12px 0;}
 .tl-cv{font-size:.78rem;color:var(--t2);white-space:pre-wrap;background:var(--sf2);border-radius:8px;padding:10px 12px;margin-top:8px;max-height:200px;overflow-y:auto;}
@@ -234,15 +249,21 @@ textarea:focus,input:focus,select:focus{border-color:var(--blue);}
     <!-- ANALYTICS -->
     <div class="panel" id="panel-analytics">
       <div class="card">
-        <h2>Conversion funnel by traffic source</h2>
-        <p class="hint">Accepted the consent banner &rarr; went on to submit a CV/analysis &rarr; clicked through to a recommended event. Each stage counts a person once, no matter how many times they did it. Source is the UTM param if present, otherwise the referrer's domain, otherwise "direct / unknown".</p>
+        <h2>What's happening, in plain terms</h2>
+        <p class="hint" id="an-plain-summary">Loading…</p>
+        <div id="an-funnel-viz"></div>
+      </div>
+
+      <div class="card">
+        <h2>Broken down by where people came from</h2>
+        <p class="hint">Same three steps as above, split per traffic source. "Source" is the UTM param if the link had one, otherwise the referring site's domain, otherwise "direct / unknown" (typed the URL, or the browser withheld it). The last two columns are conversion rates, not raw counts.</p>
         <div class="lookup-row">
           <input type="text" id="an-filter-input" placeholder="Filter by source…" oninput="renderFunnel()">
           <select id="an-sort-sel" onchange="renderFunnel()">
-            <option value="accepted">Sort: Accepted</option>
-            <option value="submitted_analysis">Sort: Submitted CV</option>
-            <option value="clicked_recommendation">Sort: Clicked event</option>
-            <option value="source">Sort: Source name</option>
+            <option value="accepted">Sort: Most accepted</option>
+            <option value="submitted_analysis">Sort: Most submitted a CV</option>
+            <option value="clicked_recommendation">Sort: Most clicked an event</option>
+            <option value="source">Sort: Source name (A-Z)</option>
           </select>
         </div>
         <div id="analytics-body"><div class="empty">Loading…</div></div>
@@ -498,17 +519,67 @@ function fmtBytes(n) {
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
   return (n / (1024 * 1024)).toFixed(1) + " MB";
 }
+function initAdminLocMap(el) {
+  if (typeof L === "undefined") return; // CDN blocked/offline - the coordinate link above still works
+  const lat = +el.dataset.lat, lng = +el.dataset.lng;
+  const map = L.map(el, { scrollWheelZoom: false, attributionControl: true }).setView([lat, lng], 12);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 18, attribution: "&copy; OpenStreetMap contributors",
+  }).addTo(map);
+  L.marker([lat, lng]).addTo(map);
+}
 
 // ANALYTICS
 let FUNNEL_DATA = [];
 async function loadAnalytics() {
   const body = document.getElementById("analytics-body");
+  const viz = document.getElementById("an-funnel-viz");
+  const summary = document.getElementById("an-plain-summary");
   body.innerHTML = `<div class="empty">Loading…</div>`;
+  summary.textContent = "Loading…";
+  viz.innerHTML = "";
   try {
     const data = await api("/api/admin/analytics");
     FUNNEL_DATA = data.funnel || [];
+
+    if (!FUNNEL_DATA.length) {
+      summary.textContent = "No one has accepted the consent banner yet - this fills in once real visitors start using the app.";
+      renderFunnel();
+      return;
+    }
+
+    // Overall totals across every source - this is the number that
+    // actually answers "is this working", before slicing by source at all.
+    const totals = FUNNEL_DATA.reduce((t, r) => ({
+      accepted: t.accepted + r.accepted,
+      submitted: t.submitted + r.submitted_analysis,
+      clicked: t.clicked + r.clicked_recommendation,
+    }), { accepted: 0, submitted: 0, clicked: 0 });
+    const pct = (num, den) => den ? Math.round(num / den * 100) : 0;
+    const submitPct = pct(totals.submitted, totals.accepted);
+    const clickPct = pct(totals.clicked, totals.submitted);
+
+    summary.innerHTML = `<b>${totals.accepted}</b> people have accepted the consent banner. `
+      + `Of those, <b>${totals.submitted}</b> went on to actually submit a CV or description `
+      + `(<b>${submitPct}%</b> of everyone who accepted). Of the people who got results, `
+      + `<b>${totals.clicked}</b> clicked through to an actual event `
+      + `(<b>${clickPct}%</b> of the people who submitted).`;
+
+    const bar = (label, count, denom) => {
+      const width = denom ? Math.max(2, Math.round(count / denom * 100)) : 2;
+      return `<div class="funnel-row">
+          <div class="funnel-label">${label}</div>
+          <div class="funnel-bar-track"><div class="funnel-bar-fill" style="width:${width}%">${count}</div></div>
+          <div class="funnel-pct">${denom ? Math.round(count / denom * 100) + "% of step above" : "—"}</div>
+        </div>`;
+    };
+    viz.innerHTML = bar("Accepted the banner", totals.accepted, null)
+      + bar("Submitted a CV", totals.submitted, totals.accepted)
+      + bar("Clicked an event", totals.clicked, totals.submitted);
+
     renderFunnel();
   } catch (e) {
+    summary.textContent = "";
     body.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`;
   }
 }
@@ -524,7 +595,8 @@ function renderFunnel() {
     return;
   }
   body.innerHTML = `<table class="u-table"><thead><tr>
-      <th>Source</th><th>Accepted</th><th>Submitted CV</th><th>Clicked event</th><th>Accept &rarr; Submit</th><th>Submit &rarr; Click</th>
+      <th>Source</th><th>Accepted</th><th>Submitted a CV</th><th>Clicked an event</th>
+      <th>% who then submitted</th><th>% who then clicked</th>
     </tr></thead><tbody>` + rows.map(r => {
       const pct = (num, den) => den ? Math.round(num / den * 100) + "%" : "—";
       return `<tr>
@@ -621,15 +693,19 @@ async function showUserDetail(oc_uid) {
 
     if (data.locations.length) {
       html += `<h2 style="margin:18px 0 10px;font-size:.85rem;">Location on file (${data.locations.length})</h2>`;
-      html += data.locations.map(l => `
+      html += data.locations.map((l, i) => {
+        const mapId = `admin-loc-map-${i}-${Math.random().toString(36).slice(2, 8)}`;
+        return `
         <div class="tl-item" style="padding:12px 16px;">
           <div class="tl-top">
             <a href="https://www.google.com/maps?q=${l.lat},${l.lng}" target="_blank" rel="noopener" style="color:var(--blue);font-family:'IBM Plex Mono',monospace;font-size:.78rem;">${l.lat.toFixed(4)}, ${l.lng.toFixed(4)}</a>
             ${l.accuracy_m ? `<span style="font-size:.72rem;color:var(--t3);">&plusmn;${Math.round(l.accuracy_m)}m</span>` : ""}
             <span class="tl-time">${fmtDate(l.created_at)}</span>
           </div>
+          <div class="loc-map" id="${mapId}" data-lat="${l.lat}" data-lng="${l.lng}"></div>
         </div>
-      `).join("");
+      `;
+      }).join("");
     } else if (c.location_consented) {
       html += `<h2 style="margin:18px 0 10px;font-size:.85rem;">Location on file</h2><div class="empty">Granted, but no fix stored yet (e.g. the browser's own location prompt didn't complete).</div>`;
     }
@@ -698,6 +774,7 @@ async function showUserDetail(oc_uid) {
     }
 
     body.innerHTML = html;
+    body.querySelectorAll(".loc-map").forEach(initAdminLocMap);
   } catch (e) {
     document.getElementById("u-detail-meta").textContent = "";
     body.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`;

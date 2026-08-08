@@ -178,7 +178,13 @@ def privacy_policy():
 @limiter.limit("20 per hour")
 def api_analyze():
     file = request.files.get("file")
-    pasted_text = (request.form.get("text") or "").strip()
+    # NUL (0x00) can't be stored in a Postgres text column at all - the
+    # insert raises, not just renders oddly. extract_text() already strips
+    # it from file-derived text; pasted text skips that function entirely
+    # (it comes straight from the form field), so it needs its own strip
+    # here or a stray NUL in a paste silently breaks persistence exactly
+    # the same way a bad PDF extraction did.
+    pasted_text = (request.form.get("text") or "").replace("\x00", "").strip()
 
     if file and file.filename:
         file_bytes = file.read()
