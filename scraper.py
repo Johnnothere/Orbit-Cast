@@ -705,6 +705,125 @@ def scrape_brainstation():
     return events[:15]
 
 # ─────────────────────────────────────────────
+# TECHUK EVENTS
+# ─────────────────────────────────────────────
+
+@source("techUK Events", "🏢", "Business & Networking")
+def scrape_techuk():
+    """techUK's own events listing, pre-filtered to London via the
+    ?location=London query param. Static HTML with clean article/h4/date
+    markup - unlike dev.events (client-side rendered React app; the raw
+    HTML has zero event data at all, same class of problem as the retired
+    GDG London source above, not worth a headless-browser dependency)."""
+    events = []
+    soup = fetch("https://www.techuk.org/what-we-deliver/events.html?location=London")
+    if not soup:
+        return events
+    for art in soup.select("article.eventfolio-calendar-event"):
+        h = art.select_one("h4.article-title a")
+        d = art.select_one(".article-date")
+        if not (h and d):
+            continue
+        title = h.get_text(strip=True)
+        url   = fix_url(h.get("href", ""), "https://www.techuk.org")
+        m     = _LOOSE_DATE_RE.search(d.get_text(" ", strip=True))
+        iso   = _iso_from_match(m) if m else None
+        if not (is_valid_event(title) and is_valid_url(url) and _is_future(iso)):
+            continue
+        events.append({"title": title, "date": iso, "url": url,
+                        "source": "techUK Events", "location": "London"})
+    return events[:20]
+
+# ─────────────────────────────────────────────
+# CURATED ONE-OFF LONDON EVENTS
+# ─────────────────────────────────────────────
+# Each of these was individually checked live (title, date, London venue
+# confirmed) from a page that can't be turned into a real scraper: some
+# block scraping outright (Black Hat -> 403, BeyondTrust -> 403), some are
+# client-rendered with no data in the raw HTML, some are single annual
+# pages with no repeating structure to select on at all. Precision over
+# volume, same call as _SECURITY_TITLE_RE / _BUILDER_TECH_TITLE_RE above.
+#
+# _is_future() still applies, so each entry drops off the catalog on its
+# own once the date passes - but unlike a live scraper nothing regenerates
+# next year's edition automatically. These need a yearly manual refresh.
+CURATED_LONDON_EVENTS = [
+    # Hackathons - HACKATHON_RE auto-tags these "Hackathons" from the title
+    # regardless of the category set here, so it's a placeholder.
+    {"title": "Frontline London Hackathon 2026", "date": "2026-08-15",
+     "url": "https://luma.com/mgwpj5jn", "category": "Hackathons"},
+    {"title": "Superlinked x Qwen Hackathon (Invite Only)", "date": "2026-08-14",
+     "url": "https://luma.com/3ssiuf0l", "category": "Hackathons"},
+
+    # Cyber & Infosec
+    {"title": "44CON 2026", "date": "2026-09-17",
+     "url": "https://44con.com/", "category": "Cyber & Infosec"},
+    {"title": "SANS London September 2026", "date": "2026-09-07",
+     "url": "https://www.sans.org/cyber-security-training-events/london-september-2026",
+     "category": "Cyber & Infosec"},
+    {"title": "Black Hat Europe 2026", "date": "2026-12-07",
+     "url": "https://blackhat.com/europe/", "category": "Cyber & Infosec"},
+    {"title": "BeyondTrust: Go Beyond London 2026", "date": "2026-09-10",
+     "url": "https://www.beyondtrust.com/events/go-beyond-london", "category": "Cyber & Infosec"},
+    {"title": "BeyondTrust Partner Summit London 2026", "date": "2026-09-09",
+     "url": "https://www.beyondtrust.com/events/partner-summit-london", "category": "Cyber & Infosec"},
+
+    # Intelligence & Security
+    {"title": "The Global OSINT Conference 2026", "date": "2026-10-05",
+     "url": "https://www.osint.uk/conference", "category": "Intelligence & Security"},
+    {"title": "NextGen Intelligence Conference: Data, Cloud & AI", "date": "2026-11-16",
+     "url": "https://www.luminik.io/events/nextgen-intelligence-conference-data-cloud-ai-london/",
+     "category": "Intelligence & Security"},
+    {"title": "Society for Intelligence History Annual Conference 2026", "date": "2026-10-11",
+     "url": "https://www.intelligencehistory.org/2026conferencedetails", "category": "Intelligence & Security"},
+
+    # Defence & Geopolitics
+    {"title": "Defence in Space 2026", "date": "2026-10-27",
+     "url": "https://defenceinspace.com/", "category": "Defence & Geopolitics"},
+    {"title": "Counter UAS Homeland Security Europe 2026", "date": "2026-09-28",
+     "url": "https://www.unmannedsystemstechnology.com/events/counter-uas-homeland-security-europe/",
+     "category": "Defence & Geopolitics"},
+    {"title": "DroneX Trade Show & Conference 2026", "date": "2026-09-29",
+     "url": "https://dronexpo.co.uk/", "category": "Defence & Geopolitics"},
+    {"title": "Defence Exports 2026", "date": "2026-09-28",
+     "url": "https://www.defence-industries.com/events/defence-exports-2026", "category": "Defence & Geopolitics"},
+    {"title": "Defence Aviation Safety 2026", "date": "2026-10-05",
+     "url": "https://www.defenseadvancement.com/events/defence-aviation-safety/", "category": "Defence & Geopolitics"},
+
+    # Tech & AI
+    {"title": "56th European Microwave Conference (EuMW 2026)", "date": "2026-10-06",
+     "url": "https://www.eumw.eu/", "category": "Tech & AI"},
+    {"title": "The AI Summit London 2027", "date": "2027-06-09",
+     "url": "https://london.theaisummit.com/", "category": "Tech & AI"},
+
+    # Business & Networking
+    {"title": "Leading Design London 2026", "date": "2026-11-11",
+     "url": "https://leadingdesign.com/conferences/london-2026", "category": "Business & Networking"},
+    {"title": "Event Tech Live London 2026", "date": "2026-11-11",
+     "url": "https://eventtechlive.com/etl-london-2026/", "category": "Business & Networking"},
+]
+
+_CURATED_EMOJI = {
+    "Hackathons": "🛠️", "Cyber & Infosec": "🔐", "Intelligence & Security": "🧠",
+    "Defence & Geopolitics": "🎖️", "Tech & AI": "🤖", "Business & Networking": "💼",
+}
+
+def _scrape_curated(category):
+    return [
+        {**ev, "source": f"Curated — {category}", "location": "London"}
+        for ev in CURATED_LONDON_EVENTS
+        if ev["category"] == category and _is_future(ev["date"])
+    ]
+
+for _cat in sorted({e["category"] for e in CURATED_LONDON_EVENTS}):
+    def _make_curated_scraper(c):
+        @source(f"Curated — {c}", _CURATED_EMOJI.get(c, "📌"), c)
+        def _scraper():
+            return _scrape_curated(c)
+        return _scraper
+    _make_curated_scraper(_cat)
+
+# ─────────────────────────────────────────────
 # LUMA CALENDARS
 # ─────────────────────────────────────────────
 
