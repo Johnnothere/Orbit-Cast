@@ -937,10 +937,24 @@ def analyze_upload(file_text: str, events: list, user_location: dict = None) -> 
         data.setdefault("clarifying_questions", [])
         return data
 
+    scored = score_and_enrich(data["profile"], data.get("evidence_level", "rich"),
+                               data.get("field", ""), events, user_location)
+    data.update(scored)
+    return data
+
+
+def score_and_enrich(profile: dict, evidence_level: str, field: str,
+                      events: list, user_location: dict = None) -> dict:
+    """The back half of analyze_upload - orientation + scoring + event
+    enrichment - split out so a returning visitor's ALREADY-extracted
+    profile can be re-run against the current catalog without paying for
+    another extract_profile call (or asking them to paste their CV again).
+    Same honesty rules, same retry/failure handling, same distance/map
+    logic as a fresh analysis; the only thing skipped is re-reading the
+    person, since nothing about them changed since last time."""
     # evidence_level lives at the top level but the scorer needs it to pick which
     # question it's answering (fit-to-record vs fit-to-direction).
-    scoring_profile = {**data["profile"],
-                       "evidence_level": data.get("evidence_level", "rich")}
+    scoring_profile = {**profile, "evidence_level": evidence_level or "rich"}
 
     compact_events = build_compact_events(events)
 
@@ -971,10 +985,10 @@ def analyze_upload(file_text: str, events: list, user_location: dict = None) -> 
         return recs, failed
 
     orientation_field = None
-    if data.get("evidence_level") == "thin":
-        orientation_field = (data.get("field") or "").strip() \
-            or (data.get("profile", {}).get("aspiration") or "").strip()
+    if evidence_level == "thin":
+        orientation_field = (field or "").strip() or (profile.get("aspiration") or "").strip()
 
+    result = {}
     if orientation_field:
         # Orientation (a web-search call, can run 60-90s) and scoring are
         # independent - both only need the profile. Sequentially they added
@@ -983,15 +997,15 @@ def analyze_upload(file_text: str, events: list, user_location: dict = None) -> 
         # two, not the sum. build_orientation() never raises - it already
         # returns None on any failure - so no error handling needed here.
         with ThreadPoolExecutor(max_workers=2) as pool:
-            orient_future = pool.submit(build_orientation, orientation_field, data["profile"])
+            orient_future = pool.submit(build_orientation, orientation_field, profile)
             score_future = pool.submit(_do_scoring)
-            data["orientation"] = orient_future.result()
+            result["orientation"] = orient_future.result()
             recs, scoring_failed = score_future.result()
     else:
-        data["orientation"] = None
+        result["orientation"] = None
         recs, scoring_failed = _do_scoring()
 
-    data["scoring_failed"] = scoring_failed
+    result["scoring_failed"] = scoring_failed
 
     # Enrich with the real event object and cap at the honesty-rule max.
     by_id = {e["id"]: e for e in compact_events}
@@ -1019,5 +1033,5 @@ def analyze_upload(file_text: str, events: list, user_location: dict = None) -> 
                     user_location["lat"], user_location["lng"], geo["lat"], geo["lng"])
         enriched.append(row)
 
-    data["recommendations"] = enriched
-    return data
+    result["recommendations"] = enriched
+    return result

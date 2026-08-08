@@ -72,7 +72,12 @@ def get_consent(oc_uid: str):
         return None
 
 
-def set_consent(oc_uid: str, consented: bool) -> bool:
+def set_consent(oc_uid: str, consented: bool, referrer: str = None, utm_source: str = None,
+                 utm_medium: str = None, utm_campaign: str = None) -> bool:
+    """Traffic-source fields are only ever populated on the FIRST accept for
+    a given oc_uid (coalesce keeps whatever was captured then) - a later
+    re-answer (e.g. from a re-triggered banner) never overwrites the
+    original attribution with nulls."""
     if not oc_uid:
         return False
     try:
@@ -81,12 +86,17 @@ def set_consent(oc_uid: str, consented: bool) -> bool:
                 return False
             cur.execute(
                 """
-                insert into consent (oc_uid, consented, consented_at, updated_at)
-                values (%s, %s, now(), now())
+                insert into consent (oc_uid, consented, consented_at, updated_at,
+                                      referrer, utm_source, utm_medium, utm_campaign)
+                values (%s, %s, now(), now(), %s, %s, %s, %s)
                 on conflict (oc_uid) do update
-                  set consented = excluded.consented, updated_at = now()
+                  set consented = excluded.consented, updated_at = now(),
+                      referrer = coalesce(consent.referrer, excluded.referrer),
+                      utm_source = coalesce(consent.utm_source, excluded.utm_source),
+                      utm_medium = coalesce(consent.utm_medium, excluded.utm_medium),
+                      utm_campaign = coalesce(consent.utm_campaign, excluded.utm_campaign)
                 """,
-                (oc_uid, consented),
+                (oc_uid, consented, referrer, utm_source, utm_medium, utm_campaign),
             )
             return True
     except Exception as exc:
@@ -195,22 +205,60 @@ def forget(oc_uid: str) -> bool:
 # --------------------------------------------------------------------------
 # Analyses + recommendations
 # --------------------------------------------------------------------------
-def save_analysis(oc_uid: str, is_cv: bool, cv_text: str, profile: dict):
+def save_analysis(oc_uid: str, is_cv: bool, cv_text: str, profile: dict,
+                   evidence_level: str = None, field: str = None):
     try:
         with _cursor() as cur:
             if cur is None:
                 return None
             cur.execute(
                 """
-                insert into analyses (oc_uid, is_cv, cv_text, profile)
-                values (%s, %s, %s, %s)
+                insert into analyses (oc_uid, is_cv, cv_text, profile, evidence_level, field)
+                values (%s, %s, %s, %s, %s, %s)
                 returning id
                 """,
-                (oc_uid, is_cv, cv_text, json.dumps(profile)),
+                (oc_uid, is_cv, cv_text, json.dumps(profile), evidence_level, field),
             )
             return cur.fetchone()[0]
     except Exception as exc:
         log.warning(f"save_analysis failed: {exc}")
+        return None
+
+
+def get_latest_analysis(oc_uid: str):
+    """Powers the returning-visitor 'reuse my last profile' prompt - only
+    ever called for the caller's OWN oc_uid (enforced in app.py by reading
+    it from the request cookie, never a client-supplied id), so this never
+    exposes one person's profile to another."""
+    if not oc_uid:
+        return None
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute(
+                """
+                select profile, evidence_level, field
+                from analyses
+                where oc_uid = %s and is_cv = true
+                order by created_at desc limit 1
+                """,
+                (oc_uid,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            profile, evidence_level, field = row
+            if isinstance(profile, str):
+                try:
+                    profile = json.loads(profile)
+                except Exception:
+                    profile = None
+            if not profile:
+                return None
+            return {"profile": profile, "evidence_level": evidence_level or "rich", "field": field or ""}
+    except Exception as exc:
+        log.warning(f"get_latest_analysis failed: {exc}")
         return None
 
 
@@ -301,6 +349,44 @@ def _iso(dt):
     8601 explicitly rather than relying on Flask's jsonify default encoder,
     so the admin frontend always gets something JS's `new Date()` parses."""
     return dt.isoformat() if dt else None
+
+
+def get_funnel_analytics():
+    """Admin dashboard: conversion funnel (accepted -> submitted an
+    analysis -> clicked a recommendation), broken down by traffic source.
+    Every stage counts DISTINCT oc_uid so someone who submitted 5 CVs still
+    counts once toward 'submitted' - this is a conversion funnel, not a
+    raw event tally. Source resolution: UTM param first, then the
+    referrer's bare hostname, then 'direct / unknown' for a typed URL or a
+    browser that withheld the referrer."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return []
+            cur.execute(
+                """
+                select
+                  coalesce(
+                    nullif(c.utm_source, ''),
+                    nullif(regexp_replace(c.referrer, '^https?://([^/]+).*$', '\\1'), ''),
+                    'direct / unknown'
+                  ) as source,
+                  count(distinct c.oc_uid) as accepted,
+                  count(distinct a.oc_uid) as submitted_analysis,
+                  count(distinct i.oc_uid) as clicked_recommendation
+                from consent c
+                left join analyses a on a.oc_uid = c.oc_uid
+                left join interactions i on i.oc_uid = c.oc_uid
+                where c.consented = true
+                group by source
+                order by accepted desc
+                """
+            )
+            cols = ["source", "accepted", "submitted_analysis", "clicked_recommendation"]
+            return [dict(zip(cols, row)) for row in cur.fetchall()]
+    except Exception as exc:
+        log.warning(f"get_funnel_analytics failed: {exc}")
+        return []
 
 
 def list_users(limit: int = 200):

@@ -705,7 +705,18 @@ footer.site{border-top:1px solid var(--hairline);}
           <span class="label-xs">02 &mdash; Submission</span>
           <h2 class="display-xl">Present your <span class="serif-accent" style="color:var(--primary)">record</span></h2>
         </div>
-        <p>Text is extracted server-side and the original file is discarded immediately. Nothing is kept that you cannot erase.</p>
+        <p>Text is extracted server-side. Nothing is kept unless you accept the banner below, and everything you accept can be erased anytime from our <a href="/privacy" style="color:var(--primary)">Privacy Policy</a> page.</p>
+      </div>
+    </div>
+
+    <div class="reveal" data-delay="60" id="returningBox" style="display:none;align-items:center;gap:1rem;flex-wrap:wrap;padding:1.25rem 1.5rem;border-radius:1.25rem;border:1px solid var(--hairline);background:color-mix(in oklab,var(--primary) 5%,transparent);margin-bottom:1.5rem;">
+      <div style="flex:1;min-width:14rem;">
+        <strong style="font-size:.9375rem;">Welcome back</strong>
+        <p id="returningSummary" style="margin-top:.25rem;font-size:.8125rem;color:var(--muted-foreground);line-height:1.6;"></p>
+      </div>
+      <div style="display:flex;gap:.5rem;flex-shrink:0;">
+        <button class="btn-sm" onclick="dismissReturning()">Start fresh instead</button>
+        <button class="btn-lux" style="padding:.625rem 1.25rem;font-size:.8125rem;" onclick="reuseProfile()">Reuse my profile</button>
       </div>
     </div>
 
@@ -1665,6 +1676,20 @@ function trackView(recommendationId){
     navigator.sendBeacon('/api/track',body);
   }catch{/* best-effort, never block the click */}
 }
+// Captured once at load, from THIS page load's own referrer/URL - not from
+// any tracking technology, just the two standard signals a browser already
+// hands any page: document.referrer and its own query string. Only ever
+// sent to the server if the visitor clicks Accept.
+const OC_TRAFFIC_SOURCE=(()=>{
+  const p=new URLSearchParams(location.search);
+  return {
+    referrer: document.referrer||null,
+    utm_source: p.get('utm_source'),
+    utm_medium: p.get('utm_medium'),
+    utm_campaign: p.get('utm_campaign'),
+  };
+})();
+
 async function initConsent(){
   // One banner, shown once, on first visit only - if either decision is
   // already on record for this browser, nothing is shown again. Reviewing
@@ -1682,6 +1707,7 @@ async function initConsent(){
     if(l.decision===true&&typeof l.lat==='number'){
       OC_USER_LOC={lat:l.lat,lng:l.lng}; // returning visit - reuse the stored fix, no re-prompt
     }
+    if(c.decision===true)checkReturningVisitor();
   }catch{/* never block the app on this */}
 }
 
@@ -1693,7 +1719,10 @@ async function initConsent(){
 // yes to.
 async function respondToConsent(accepted){
   document.getElementById('consentBanner').style.display='none';
-  try{await fetch('/api/consent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accepted})});}catch{}
+  try{
+    await fetch('/api/consent',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({accepted, ...OC_TRAFFIC_SOURCE})});
+  }catch{}
   if(!accepted){
     try{await fetch('/api/location',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accepted:false})});}catch{}
     toast('Got it — nothing will be tracked or saved');
@@ -1718,6 +1747,32 @@ async function respondToConsent(accepted){
     {enableHighAccuracy:false,timeout:8000,maximumAge:600000}
   );
 }
+
+// ── RETURNING VISITOR ────────────────────────────────────
+// "I don't want to upload my CV every time" - solved with the cookie this
+// browser already has and already consented to, not with fingerprinting.
+async function checkReturningVisitor(){
+  try{
+    const data=await fetch('/api/my-history').then(r=>r.json());
+    if(!data.has_history)return;
+    const box=document.getElementById('returningBox');
+    document.getElementById('returningSummary').textContent=data.summary||'your last profile';
+    box.style.display='flex';
+  }catch{/* never block the app on this */}
+}
+async function reuseProfile(){
+  const box=document.getElementById('returningBox');
+  box.style.display='none';
+  document.getElementById('aiResults').innerHTML=aiSkeleton();
+  document.getElementById('aiResults').scrollIntoView({behavior:'smooth',block:'start'});
+  try{
+    const res=await fetch('/api/analyze/reuse',{method:'POST'});
+    const data=await res.json();
+    if(!res.ok){toast(data.error||'Something went wrong');document.getElementById('aiResults').innerHTML='';return;}
+    renderAIResults(data);
+  }catch(err){toast('Failed: '+err.message);document.getElementById('aiResults').innerHTML='';}
+}
+function dismissReturning(){document.getElementById('returningBox').style.display='none';}
 
 // ── CALENDAR ────────────────────────────────────────────
 const MN=['January','February','March','April','May','June','July','August','September','October','November','December'];

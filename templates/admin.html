@@ -146,6 +146,7 @@ textarea:focus,input:focus,select:focus{border-color:var(--blue);}
       <button class="tab" data-tab="examples">Examples</button>
       <button class="tab" data-tab="rules">Scoring Rules</button>
       <button class="tab" data-tab="users">Users</button>
+      <button class="tab" data-tab="analytics">Analytics</button>
     </div>
 
     <!-- UPLOAD -->
@@ -229,6 +230,24 @@ textarea:focus,input:focus,select:focus{border-color:var(--blue);}
         <div id="user-detail-body"></div>
       </div>
     </div>
+
+    <!-- ANALYTICS -->
+    <div class="panel" id="panel-analytics">
+      <div class="card">
+        <h2>Conversion funnel by traffic source</h2>
+        <p class="hint">Accepted the consent banner &rarr; went on to submit a CV/analysis &rarr; clicked through to a recommended event. Each stage counts a person once, no matter how many times they did it. Source is the UTM param if present, otherwise the referrer's domain, otherwise "direct / unknown".</p>
+        <div class="lookup-row">
+          <input type="text" id="an-filter-input" placeholder="Filter by source…" oninput="renderFunnel()">
+          <select id="an-sort-sel" onchange="renderFunnel()">
+            <option value="accepted">Sort: Accepted</option>
+            <option value="submitted_analysis">Sort: Submitted CV</option>
+            <option value="clicked_recommendation">Sort: Clicked event</option>
+            <option value="source">Sort: Source name</option>
+          </select>
+        </div>
+        <div id="analytics-body"><div class="empty">Loading…</div></div>
+      </div>
+    </div>
   </main>
 </div>
 
@@ -287,6 +306,7 @@ document.querySelectorAll(".tab").forEach(btn => {
     btn.classList.add("active");
     document.getElementById("panel-" + btn.dataset.tab).classList.add("active");
     if (btn.dataset.tab === "users") loadUsers();
+    if (btn.dataset.tab === "analytics") loadAnalytics();
   };
 });
 
@@ -466,6 +486,45 @@ function fmtDate(iso) {
   if (!iso) return "—";
   const d = new Date(iso);
   return isNaN(d) ? iso : d.toLocaleString();
+}
+
+// ANALYTICS
+let FUNNEL_DATA = [];
+async function loadAnalytics() {
+  const body = document.getElementById("analytics-body");
+  body.innerHTML = `<div class="empty">Loading…</div>`;
+  try {
+    const data = await api("/api/admin/analytics");
+    FUNNEL_DATA = data.funnel || [];
+    renderFunnel();
+  } catch (e) {
+    body.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`;
+  }
+}
+function renderFunnel() {
+  const body = document.getElementById("analytics-body");
+  const filter = (document.getElementById("an-filter-input").value || "").toLowerCase().trim();
+  const sortKey = document.getElementById("an-sort-sel").value;
+  let rows = FUNNEL_DATA.filter(r => !filter || r.source.toLowerCase().includes(filter));
+  rows = rows.slice().sort((a, b) =>
+    sortKey === "source" ? a.source.localeCompare(b.source) : b[sortKey] - a[sortKey]);
+  if (!rows.length) {
+    body.innerHTML = `<div class="empty">${FUNNEL_DATA.length ? "No source matches that filter." : "No consented visitors yet."}</div>`;
+    return;
+  }
+  body.innerHTML = `<table class="u-table"><thead><tr>
+      <th>Source</th><th>Accepted</th><th>Submitted CV</th><th>Clicked event</th><th>Accept &rarr; Submit</th><th>Submit &rarr; Click</th>
+    </tr></thead><tbody>` + rows.map(r => {
+      const pct = (num, den) => den ? Math.round(num / den * 100) + "%" : "—";
+      return `<tr>
+        <td class="u-id">${escapeHtml(r.source)}</td>
+        <td>${r.accepted}</td>
+        <td>${r.submitted_analysis}</td>
+        <td>${r.clicked_recommendation}</td>
+        <td>${pct(r.submitted_analysis, r.accepted)}</td>
+        <td>${pct(r.clicked_recommendation, r.submitted_analysis)}</td>
+      </tr>`;
+    }).join("") + `</tbody></table>`;
 }
 
 async function loadUsers() {
