@@ -441,15 +441,32 @@ def get_user_activity(oc_uid: str):
                 return None
 
             cur.execute(
-                "select oc_uid, consented, consented_at, updated_at from consent where oc_uid = %s",
+                """
+                select oc_uid, consented, consented_at, updated_at,
+                       location_consented, location_consented_at,
+                       referrer, utm_source, utm_medium, utm_campaign
+                from consent where oc_uid = %s
+                """,
                 (oc_uid,),
             )
             row = cur.fetchone()
             if row is None:
                 return None
-            consent = dict(zip(["oc_uid", "consented", "consented_at", "updated_at"], row))
+            consent = dict(zip(["oc_uid", "consented", "consented_at", "updated_at",
+                                 "location_consented", "location_consented_at",
+                                 "referrer", "utm_source", "utm_medium", "utm_campaign"], row))
             consent["consented_at"] = _iso(consent["consented_at"])
             consent["updated_at"] = _iso(consent["updated_at"])
+            consent["location_consented_at"] = _iso(consent["location_consented_at"])
+
+            cur.execute(
+                "select lat, lng, accuracy_m, created_at from user_locations "
+                "where oc_uid = %s order by created_at desc limit 10",
+                (oc_uid,),
+            )
+            locations = [dict(zip(["lat", "lng", "accuracy_m", "created_at"], r)) for r in cur.fetchall()]
+            for loc in locations:
+                loc["created_at"] = _iso(loc["created_at"])
 
             cur.execute(
                 """
@@ -509,7 +526,7 @@ def get_user_activity(oc_uid: str):
             for i in interactions:
                 i["created_at"] = _iso(i["created_at"])
 
-            return {"consent": consent, "analyses": analyses, "interactions": interactions}
+            return {"consent": consent, "analyses": analyses, "interactions": interactions, "locations": locations}
     except Exception as exc:
         log.warning(f"get_user_activity failed: {exc}")
         return None
