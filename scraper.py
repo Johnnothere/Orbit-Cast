@@ -809,27 +809,38 @@ def _jsonld_location(node) -> str:
     return (loc or "").strip() if isinstance(loc, str) else ""
 
 
-def _scrape_jsonld_source(url, source_name, base=None, limit=25):
-    """Generic: fetch a page, return its JSON-LD events as our event dicts."""
-    events, seen = [], set()
-    soup = fetch(url)
-    if not soup:
-        return events
-    for node in _jsonld_events(soup):
-        title = (node.get("name") or "").strip()
-        iso = (node.get("startDate") or "")[:10]
-        if not title or not _is_future(iso):
+def _scrape_jsonld_source(urls, source_name, base=None, limit=25):
+    """Generic: fetch a page, return its JSON-LD events as our event dicts.
+
+    `urls` may be one URL or several tried in order until one yields
+    events. Some of these sites sit behind a CDN that serves a different
+    (JSON-LD free) variant to datacenter IPs than to a residential
+    browser, and which paths that hits is inconsistent - so a second
+    candidate URL is a cheap hedge rather than an outage."""
+    if isinstance(urls, str):
+        urls = [urls]
+    for url in urls:
+        events, seen = [], set()
+        soup = fetch(url)
+        if not soup:
             continue
-        link = (node.get("url") or "").strip()
-        link = fix_url(link, base or url) if link else url
-        key = title.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        events.append({"title": title, "date": iso, "url": link,
-                        "source": source_name,
-                        "location": _jsonld_location(node)})
-    return events[:limit]
+        for node in _jsonld_events(soup):
+            title = (node.get("name") or "").strip()
+            iso = (node.get("startDate") or "")[:10]
+            if not title or not _is_future(iso):
+                continue
+            link = (node.get("url") or "").strip()
+            link = fix_url(link, base or url) if link else url
+            key = title.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            events.append({"title": title, "date": iso, "url": link,
+                            "source": source_name,
+                            "location": _jsonld_location(node)})
+        if events:
+            return events[:limit]
+    return []
 
 
 @source("dev.events London", "💻", "Tech & AI")
@@ -855,9 +866,14 @@ def scrape_techmeetups():
 @source("Event Tech Live", "🎪", "Business & Networking")
 def scrape_event_tech_live():
     """Annual event-technology expo at ExCeL. Publishes the current
-    edition as a JSON-LD Event, so next year's rolls in by itself."""
-    return _scrape_jsonld_source("https://eventtechlive.com/etl-london-2026/",
-                                  "Event Tech Live", limit=5)
+    edition as a JSON-LD Event, so next year's rolls in by itself.
+
+    Both the homepage and the dated page carry the same Event node; both
+    are tried because this host is one of the CDN-fronted ones that can
+    serve a stripped variant to a datacenter IP."""
+    return _scrape_jsonld_source(
+        ["https://eventtechlive.com/", "https://eventtechlive.com/etl-london-2026/"],
+        "Event Tech Live", limit=5)
 
 
 @source("AI Summit London", "🤖", "Tech & AI")
