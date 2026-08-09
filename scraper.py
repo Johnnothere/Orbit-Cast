@@ -712,9 +712,7 @@ def scrape_brainstation():
 def scrape_techuk():
     """techUK's own events listing, pre-filtered to London via the
     ?location=London query param. Static HTML with clean article/h4/date
-    markup - unlike dev.events (client-side rendered React app; the raw
-    HTML has zero event data at all, same class of problem as the retired
-    GDG London source above, not worth a headless-browser dependency)."""
+    markup."""
     events = []
     soup = fetch("https://www.techuk.org/what-we-deliver/events.html?location=London")
     if not soup:
@@ -733,6 +731,321 @@ def scrape_techuk():
         events.append({"title": title, "date": iso, "url": url,
                         "source": "techUK Events", "location": "London"})
     return events[:20]
+
+# ─────────────────────────────────────────────
+# SCHEMA.ORG JSON-LD SOURCES
+# ─────────────────────────────────────────────
+# Four of the sources below publish their events as schema.org JSON-LD in
+# the page head. That's a far better contract than CSS selectors: it's a
+# published standard the site maintains for Google, so it survives visual
+# redesigns that would silently break class-name scraping. One shared
+# parser serves all of them.
+#
+# Two shapes have to be handled, because sites use both:
+#   - a bare Event / EducationEvent node (or several)
+#   - an ItemList whose itemListElement[].item is the Event
+# plus @graph wrapping, and @type arriving as either a string or a list.
+
+def _jsonld_blocks(soup):
+    """Every parseable application/ld+json payload on the page."""
+    out = []
+    for tag in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        raw = tag.string or tag.get_text() or ""
+        try:
+            out.append(json.loads(raw))
+        except Exception:
+            continue          # a malformed block is normal; skip it
+    return out
+
+
+def _jsonld_events(soup):
+    """Flatten a page's JSON-LD down to just the event-shaped nodes.
+
+    Matches any @type containing "Event" - dev.events publishes
+    EducationEvent, not Event, which is exactly the kind of detail that
+    makes a hardcoded == "Event" check quietly return nothing."""
+    found, seen = [], set()
+
+    def visit(node):
+        if isinstance(node, list):
+            for n in node:
+                visit(n)
+            return
+        if not isinstance(node, dict):
+            return
+        for key in ("@graph", "itemListElement"):
+            if key in node:
+                visit(node[key])
+        if "item" in node and isinstance(node["item"], dict):
+            visit(node["item"])
+        types = node.get("@type")
+        types = types if isinstance(types, list) else [types]
+        if any(isinstance(t, str) and "Event" in t for t in types):
+            marker = id(node)
+            if marker not in seen:
+                seen.add(marker)
+                found.append(node)
+
+    for block in _jsonld_blocks(soup):
+        visit(block)
+    return found
+
+
+def _jsonld_location(node) -> str:
+    """schema.org location is a Place object, a bare string, or a list."""
+    loc = node.get("location")
+    if isinstance(loc, list):
+        loc = loc[0] if loc else None
+    if isinstance(loc, dict):
+        name = (loc.get("name") or "").strip()
+        addr = loc.get("address")
+        if isinstance(addr, dict):
+            city = (addr.get("addressLocality") or "").strip()
+            if city and city.lower() not in name.lower():
+                return f"{name}, {city}".strip(", ")
+        elif isinstance(addr, str) and addr.strip() and not name:
+            return addr.strip()
+        return name
+    return (loc or "").strip() if isinstance(loc, str) else ""
+
+
+def _scrape_jsonld_source(url, source_name, base=None, limit=25):
+    """Generic: fetch a page, return its JSON-LD events as our event dicts."""
+    events, seen = [], set()
+    soup = fetch(url)
+    if not soup:
+        return events
+    for node in _jsonld_events(soup):
+        title = (node.get("name") or "").strip()
+        iso = (node.get("startDate") or "")[:10]
+        if not title or not _is_future(iso):
+            continue
+        link = (node.get("url") or "").strip()
+        link = fix_url(link, base or url) if link else url
+        key = title.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        events.append({"title": title, "date": iso, "url": link,
+                        "source": source_name,
+                        "location": _jsonld_location(node)})
+    return events[:limit]
+
+
+@source("dev.events London", "💻", "Tech & AI")
+def scrape_dev_events():
+    """dev.events' London tech listing. The visible cards are rendered
+    client-side, but every conference is also emitted as a schema.org
+    EducationEvent in the page head - so no headless browser needed, and
+    the feed keeps flowing as they add conferences."""
+    return _scrape_jsonld_source("https://dev.events/EU/GB/London/tech",
+                                  "dev.events London", base="https://dev.events", limit=30)
+
+
+@source("TechMeetups London", "🧩", "Builder & Tech Community")
+def scrape_techmeetups():
+    """techmeetups.io's London page carries an "Upcoming Tech Events in
+    London" ItemList in JSON-LD. It does include the occasional non-London
+    entry (a "Silicon Valley" gathering was in the live payload) - the
+    catalog-level is_london() filter in app.py is what catches those."""
+    return _scrape_jsonld_source("https://techmeetups.io/london",
+                                  "TechMeetups London", limit=25)
+
+
+@source("Event Tech Live", "🎪", "Business & Networking")
+def scrape_event_tech_live():
+    """Annual event-technology expo at ExCeL. Publishes the current
+    edition as a JSON-LD Event, so next year's rolls in by itself."""
+    return _scrape_jsonld_source("https://eventtechlive.com/etl-london-2026/",
+                                  "Event Tech Live", limit=5)
+
+
+@source("AI Summit London", "🤖", "Tech & AI")
+def scrape_ai_summit():
+    """The AI Summit London, from the JSON-LD Event on its homepage.
+
+    Note this legitimately returns nothing between editions: at the time
+    of writing the markup still advertised the finished June 2026 dates,
+    which _is_future() drops. That's the correct behaviour - it starts
+    feeding again the moment they publish the next edition, and until
+    then the curated entry below covers it."""
+    return _scrape_jsonld_source("https://london.theaisummit.com/",
+                                  "AI Summit London", limit=5)
+
+
+# ─────────────────────────────────────────────
+# MEETUP GROUPS
+# ─────────────────────────────────────────────
+# Meetup is a React app - the events are not in the served DOM, but the
+# full list IS in the __NEXT_DATA__ hydration blob as normalised Apollo
+# nodes. One helper therefore covers ANY Meetup group, so adding a new
+# community later is a single line in MEETUP_GROUPS rather than a new
+# scraper.
+
+def _scrape_meetup_group(slug: str, source_name: str, limit: int = 12):
+    events = []
+    soup = fetch(f"https://www.meetup.com/{slug}/events/")
+    if not soup:
+        return events
+    tag = soup.find("script", id="__NEXT_DATA__")
+    if not tag:
+        log.warning(f"Meetup {slug}: no __NEXT_DATA__ blob")
+        return events
+    try:
+        data = json.loads(tag.string or tag.get_text() or "")
+    except Exception as e:
+        log.warning(f"Meetup {slug}: unparseable __NEXT_DATA__: {e}")
+        return events
+
+    nodes = []
+
+    def visit(node):
+        if isinstance(node, list):
+            for n in node:
+                visit(n)
+        elif isinstance(node, dict):
+            if node.get("__typename") == "Event":
+                nodes.append(node)
+            for v in node.values():
+                visit(v)
+
+    visit(data)
+
+    seen = set()
+    for ev in nodes:
+        # status alone is NOT enough: recurring series carry ACTIVE
+        # template entries dated months in the past (Silicon Roundabout
+        # had ACTIVE events three months stale), so the real date is
+        # checked too.
+        if ev.get("status") in ("PAST", "CANCELLED"):
+            continue
+        iso = (ev.get("dateTime") or "")[:10]
+        title = (ev.get("title") or "").strip()
+        if not title or not _is_future(iso):
+            continue
+        eid = ev.get("id") or title.lower()
+        if eid in seen:
+            continue
+        seen.add(eid)
+        start = ev.get("dateTime") or ""
+        events.append({
+            "title": title,
+            "date": iso,
+            "time": start[11:16] if len(start) >= 16 else None,
+            "url": ev.get("eventUrl") or f"https://www.meetup.com/{slug}/events/",
+            "source": source_name,
+            # ONLINE events from a London community are still relevant to a
+            # London audience; label them rather than dropping them.
+            "location": "Online" if ev.get("isOnline") else "London",
+        })
+    events.sort(key=lambda e: e["date"])
+    return events[:limit]
+
+
+MEETUP_GROUPS = {
+    # slug: (display name, emoji, category)
+    "siliconroundabout": ("Silicon Roundabout", "🔵", "Builder & Tech Community"),
+    "llhs-ladies-of-london-hacking-society": (
+        "Ladies of London Hacking Society", "🔐", "Cyber & Infosec"),
+}
+
+for _slug, (_name, _emoji, _cat) in MEETUP_GROUPS.items():
+    def _make_meetup_scraper(slug, name):
+        @source(name, _emoji, _cat)
+        def _scraper():
+            return _scrape_meetup_group(slug, name)
+        return _scraper
+    _make_meetup_scraper(_slug, _name)
+
+
+# ─────────────────────────────────────────────
+# LEADING DESIGN / CYBER GRIFFIN / 44CON
+# ─────────────────────────────────────────────
+
+@source("Leading Design", "🎨", "Business & Networking")
+def scrape_leading_design():
+    """Leading Design runs one conference per city per year. The index
+    lists every edition as an <a class="promo"> carrying a machine
+    readable <time datetime>, so next year's London edition appears here
+    the day they publish it - no yearly edit needed. Non-London editions
+    (New York) are dropped on the card's own text."""
+    events = []
+    soup = fetch("https://leadingdesign.com/conferences/")
+    if not soup:
+        return events
+    for card in soup.select("a.promo"):
+        t = card.select_one("time[datetime]")
+        if not t:
+            continue
+        iso = (t.get("datetime") or "")[:10]
+        text = card.get_text(" ", strip=True)
+        if not _is_future(iso) or not re.search(r"\blondon\b", text, re.IGNORECASE):
+            continue
+        href = fix_url(card.get("href", ""), "https://leadingdesign.com")
+        # card text reads "11 - 12 November London 2026"
+        year = re.search(r"\b(20\d{2})\b", text)
+        title = f"Leading Design London {year.group(1)}" if year else "Leading Design London"
+        events.append({"title": title, "date": iso, "url": href,
+                        "source": "Leading Design", "location": "London"})
+    return events[:5]
+
+
+@source("Cyber Griffin", "🛡️", "Cyber & Infosec")
+def scrape_cyber_griffin():
+    """City of London Police's Cyber Griffin briefings. Each briefing type
+    (Baseline Part A/B, Case Study) is an .events-table whose rows are the
+    individual sittings, each with its own Eventbrite link - so new dates
+    appear automatically as the team schedules them."""
+    events = []
+    soup = fetch("https://cybergriffin.police.uk/events")
+    if not soup:
+        return events
+    for table in soup.select(".events-table"):
+        heading = table.find_previous(["h1", "h2", "h3", "h4"])
+        label = heading.get_text(" ", strip=True) if heading else "Briefing"
+        for row in table.select("tr"):
+            cells = [c.get_text(" ", strip=True) for c in row.select("td")]
+            if not cells:
+                continue                      # header row
+            m = _LOOSE_DATE_RE.search(cells[0])
+            iso = _iso_from_match(m) if m else None
+            if not _is_future(iso):
+                continue
+            a = row.select_one("a[href]")
+            events.append({
+                "title": f"Cyber Griffin: {label}",
+                "date": iso,
+                "time": cells[1].split("-")[0].strip() if len(cells) > 1 else None,
+                "url": a.get("href") if a else "https://cybergriffin.police.uk/events",
+                "source": "Cyber Griffin",
+                "location": "London",
+            })
+    events.sort(key=lambda e: e["date"])
+    return events[:12]
+
+
+@source("44CON", "🎩", "Cyber & Infosec")
+def scrape_44con():
+    """44CON - annual London infosec conference. Same approach as the
+    BSides London and DC4420 scrapers above: the homepage states the
+    conference date in prose rather than in markup, so take the first
+    future full date on the page. (Their X account was the source
+    originally suggested, but X requires authentication to read.)"""
+    events = []
+    soup = fetch("https://44con.com/")
+    if not soup:
+        return events
+    text = soup.get_text(" ", strip=True)
+    for m in _LOOSE_DATE_RE.finditer(text):
+        iso = _iso_from_match(m)
+        if not _is_future(iso):
+            continue
+        events.append({"title": "44CON", "date": iso,
+                        "url": "https://44con.com/", "source": "44CON",
+                        "location": "London"})
+        break     # single annual conference - first future date is the one
+    return events
+
 
 # ─────────────────────────────────────────────
 # CURATED ONE-OFF LONDON EVENTS
@@ -756,8 +1069,7 @@ CURATED_LONDON_EVENTS = [
      "url": "https://luma.com/3ssiuf0l", "category": "Hackathons"},
 
     # Cyber & Infosec
-    {"title": "44CON 2026", "date": "2026-09-17",
-     "url": "https://44con.com/", "category": "Cyber & Infosec"},
+    # (44CON moved to a live scraper - scrape_44con)
     {"title": "SANS London September 2026", "date": "2026-09-07",
      "url": "https://www.sans.org/cyber-security-training-events/london-september-2026",
      "category": "Cyber & Infosec"},
@@ -797,10 +1109,9 @@ CURATED_LONDON_EVENTS = [
      "url": "https://london.theaisummit.com/", "category": "Tech & AI"},
 
     # Business & Networking
-    {"title": "Leading Design London 2026", "date": "2026-11-11",
-     "url": "https://leadingdesign.com/conferences/london-2026", "category": "Business & Networking"},
-    {"title": "Event Tech Live London 2026", "date": "2026-11-11",
-     "url": "https://eventtechlive.com/etl-london-2026/", "category": "Business & Networking"},
+    # (Leading Design and Event Tech Live both moved to live scrapers -
+    #  scrape_leading_design / scrape_event_tech_live - so they're no
+    #  longer duplicated here.)
 ]
 
 _CURATED_EMOJI = {
