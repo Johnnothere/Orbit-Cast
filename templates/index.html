@@ -13,48 +13,64 @@
      location access; see initMiniMap(). -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<!-- theme restore runs before first paint so a saved Day choice never
+     flashes Night for a frame. Night is the default; only "day" is ever
+     written as an attribute. -->
+<script>(function(){try{if(localStorage.getItem('oc_theme')==='day')document.documentElement.setAttribute('data-theme','day');}catch(e){}})();</script>
 <style>
 /* ============================================================
    DESIGN TOKENS  (navy-glass system - dark navy field, white-tinted glass)
    ============================================================ */
 :root{
+  color-scheme:dark;
   --radius:1.25rem;
   --navy-deep:oklch(0.16 0.05 262);
   --navy:oklch(0.32 0.09 262);
-  --navy-soft:oklch(0.52 0.11 259);
-  --ice:oklch(0.94 0.02 250);
-  --background:oklch(0.19 0.055 262);
-  --foreground:oklch(0.98 0.005 250);
-  --card:oklch(0.98 0.005 250/0.08);
-  --primary:oklch(0.97 0.004 250);
-  --primary-foreground:oklch(0.22 0.07 261);
-  --secondary:oklch(0.98 0.005 250/0.1);
-  --muted:oklch(0.98 0.005 250/0.08);
-  --muted-foreground:oklch(0.82 0.02 250/0.72);
-  --accent:oklch(0.98 0.005 250/0.14);
+  --navy-soft:oklch(0.5 0.1 262);
+  --ice:oklch(0.94 0.015 70);
+  /* Colour-grading pass: an all-cool palette (navy + blue + pure cool
+     greys, zero warmth anywhere) reads as sterile/clinical no matter how
+     good the glass is. Every neutral below now carries a whisper of warm
+     hue (70ish) instead of clinically cool 250, and the deep shadows lean
+     warm-dark the way real bounced light does. Still unmistakably navy -
+     just not cold about it. */
+  --background:oklch(0.195 0.045 268);
+  --foreground:oklch(0.97 0.006 70);
+  --card:oklch(0.98 0.006 70/0.08);
+  --primary:oklch(0.97 0.006 70);
+  --primary-foreground:oklch(0.2 0.06 265);
+  --secondary:oklch(0.98 0.006 70/0.1);
+  --muted:oklch(0.98 0.006 70/0.08);
+  --muted-foreground:oklch(0.8 0.02 60/0.72);
+  --accent:oklch(0.98 0.006 70/0.14);
   --destructive:oklch(0.62 0.2 22);
-  --border:oklch(0.98 0.005 250/0.16);
-  --ring:oklch(0.68 0.19 258/0.35);
-  --surface:oklch(0.98 0.005 250/0.06);
-  --elevated:oklch(0.98 0.005 250/0.14);
-  --hairline:oklch(0.98 0.005 250/0.14);
-  --primary-glow:oklch(0.99 0.003 250);
+  --border:oklch(0.98 0.006 70/0.16);
+  --ring:oklch(0.66 0.16 258/0.35);
+  --surface:oklch(0.98 0.006 70/0.06);
+  --elevated:oklch(0.98 0.006 70/0.14);
+  --hairline:oklch(0.98 0.006 70/0.14);
+  --primary-glow:oklch(0.99 0.004 70);
   --lux:var(--ice);
   --ok:oklch(0.68 0.15 155);
   --warn:oklch(0.75 0.15 70);
   --gradient-lux:linear-gradient(135deg,var(--primary) 0%,var(--primary-glow) 100%);
-  /* signature brand blue - the thing a pure navy+white+glass page is
-     missing. Used sparingly and deliberately: live indicators, hover
-     feedback, focus rings, the "today" marker, progress fills - not
-     buttons (those stay white per the reference), just the accent that
-     used to run through the whole old light theme and got lost when
-     everything went monochrome navy/white/grey. */
-  --brand:oklch(0.68 0.19 258);
-  --brand-glow:oklch(0.78 0.15 246);
+  /* signature brand blue - chroma pulled back ~15% from the first pass;
+     2026-era UI favours nuanced/dusty saturation over hard primaries and
+     the old value ran hot next to the newly warmed neutrals. Used for:
+     live indicators, hover feedback, focus rings, the "today" marker,
+     the logo accent, score numbers - never buttons (those stay white). */
+  --brand:oklch(0.66 0.16 258);
+  --brand-glow:oklch(0.76 0.13 244);
   --gradient-brand:linear-gradient(135deg,var(--brand) 0%,var(--brand-glow) 100%);
-  --shadow-soft:0 1px 2px oklch(0.1 0.04 262/0.3),0 24px 60px -30px oklch(0.14 0.05 262/0.85);
-  --shadow-lift:0 1px 2px oklch(0.1 0.04 262/0.35),0 30px 70px -28px oklch(0.12 0.05 262/0.9);
-  --shadow-glow:0 16px 40px -16px oklch(0.12 0.05 262/0.7);
+  /* the one warm accent - amber, reserved exclusively for an 85+
+     "should attend" score. Scarcity is what makes it read as delight
+     instead of another badge colour fighting the brand blue. */
+  --warm:oklch(0.74 0.15 55);
+  --warm-glow:oklch(0.82 0.13 75);
+  --gradient-warm:linear-gradient(135deg,var(--warm) 0%,var(--warm-glow) 100%);
+  --shadow-soft:0 1px 2px oklch(0.08 0.03 40/0.3),0 24px 60px -30px oklch(0.1 0.035 50/0.85);
+  --shadow-lift:0 1px 2px oklch(0.08 0.03 40/0.35),0 30px 70px -28px oklch(0.09 0.03 45/0.9);
+  --shadow-glow:0 16px 40px -16px oklch(0.1 0.035 50/0.7);
   /* rim light: a hairline-bright inset top edge that reads as light catching
      the top of a glass pane. Stacked after shadow-soft on every glass
      surface below - this is what separates "translucent box" from "glass". */
@@ -65,6 +81,86 @@
   --ct:oklch(0.76 0.13 290);--ce:oklch(0.78 0.13 160);--cb:oklch(0.8 0.14 55);
   --cn:oklch(0.76 0.12 270);--ch:oklch(0.74 0.15 265);--cy:oklch(0.76 0.13 235);
 }
+/* hue-shifted gradients interpolated in raw sRGB grey out through the
+   middle; oklch interpolation stays vibrant edge-to-edge. Gated behind
+   @supports because on an unsupporting browser an `in oklch` gradient is
+   invalid at use-time - and .lux-text sets color:transparent, so a failed
+   background there would mean invisible text. */
+@supports (background:linear-gradient(in oklch,red,blue)){
+  :root{--gradient-brand:linear-gradient(in oklch 135deg,var(--brand) 0%,var(--brand-glow) 100%);
+        --gradient-warm:linear-gradient(in oklch 135deg,var(--warm) 0%,var(--warm-glow) 100%);}
+}
+
+/* ============================================================
+   DAY THEME - strictly three colours: navy ink, white ground, and the
+   same brand-blue accent Night uses (reused, not a new hue, so the two
+   themes read as one product). Night stays the default; this activates
+   only via the toggle (persisted in localStorage as oc_theme=day).
+   ============================================================ */
+html[data-theme="day"]{
+  color-scheme:light;
+  --background:oklch(0.99 0.002 260);
+  --foreground:oklch(0.22 0.05 262);
+  --card:oklch(0.22 0.05 262/0.06);
+  --primary:oklch(0.22 0.05 262);
+  --primary-foreground:oklch(0.99 0.002 260);
+  --primary-glow:oklch(0.32 0.06 262);
+  --secondary:oklch(0.22 0.05 262/0.08);
+  --muted:oklch(0.22 0.05 262/0.06);
+  --muted-foreground:oklch(0.42 0.025 262/0.78);
+  --accent:oklch(0.22 0.05 262/0.1);
+  --border:oklch(0.22 0.05 262/0.13);
+  --surface:oklch(0.22 0.05 262/0.045);
+  --elevated:oklch(0.22 0.05 262/0.09);
+  --hairline:oklch(0.22 0.05 262/0.12);
+  --ice:oklch(0.3 0.06 262);
+  --navy-soft:oklch(0.8 0.045 258);
+  --ok:oklch(0.55 0.14 155);
+  --warn:oklch(0.6 0.14 70);
+  /* the 3-colour rule: Day has no separate warm accent - anything that
+     asks for --warm gets the brand blue instead */
+  --warm:var(--brand);
+  --warm-glow:var(--brand-glow);
+  --shadow-soft:0 1px 2px oklch(0.22 0.05 262/0.07),0 16px 36px -20px oklch(0.22 0.05 262/0.16);
+  --shadow-lift:0 1px 2px oklch(0.22 0.05 262/0.09),0 22px 48px -22px oklch(0.22 0.05 262/0.22);
+  --shadow-glow:0 12px 32px -14px oklch(0.22 0.05 262/0.28);
+  --rim-light:inset 0 1px 0 oklch(1 0 0/0.9);
+  /* category accents darkened to hold contrast on a white ground */
+  --ci:oklch(0.5 0.1 220);--cd:oklch(0.55 0.12 65);--cc:oklch(0.55 0.18 25);
+  --ct:oklch(0.5 0.13 290);--ce:oklch(0.5 0.12 160);--cb:oklch(0.55 0.13 55);
+  --cn:oklch(0.48 0.12 270);--ch:oklch(0.48 0.14 265);--cy:oklch(0.5 0.12 235);
+}
+/* the glass recipes hardcode white tints (correct for Night); on a white
+   ground white-on-white vanishes, so Day re-tints every glass surface
+   with low-alpha navy instead */
+html[data-theme="day"] .card-lux{
+  border-color:color-mix(in oklab,oklch(0.22 0.05 262) 13%,transparent);
+  background:linear-gradient(145deg,color-mix(in oklab,oklch(0.22 0.05 262) 6%,transparent),color-mix(in oklab,oklch(0.22 0.05 262) 2%,transparent));}
+html[data-theme="day"] .glass{
+  background:color-mix(in oklab,oklch(0.22 0.05 262) 5%,transparent);
+  border-color:color-mix(in oklab,oklch(0.22 0.05 262) 11%,transparent);}
+html[data-theme="day"] .card-lux::before,html[data-theme="day"] .glass::before{
+  background:linear-gradient(140deg,oklch(1 0 0/0.95),oklch(1 0 0/0.3) 38%,transparent 70%,oklch(1 0 0/0.6));}
+html[data-theme="day"] .cal-day-panel{
+  background:linear-gradient(145deg,color-mix(in oklab,oklch(0.22 0.05 262) 6%,transparent),color-mix(in oklab,oklch(0.22 0.05 262) 2%,transparent));
+  border-color:color-mix(in oklab,oklch(0.22 0.05 262) 13%,transparent);}
+html[data-theme="day"] .ai-textarea{background:color-mix(in oklab,oklch(0.22 0.05 262) 4%,transparent);}
+html[data-theme="day"] .ai-textarea:focus{background:color-mix(in oklab,oklch(0.22 0.05 262) 7%,transparent);}
+html[data-theme="day"] .ai-tip{background:color-mix(in oklab,oklch(0.22 0.05 262) 4%,transparent);}
+/* white text on a 30% brand tint fails contrast on a light page */
+html[data-theme="day"] .ai-tip:hover{color:var(--navy-deep);}
+html[data-theme="day"] header.nav.solid{box-shadow:inset 0 -1px 0 oklch(0.22 0.05 262/0.08);}
+html[data-theme="day"] .gridlines{
+  background-image:linear-gradient(to right,oklch(0.22 0.05 262/0.06) 1px,transparent 1px),
+                   linear-gradient(to bottom,oklch(0.22 0.05 262/0.06) 1px,transparent 1px);}
+/* Day atmosphere: one soft brand-blue glow, same hue family as everything
+   else in the frame - nothing present to clash. The navy blobs that build
+   Night's depth would sit as dark smears on white. */
+html[data-theme="day"] .aura-1,html[data-theme="day"] .aura-3,html[data-theme="day"] .aura-4{display:none;}
+html[data-theme="day"] .aura-2{opacity:.09;}
+html[data-theme="day"] .grain{opacity:.28;}
+html[data-theme="day"] .toast{background:var(--navy-deep);color:oklch(0.97 0.006 70);}
+html[data-theme="day"] ::selection{background:color-mix(in oklab,var(--brand) 25%,transparent);color:var(--navy-deep);}
 *{margin:0;padding:0;box-sizing:border-box;border-color:var(--border);}
 html{scroll-behavior:smooth;}
 html,body{overflow-x:clip;max-width:100vw;}
@@ -125,6 +221,8 @@ h1,h2,h3,h4{font-family:'Space Grotesk',sans-serif;letter-spacing:-.02em;}
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
   .card-lux{background:oklch(0.24 0.07 261/0.98);}
   .glass{background:oklch(0.24 0.07 261/0.96);}
+  html[data-theme="day"] .card-lux{background:oklch(0.97 0.004 260/0.98);}
+  html[data-theme="day"] .glass{background:oklch(0.97 0.004 260/0.96);}
 }
 /* the flat dark gradient here was reading as a plain rectangle next to
    the glassy cards elsewhere - no rim, no light source, no depth. A
@@ -160,7 +258,7 @@ h1,h2,h3,h4{font-family:'Space Grotesk',sans-serif;letter-spacing:-.02em;}
 .rise{animation:rise .7s cubic-bezier(.22,1,.36,1) both;}
 @keyframes marquee{from{transform:translateX(0);}to{transform:translateX(-50%);}}
 .marquee-track{display:flex;width:max-content;animation:marquee 38s linear infinite;gap:2.5rem;}
-@keyframes pulse-ring{0%{box-shadow:0 0 0 0 oklch(0.68 0.19 258/0.4);}70%{box-shadow:0 0 0 14px oklch(0.68 0.19 258/0);}100%{box-shadow:0 0 0 0 oklch(0.68 0.19 258/0);}}
+@keyframes pulse-ring{0%{box-shadow:0 0 0 0 oklch(0.66 0.16 258/0.4);}70%{box-shadow:0 0 0 14px oklch(0.66 0.16 258/0);}100%{box-shadow:0 0 0 0 oklch(0.66 0.16 258/0);}}
 .pulse-ring{animation:pulse-ring 2.6s ease-out infinite;}
 @keyframes scan{0%{transform:translateY(-100%);}100%{transform:translateY(400%);}}
 .scanline{position:relative;overflow:hidden;}
@@ -203,7 +301,10 @@ header.nav.solid{border-bottom:1px solid color-mix(in oklab,var(--hairline) 70%,
   backdrop-filter:blur(22px) saturate(160%);-webkit-backdrop-filter:blur(22px) saturate(160%);
   box-shadow:inset 0 -1px 0 oklch(1 0 0/0.5);}
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
-  header.nav.solid{background:oklch(0.98 0.005 250/0.98);}
+  /* was still the old light theme's near-white - on the navy site that
+     flashed a white bar across the top for no-backdrop-filter browsers */
+  header.nav.solid{background:oklch(0.21 0.05 265/0.98);}
+  html[data-theme="day"] header.nav.solid{background:oklch(0.98 0.003 260/0.98);}
 }
 .nav-inner{margin:0 auto;display:flex;width:100%;max-width:72rem;align-items:center;justify-content:space-between;
   gap:1rem;padding:1rem 1.5rem;min-width:0;}
@@ -224,6 +325,12 @@ header.nav.solid{border-bottom:1px solid color-mix(in oklab,var(--hairline) 70%,
   font-size:10px;font-weight:600;letter-spacing:.16em;color:var(--primary-foreground);
   background:var(--gradient-lux);transition:transform .3s;}
 .nav-cta:hover{transform:translateY(-2px);}
+.theme-toggle{display:inline-flex;align-items:center;justify-content:center;width:1.875rem;height:1.875rem;
+  flex-shrink:0;border-radius:999px;border:1px solid var(--hairline);
+  background:color-mix(in oklab,var(--elevated) 68%,transparent);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  color:var(--muted-foreground);cursor:pointer;font-size:.8125rem;line-height:1;padding:0;transition:all .2s;}
+.theme-toggle:hover{color:var(--foreground);border-color:color-mix(in oklab,var(--brand) 45%,transparent);}
 
 /* ============================================================
    LANDING / AI VIEW
@@ -346,6 +453,11 @@ header.nav.solid{border-bottom:1px solid color-mix(in oklab,var(--hairline) 70%,
 .match h3{margin-top:.75rem;font-size:1.25rem;font-weight:500;line-height:1.35;letter-spacing:-.02em;}
 .match-score{flex-shrink:0;text-align:right;}
 .match-score .num{font-family:'Space Grotesk',sans-serif;font-size:3rem;font-weight:600;font-variant-numeric:tabular-nums;line-height:1;}
+/* an 85+ score is the one place the warm amber appears - a genuine signal
+   ("this one is exceptional"), not decoration. On Day, --warm remaps to
+   the brand blue, keeping that theme strictly three colours. */
+.match-score .num.hot{background:var(--gradient-warm);-webkit-background-clip:text;background-clip:text;color:transparent;}
+.warm-fill{background:var(--gradient-warm);}
 .meter{margin-top:1.5rem;height:1px;width:100%;overflow:hidden;background:var(--hairline);}
 .meter i{display:block;height:1px;transition:width .9s cubic-bezier(.22,1,.36,1);}
 .match-why{margin-top:1.25rem;font-size:.875rem;line-height:1.7;color:color-mix(in oklab,var(--foreground) 85%,transparent);}
@@ -750,6 +862,7 @@ footer.site{border-top:1px solid var(--hairline);}
       <button class="nav-link" id="tabEvents" onclick="switchView('events')">Events</button>
       <button class="nav-link" id="tabCalendar" onclick="switchView('calendar')">Calendar</button>
       <button class="nav-link" id="tabHackathons" onclick="switchView('hackathons')">Hackathons</button>
+      <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" aria-label="Switch between day and night theme">&#9728;</button>
       <button class="nav-cta sheen" id="navCta" onclick="scrollToConsole()">BEGIN</button>
     </div>
   </div>
@@ -1077,6 +1190,22 @@ footer.site{border-top:1px solid var(--hairline);}
 </div>
 
 <script>
+// ── THEME ────────────────────────────────────────────────
+// Night is the default (no attribute). The head script already restored a
+// saved Day choice before first paint; this just keeps the toggle glyph in
+// sync and handles clicks. Glyph shows the theme you'd switch TO.
+function applyTheme(t, save){
+  if(t==='day') document.documentElement.setAttribute('data-theme','day');
+  else document.documentElement.removeAttribute('data-theme');
+  const b=document.getElementById('themeToggle');
+  if(b) b.innerHTML = t==='day' ? '&#9790;' : '&#9728;';
+  if(save){ try{ localStorage.setItem('oc_theme', t); }catch(e){} }
+}
+function toggleTheme(){
+  applyTheme(document.documentElement.getAttribute('data-theme')==='day' ? 'night' : 'day', true);
+}
+applyTheme(document.documentElement.getAttribute('data-theme')==='day' ? 'day' : 'night', false);
+
 // ── CONFIG ───────────────────────────────────────────────
 const REDUCE_MOTION = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const CAT_COLOR = {
@@ -1522,7 +1651,9 @@ function fmtRecDate(raw){
   return tm==='All day'?ds:ds+' · '+tm;
 }
 function tierFor(score){
-  if(score>=85)return{label:'Should attend',cls:'lux-fill'};
+  // 85+ gets the warm amber treatment - the one warm moment in the whole
+  // palette (Night only; Day remaps --warm to brand blue in CSS)
+  if(score>=85)return{label:'Should attend',cls:'warm-fill',hot:true};
   if(score>=75)return{label:'Solid match',cls:'solid'};
   return{label:'Fit',cls:'fit'};
 }
@@ -1706,7 +1837,7 @@ function renderAIResults(data){
     recs.forEach((r,i)=>{
       const fit=r.fit_score||0;
       const tier=tierFor(fit);
-      const barStyle=fit>=85?'background:var(--gradient-lux)'
+      const barStyle=fit>=85?'background:var(--gradient-warm)'
         :(fit>=75?'background:color-mix(in oklab,var(--primary) 70%,transparent)'
                  :'background:color-mix(in oklab,var(--primary) 40%,transparent)');
       const extras=[
@@ -1728,7 +1859,7 @@ function renderAIResults(data){
         +(r.location?'<span class="mono" style="font-size:11px;color:var(--muted-foreground)">&middot; '+esc(r.location)+'</span>':'')
         +'</div>'
         +'<h3>'+esc(r.title||'')+'</h3></div>'
-        +'<div class="match-score"><span class="num lux-text tabular">'+fit+'</span>'
+        +'<div class="match-score"><span class="num '+(tier.hot?'hot':'lux-text')+' tabular">'+fit+'</span>'
         +'<p class="label-xs" style="margin-top:.25rem">'+tier.label+'</p></div></div>'
         +'<div class="meter"><i style="width:'+fit+'%;'+barStyle+'"></i></div>'
         +'<p class="match-why">'+esc(r.why||'')+'</p>'
