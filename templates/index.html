@@ -34,7 +34,7 @@
   --accent:oklch(0.98 0.005 250/0.14);
   --destructive:oklch(0.62 0.2 22);
   --border:oklch(0.98 0.005 250/0.16);
-  --ring:oklch(0.85 0.03 250/0.5);
+  --ring:oklch(0.68 0.19 258/0.35);
   --surface:oklch(0.98 0.005 250/0.06);
   --elevated:oklch(0.98 0.005 250/0.14);
   --hairline:oklch(0.98 0.005 250/0.14);
@@ -43,6 +43,15 @@
   --ok:oklch(0.68 0.15 155);
   --warn:oklch(0.75 0.15 70);
   --gradient-lux:linear-gradient(135deg,var(--primary) 0%,var(--primary-glow) 100%);
+  /* signature brand blue - the thing a pure navy+white+glass page is
+     missing. Used sparingly and deliberately: live indicators, hover
+     feedback, focus rings, the "today" marker, progress fills - not
+     buttons (those stay white per the reference), just the accent that
+     used to run through the whole old light theme and got lost when
+     everything went monochrome navy/white/grey. */
+  --brand:oklch(0.68 0.19 258);
+  --brand-glow:oklch(0.78 0.15 246);
+  --gradient-brand:linear-gradient(135deg,var(--brand) 0%,var(--brand-glow) 100%);
   --shadow-soft:0 1px 2px oklch(0.1 0.04 262/0.3),0 24px 60px -30px oklch(0.14 0.05 262/0.85);
   --shadow-lift:0 1px 2px oklch(0.1 0.04 262/0.35),0 30px 70px -28px oklch(0.12 0.05 262/0.9);
   --shadow-glow:0 16px 40px -16px oklch(0.12 0.05 262/0.7);
@@ -74,8 +83,12 @@ h1,h2,h3,h4{font-family:'Space Grotesk',sans-serif;letter-spacing:-.02em;}
 .atmosphere{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden;}
 .aura{position:absolute;border-radius:9999px;filter:blur(100px);opacity:.5;pointer-events:none;}
 .aura-1{left:-14%;top:-16%;height:42rem;width:42rem;background:var(--navy-soft);animation:drift 26s ease-in-out infinite;}
-.aura-2{right:-10%;top:24%;height:32rem;width:32rem;background:var(--ice);opacity:.16;}
+/* was pure white/ice - a flat highlight with no colour of its own. Brand
+   blue here is what gives the whole field a signature tint instead of
+   reading as plain grey-navy. */
+.aura-2{right:-10%;top:24%;height:32rem;width:32rem;background:var(--brand);opacity:.22;}
 .aura-3{bottom:-18%;left:20%;height:38rem;width:38rem;background:var(--navy-soft);opacity:.32;}
+.aura-4{right:8%;bottom:6%;height:26rem;width:26rem;background:var(--brand-glow);opacity:.14;animation:drift 32s ease-in-out infinite reverse;}
 @keyframes drift{0%,100%{transform:translate3d(0,0,0) scale(1);}50%{transform:translate3d(3%,-4%,0) scale(1.08);}}
 .grain{position:absolute;inset:0;pointer-events:none;opacity:.5;z-index:0;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.32'/%3E%3C/svg%3E");}
@@ -92,7 +105,7 @@ h1,h2,h3,h4{font-family:'Space Grotesk',sans-serif;letter-spacing:-.02em;}
   backdrop-filter:blur(26px) saturate(150%);-webkit-backdrop-filter:blur(26px) saturate(150%);
   box-shadow:var(--shadow-soft),var(--rim-light);
   transition:transform .45s cubic-bezier(.22,1,.36,1),box-shadow .45s cubic-bezier(.22,1,.36,1),border-color .45s ease;}
-.card-lux:hover{transform:translateY(-4px);border-color:color-mix(in oklab,white 30%,transparent);
+.card-lux:hover{transform:translateY(-4px);border-color:color-mix(in oklab,var(--brand) 45%,transparent);
   box-shadow:var(--shadow-lift),var(--rim-light);}
 /* glass-edge: a refracted-looking border - bright at the top-left corner,
    fading to nothing, brightening again faintly at the bottom-right. A
@@ -113,7 +126,15 @@ h1,h2,h3,h4{font-family:'Space Grotesk',sans-serif;letter-spacing:-.02em;}
   .card-lux{background:oklch(0.24 0.07 261/0.98);}
   .glass{background:oklch(0.24 0.07 261/0.96);}
 }
-.inkwell{background:linear-gradient(165deg,var(--navy-deep),oklch(0.12 0.04 262) 55%,var(--navy-deep));
+/* the flat dark gradient here was reading as a plain rectangle next to
+   the glassy cards elsewhere - no rim, no light source, no depth. A
+   corner glow + the same rim-light every glass card gets ties it back
+   into the same visual language instead of looking like a leftover. */
+.inkwell{position:relative;overflow:hidden;
+  background:
+    radial-gradient(60% 80% at 15% -10%,color-mix(in oklab,var(--brand) 28%,transparent),transparent 60%),
+    linear-gradient(165deg,var(--navy-deep),oklch(0.12 0.04 262) 55%,var(--navy-deep));
+  box-shadow:var(--shadow-soft),inset 0 1px 0 oklch(1 0 0/0.14),inset 0 0 0 1px oklch(1 0 0/0.06);
   color:oklch(0.97 0.008 250);}
 
 /* ---------- type ---------- */
@@ -121,8 +142,13 @@ h1,h2,h3,h4{font-family:'Space Grotesk',sans-serif;letter-spacing:-.02em;}
   text-transform:uppercase;color:var(--muted-foreground);}
 .display-xl{font-family:'Space Grotesk',sans-serif;font-weight:600;letter-spacing:-.045em;line-height:.92;}
 .serif-accent{font-family:'Instrument Serif',serif;font-style:italic;font-weight:400;letter-spacing:-.02em;}
-.lux-text{background:var(--gradient-lux);-webkit-background-clip:text;background-clip:text;color:transparent;}
-.lux-fill{background:var(--gradient-lux);}
+/* deliberately NOT --gradient-lux (that's white, reserved for buttons) -
+   this is the brand-blue accent: the logo's "AI", emphasis words in body
+   copy, score numbers, dot indicators. Sharing one gradient between
+   buttons and text accents was why the whole page went monochrome white/
+   navy/grey with nothing distinctive running through it. */
+.lux-text{background:var(--gradient-brand);-webkit-background-clip:text;background-clip:text;color:transparent;}
+.lux-fill{background:var(--gradient-brand);}
 .mono{font-family:'JetBrains Mono',ui-monospace,monospace;}
 .tabular{font-variant-numeric:tabular-nums;}
 
@@ -134,7 +160,7 @@ h1,h2,h3,h4{font-family:'Space Grotesk',sans-serif;letter-spacing:-.02em;}
 .rise{animation:rise .7s cubic-bezier(.22,1,.36,1) both;}
 @keyframes marquee{from{transform:translateX(0);}to{transform:translateX(-50%);}}
 .marquee-track{display:flex;width:max-content;animation:marquee 38s linear infinite;gap:2.5rem;}
-@keyframes pulse-ring{0%{box-shadow:0 0 0 0 oklch(0.52 0.185 258/0.35);}70%{box-shadow:0 0 0 14px oklch(0.52 0.185 258/0);}100%{box-shadow:0 0 0 0 oklch(0.52 0.185 258/0);}}
+@keyframes pulse-ring{0%{box-shadow:0 0 0 0 oklch(0.68 0.19 258/0.4);}70%{box-shadow:0 0 0 14px oklch(0.68 0.19 258/0);}100%{box-shadow:0 0 0 0 oklch(0.68 0.19 258/0);}}
 .pulse-ring{animation:pulse-ring 2.6s ease-out infinite;}
 @keyframes scan{0%{transform:translateY(-100%);}100%{transform:translateY(400%);}}
 .scanline{position:relative;overflow:hidden;}
@@ -210,7 +236,7 @@ header.nav.solid{border-bottom:1px solid color-mix(in oklab,var(--hairline) 70%,
 .hero{position:relative;isolation:isolate;overflow:hidden;padding-top:7.5rem;padding-bottom:3.5rem;}
 @media(min-width:640px){.hero{padding-top:9rem;padding-bottom:4.5rem;}}
 .hero-eyebrow{display:flex;align-items:center;gap:.75rem;}
-.hero-dot{height:.375rem;width:.375rem;border-radius:999px;background:var(--gradient-lux);}
+.hero-dot{height:.375rem;width:.375rem;border-radius:999px;background:var(--gradient-brand);}
 .hero h1,.hero .hero-line{font-size:3.4rem;}
 @media(min-width:640px){.hero h1,.hero .hero-line{font-size:6rem;}}
 @media(min-width:1024px){.hero h1,.hero .hero-line{font-size:7.5rem;}}
@@ -283,7 +309,7 @@ header.nav.solid{border-bottom:1px solid color-mix(in oklab,var(--hairline) 70%,
   border:1px solid var(--hairline);background:color-mix(in oklab,white 6%,transparent);
   backdrop-filter:blur(20px) saturate(140%);-webkit-backdrop-filter:blur(20px) saturate(140%);
   box-shadow:var(--rim-light);transition:border-color .3s,box-shadow .3s,background .3s;}
-.ai-textarea:focus{border-color:color-mix(in oklab,white 35%,transparent);
+.ai-textarea:focus{border-color:color-mix(in oklab,var(--brand) 55%,transparent);
   background:color-mix(in oklab,white 9%,transparent);box-shadow:0 0 0 4px var(--ring),var(--rim-light);}
 .ai-textarea::placeholder{color:var(--muted-foreground);opacity:.7;}
 .ai-tips{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.875rem;}
@@ -291,7 +317,8 @@ header.nav.solid{border-bottom:1px solid color-mix(in oklab,var(--hairline) 70%,
   border:1px solid var(--hairline);background:color-mix(in oklab,white 6%,transparent);
   backdrop-filter:blur(20px) saturate(140%);-webkit-backdrop-filter:blur(20px) saturate(140%);
   transition:all .2s;}
-.ai-tip:hover{border-color:color-mix(in oklab,var(--primary) 45%,transparent);color:var(--primary);}
+.ai-tip:hover{border-color:color-mix(in oklab,var(--brand) 55%,transparent);color:#fff;}
+.ai-tip:hover,.ai-tip.active{background:color-mix(in oklab,var(--brand) 30%,transparent);}
 .ai-actionrow{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem;margin-top:1rem;}
 .ai-progress{margin-top:.75rem;font-family:'JetBrains Mono',monospace;font-size:11px;text-transform:uppercase;
   letter-spacing:.16em;color:var(--muted-foreground);text-align:right;transition:opacity .2s;}
@@ -429,7 +456,7 @@ footer.site{border-top:1px solid var(--hairline);}
 .controls{border-bottom:1px solid var(--hairline);padding:.75rem 1.5rem;display:flex;align-items:center;
   gap:.625rem;flex-wrap:wrap;}
 .ctrl-label{display:flex;align-items:center;gap:.375rem;font-size:.8125rem;color:var(--muted-foreground);cursor:pointer;}
-.ctrl-label input{accent-color:var(--primary);cursor:pointer;}
+.ctrl-label input{accent-color:var(--brand);cursor:pointer;}
 .ctrl-sel{font-family:'DM Sans',sans-serif;font-size:.8125rem;border:1px solid var(--hairline);
   border-radius:.5rem;padding:.3125rem .625rem;
   background:color-mix(in oklab,var(--elevated) 68%,transparent);
@@ -449,13 +476,13 @@ footer.site{border-top:1px solid var(--hairline);}
   background:color-mix(in oklab,var(--elevated) 70%,transparent);
   backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
   color:var(--foreground);outline:none;transition:border-color .2s,background .2s;}
-.search-wrap input:focus{border-color:var(--primary);background:color-mix(in oklab,var(--elevated) 90%,transparent);}
+.search-wrap input:focus{border-color:var(--brand);background:color-mix(in oklab,var(--elevated) 90%,transparent);}
 .s-ico{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);color:var(--muted-foreground);
   font-size:.8125rem;pointer-events:none;font-style:normal;}
 .hd-meta{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;
   color:var(--muted-foreground);white-space:nowrap;}
 .new-badge{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
-  background:var(--gradient-lux);color:var(--primary-foreground);padding:.25rem .625rem;border-radius:999px;
+  background:var(--gradient-brand);color:#fff;padding:.25rem .625rem;border-radius:999px;
   cursor:pointer;flex-shrink:0;}
 .btn-sm{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;
   height:1.875rem;padding:0 .875rem;border:1px solid var(--hairline);border-radius:999px;
@@ -497,7 +524,7 @@ footer.site{border-top:1px solid var(--hairline);}
 .ic-btn{width:1.75rem;height:1.75rem;border:none;background:none;color:var(--muted-foreground);cursor:pointer;
   border-radius:.5rem;font-size:.875rem;display:flex;align-items:center;justify-content:center;transition:all .2s;}
 .ic-btn:hover{color:var(--primary);background:color-mix(in oklab,var(--primary) 7%,transparent);}
-.ic-btn.saved{color:var(--primary);}
+.ic-btn.saved{color:var(--brand);}
 .skel{background:linear-gradient(90deg,var(--secondary) 25%,var(--muted) 50%,var(--secondary) 75%);
   background-size:200% 100%;animation:sh 1.3s infinite;border-radius:.75rem;}
 @keyframes sh{0%{background-position:200% 0;}100%{background-position:-200% 0;}}
@@ -528,11 +555,11 @@ footer.site{border-top:1px solid var(--hairline);}
   border:1px solid var(--hairline);border-radius:1.25rem;overflow:hidden;}
 .cal-cell{background:var(--card);min-height:5.5rem;padding:.375rem;cursor:pointer;transition:background .15s;position:relative;
   min-width:0;overflow:hidden;}
-.cal-cell:hover{background:color-mix(in oklab,var(--primary) 4%,var(--card));}
+.cal-cell:hover{background:color-mix(in oklab,var(--brand) 10%,var(--card));}
 .cal-cell.other-month{background:var(--surface);opacity:.55;}
-.cal-cell.is-today{background:color-mix(in oklab,var(--primary) 6%,var(--card));}
-.cal-cell.is-today .cal-num{background:var(--gradient-lux);color:var(--primary-foreground);border-radius:999px;}
-.cal-cell.selected{background:color-mix(in oklab,var(--primary) 8%,var(--card));}
+.cal-cell.is-today{background:color-mix(in oklab,var(--brand) 14%,var(--card));}
+.cal-cell.is-today .cal-num{background:var(--gradient-brand);color:#fff;border-radius:999px;}
+.cal-cell.selected{background:color-mix(in oklab,var(--brand) 20%,var(--card));}
 .cal-num{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted-foreground);display:flex;
   align-items:center;justify-content:center;width:1.5rem;height:1.5rem;margin-bottom:.125rem;}
 .cal-badge{position:absolute;top:.25rem;right:.25rem;font-family:'JetBrains Mono',monospace;font-size:9px;
@@ -705,6 +732,7 @@ footer.site{border-top:1px solid var(--hairline);}
   <div class="aura aura-1"></div>
   <div class="aura aura-2"></div>
   <div class="aura aura-3"></div>
+  <div class="aura aura-4"></div>
   <div class="gridlines"></div>
   <div class="grain"></div>
 </div>
