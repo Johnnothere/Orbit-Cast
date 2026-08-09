@@ -44,6 +44,19 @@ except Exception as _exc:  # pragma: no cover - never let RAG availability break
     rag = None
 
 MODEL = "claude-sonnet-5"             # current Sonnet model id
+# Response-time fix: a normal analysis is 3 sequential Claude calls -
+# extract_profile -> score_events -> critique_recommendations - each a full
+# round trip plus real generation time, because scoring needs the extracted
+# profile and critique needs the scored recs. They can't run in parallel.
+# extract_profile is the one call in that chain that's closer to structured
+# extraction than open-ended judgment (classify + pull out fields against an
+# explicit, fully-specified schema) - claude-haiku-4-5 handles that reliably
+# and is meaningfully faster, so it's the one call moved off Sonnet. The two
+# calls that actually decide what's "honest" - scoring and the self-critique
+# that catches drift back toward flattery - stay on Sonnet untouched. If
+# extraction quality ever looks off, move MODEL_EXTRACT back to MODEL; it's
+# a one-line revert.
+MODEL_EXTRACT = "claude-haiku-4-5-20251001"
 FIT_THRESHOLD = 65                   # only surface events scoring this or higher
 MAX_RECOMMENDATIONS = 4              # honesty rule: 2-4 strong matches, not a list
 MAX_CATALOG_SIZE = 100                # cap events sent to scoring - the live catalog
@@ -80,13 +93,13 @@ def _extract_json_object(raw: str) -> str:
     return raw
 
 
-def _call(system, user_content, max_tokens=1500):
+def _call(system, user_content, max_tokens=1500, model=None):
     # NOTE: do NOT pass `temperature` here. It is deprecated on this model and
     # the API rejects the request outright with a 400, which takes down every
     # analysis (extract_profile included, so uploads come back as "not a CV").
     # Sampling variance near the 65 threshold has to be handled some other way.
     resp = _get_client().messages.create(
-        model=MODEL,
+        model=model or MODEL,
         max_tokens=max_tokens,
         system=system,
         messages=[{"role": "user", "content": user_content}],
@@ -469,7 +482,7 @@ def _empty_result(message: str, failed: bool = False) -> dict:
 
 def extract_profile(file_text: str) -> dict:
     user_content = f"WHAT THE PERSON GAVE US:\n{file_text[:12000]}"
-    data = _call(PROFILE_SYSTEM_PROMPT, user_content, max_tokens=2000)
+    data = _call(PROFILE_SYSTEM_PROMPT, user_content, max_tokens=2000, model=MODEL_EXTRACT)
 
     # `is_cv` is the flag the rest of the app and the frontend already branch on.
     # It now means "we have a usable person", not literally "this file is a CV" -
@@ -1025,7 +1038,7 @@ def score_and_enrich(profile: dict, evidence_level: str, field: str,
     # Enrich with the real event object and cap at the honesty-rule max.
     by_id = {e["id"]: e for e in compact_events}
     enriched = []
-    for r in recs[:MAX_RECOMMENDATIONS]:
+    for i, r in enumerate(recs[:MAX_RECOMMENDATIONS]):
         ev = by_id.get(r["event_id"], {})
         location = ev.get("location", "")
         row = {**r, "category": ev.get("category", ""),
@@ -1035,8 +1048,15 @@ def score_and_enrich(profile: dict, evidence_level: str, field: str,
 
         # Distance + directions, only when the person granted location AND
         # the venue text resolves to a real point - both best-effort, never
-        # required for a recommendation to render.
-        if user_location and location:
+        # required for a recommendation to render. Response-time fix:
+        # geocode_location sleeps up to Nominatim's mandated 1.05s between
+        # calls for anything not already cached, serially, on the request's
+        # critical path - up to ~3s of pure rate-limit sleep for a full
+        # MAX_RECOMMENDATIONS=4 set of venues nobody's looked up yet. recs
+        # arrive sorted by fit_score, so capping this to the top matches
+        # trims most of that tail; lower-ranked recs just render without a
+        # map/distance rather than block the whole response on them.
+        if user_location and location and i < 2:
             geo = geocode_location(location)
             if geo:
                 row["event_lat"] = geo["lat"]
