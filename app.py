@@ -118,9 +118,25 @@ def run_scrape_background():
                     all_events.extend(evs)
                     summary_data.append(summ)
 
+        # The same event legitimately arrives from more than one source - a
+        # Luma hackathon is listed on both the host's calendar and the
+        # community's, and aggregator feeds overlap constantly. event_id is
+        # a hash of title+url, so identical events collide by design; keep
+        # the first and drop the rest. ai_engine.build_compact_events()
+        # already did this for the AI path, so only the browse list and the
+        # calendar were ever showing the duplicates.
+        deduped, seen_ids = [], set()
+        for ev in all_events:
+            if ev["id"] in seen_ids:
+                continue
+            seen_ids.add(ev["id"])
+            deduped.append(ev)
+        dupes = len(all_events) - len(deduped)
+        all_events = deduped
+
         summary_data.sort(key=lambda x: x["source"])
         save_events_cache(all_events, summary_data)
-        log.info(f"Scrape done: {len(all_events)} events")
+        log.info(f"Scrape done: {len(all_events)} events ({dupes} cross-source duplicates removed)")
     except Exception as e:
         log.error(f"Background scrape failed: {e}")
     finally:

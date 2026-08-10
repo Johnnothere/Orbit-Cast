@@ -1079,10 +1079,13 @@ def scrape_44con():
 CURATED_LONDON_EVENTS = [
     # Hackathons - HACKATHON_RE auto-tags these "Hackathons" from the title
     # regardless of the category set here, so it's a placeholder.
-    {"title": "Frontline London Hackathon 2026", "date": "2026-08-15",
-     "url": "https://luma.com/mgwpj5jn", "category": "Hackathons"},
-    {"title": "Superlinked x Qwen Hackathon (Invite Only)", "date": "2026-08-14",
-     "url": "https://luma.com/3ssiuf0l", "category": "Hackathons"},
+    # (Frontline London Hackathon and the Superlinked x Qwen Hackathon both
+    #  moved to their hosts' Luma calendars - "Frontline London" and
+    #  "Superlinked" in LUMA_CALENDARS - so they're no longer hardcoded
+    #  here. Removing them also avoids listing each one twice under two
+    #  slightly different titles.)
+    {"title": "<vibes with kickstart/>", "date": "2026-08-21",
+     "url": "https://luma.com/tmumetun", "category": "Builder & Tech Community"},
 
     # Cyber & Infosec
     # (44CON moved to a live scraper - scrape_44con)
@@ -1154,51 +1157,94 @@ for _cat in sorted({e["category"] for e in CURATED_LONDON_EVENTS}):
 # LUMA CALENDARS
 # ─────────────────────────────────────────────
 
+# name: (calendar id, emoji, category)
 LUMA_CALENDARS = {
-    "Plugged":          "cal-FAtYQ9ilaLj34DO",
-    "Encode Club":      "cal-8LJYo5N7QObN2DI",
-    "Claude Community": "cal-TOpA5LAFfuDeFpu",
-    "AI Native Dev":    "cal-uYzPjdxdCyDtuNO",
-    "SRV Frontier":     "cal-LbyWro3ZdQSojJX",
-    "Vercel Events":    "cal-hp9HP2UFTGNaMnY",
+    "Plugged":          ("cal-FAtYQ9ilaLj34DO", "🔌", "Builder & Tech Community"),
+    "Encode Club":      ("cal-8LJYo5N7QObN2DI", "⛓️", "Builder & Tech Community"),
+    "Claude Community": ("cal-TOpA5LAFfuDeFpu", "🟠", "Builder & Tech Community"),
+    "AI Native Dev":    ("cal-uYzPjdxdCyDtuNO", "⚡", "Builder & Tech Community"),
+    "SRV Frontier":     ("cal-LbyWro3ZdQSojJX", "🚀", "Builder & Tech Community"),
+    "Vercel Events":    ("cal-hp9HP2UFTGNaMnY", "▲", "Builder & Tech Community"),
+    # Added from event links supplied by the operator. Each one is the
+    # HOST's calendar rather than the single event that was sent, so the
+    # organiser keeps feeding us as they schedule new things.
+    # Several are global (Raycast runs Raycafés in Porto, Chennai,
+    # Chattanooga, Köln; incident.io runs Austin/NYC/SF) - the London
+    # filter in scrape_luma_calendar is what keeps this to London.
+    "Raycast Community": ("cal-KwZeQ0HC9LFQ3Fk", "🔦", "Builder & Tech Community"),
+    "Tech: Europe":      ("cal-qyEpCltsspbMoJR", "🇪🇺", "Builder & Tech Community"),
+    "incident.io":       ("cal-0jikzPhENNNJBGU", "🚨", "Tech & AI"),
+    "Dex Live":          ("cal-40Ym3ZLnIXQCmUd", "🎙️", "Tech & AI"),
+    "Superlinked":       ("cal-N7kd4GStFtvqpHn", "🔗", "Builder & Tech Community"),
+    "Frontline London":  ("cal-TfyKmqJMRKifRSw", "🛰️", "Defence & Geopolitics"),
+    "Launch London":     ("cal-Msjwg9quXv2wERr", "🎈", "Business & Networking"),
+    "Halkin Offices":    ("cal-sTpcuYmvvYXvEtd", "🏛️", "Business & Networking"),
     # RETIRED: "Jody Saunders" (cal-yzm8pBHRjoQCz1E) - the calendar returns
     # HTTP 404, it has been deleted upstream.
-}
-LUMA_EMOJIS = {
-    "Plugged":"🔌","Encode Club":"⛓️","Claude Community":"🟠",
-    "AI Native Dev":"⚡","SRV Frontier":"🚀","Vercel Events":"▲",
+    # NOT ADDED, deliberately: "Future: UK" (cal-eP031AKL1RBuO3j) - its only
+    # upcoming items are "Optimistic Picnic at Hyde Park" and "Dinners -
+    # Interest", which are the same not-a-tech-event category we stripped
+    # out of the Luma Discover feed. "Corgi London", "London AI" and
+    # "KS Events" return zero upcoming items from the API, and one link
+    # resolved to a private personal calendar.
 }
 
+
 def scrape_luma_calendar(name, cal_id):
+    """One Luma calendar -> its upcoming LONDON events.
+
+    Geography matters here because most of these calendars are global.
+    Luma gives two usable signals and both are checked:
+
+      timezone          - "Europe/London" vs "Europe/Lisbon", "Asia/Kolkata",
+                          "America/New_York"...  This is the reliable one:
+                          it caught "SEV0 - The reliability conference (SF)",
+                          which a city-name denylist misses entirely because
+                          the title only says "(SF)".
+      geo_address_info  - the city, passed through as `location` so the
+                          catalog-level is_london() check has something to
+                          work with. Previously no location was set at all,
+                          so that filter was judging on the title alone.
+
+    Events with no timezone at all are kept rather than dropped - same
+    conservative principle as is_london(): silently losing a real London
+    event is worse than letting an occasional stray through."""
     events = []
     try:
         url = f"https://api.lu.ma/calendar/get-items?calendar_api_id={cal_id}&pagination_limit=20"
         r   = requests.get(url, headers={"User-Agent":"Mozilla/5.0","Accept":"application/json"}, timeout=12)
         if r.status_code != 200:
+            log.warning(f"Luma {name}: HTTP {r.status_code}")
             return events
         for entry in r.json().get("entries",[]):
             ev    = entry.get("event",{})
             title = ev.get("name")
+            if not title:
+                continue
+            tz = (ev.get("timezone") or "").strip()
+            if tz and tz != "Europe/London":
+                continue
+            geo  = ev.get("geo_address_info") or {}
+            city = (geo.get("city") or geo.get("city_state") or "").strip()
             slug  = ev.get("url") or ev.get("api_id","")
             event_url = f"https://lu.ma/{slug}" if slug and not slug.startswith("http") else slug
             start = ev.get("start_at","")
             date  = start[:10] if start else None
             time_str = start[11:16] if len(start) >= 16 else None
-            if title:
-                events.append({"title": title, "date": date, "time": time_str,
-                               "url": event_url or "https://lu.ma", "source": name})
+            events.append({"title": title, "date": date, "time": time_str,
+                           "url": event_url or "https://lu.ma", "source": name,
+                           "location": city or "London"})
     except Exception as e:
         log.warning(f"Luma {name} failed: {e}")
     return events
 
-for _name, _cal_id in LUMA_CALENDARS.items():
-    _emoji = LUMA_EMOJIS.get(_name, "📅")
-    def _make_scraper(n, c, e):
-        @source(n, e, "Builder & Tech Community")
+for _name, (_cal_id, _emoji, _cat) in LUMA_CALENDARS.items():
+    def _make_scraper(n, c, e, cat):
+        @source(n, e, cat)
         def _scraper():
             return scrape_luma_calendar(n, c)
         return _scraper
-    _make_scraper(_name, _cal_id, _emoji)
+    _make_scraper(_name, _cal_id, _emoji, _cat)
 
 # RETIRED: GDG London. lu.ma/user/gdglondon now redirects to luma.com and the
 # page is fully client-rendered - its __NEXT_DATA__ blob contains no events,
