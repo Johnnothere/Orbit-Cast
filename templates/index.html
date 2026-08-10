@@ -493,8 +493,27 @@ html[data-theme="day"] .intake-pane{background:color-mix(in oklab,oklch(0.22 0.0
   font-size:12px;color:var(--muted-foreground);
   border:1px solid var(--hairline);background:color-mix(in oklab,white 6%,transparent);
   transition:all .2s;}
-.ai-tip:hover{border-color:color-mix(in oklab,var(--brand) 55%,transparent);color:#fff;}
-.ai-tip:hover,.ai-tip.active{background:color-mix(in oklab,var(--brand) 30%,transparent);}
+/* hover and selected must not look identical, or a chip you are merely
+   pointing at reads as one you have chosen */
+.ai-tip:hover{border-color:color-mix(in oklab,var(--brand) 45%,transparent);
+  background:color-mix(in oklab,var(--brand) 14%,transparent);color:var(--foreground);}
+.ai-tip.active{background:var(--gradient-brand);border-color:transparent;color:#fff;font-weight:500;}
+html[data-theme="day"] .ai-tip.active{color:#fff;}
+
+/* ---- one input at a time ----------------------------------------
+   A CV and a free-text description are two different answers to the
+   same question. Letting both be filled meant the backend concatenated
+   them, so a quick-fill chip ("Software engineer with 3 years Python")
+   could be merged into a real CV that says something else entirely -
+   inventing a person who does not exist, which is the one thing this
+   product must never do. Whichever side has content locks the other. */
+.io-locked{opacity:.42;pointer-events:none;filter:saturate(.5);}
+.lock-note{display:flex;align-items:flex-start;gap:.45rem;margin-top:.75rem;font-size:12px;
+  line-height:1.5;color:var(--muted-foreground);}
+.lock-note b{color:var(--foreground);font-weight:500;}
+.lock-note button{background:none;border:none;padding:0;cursor:pointer;font:inherit;
+  color:var(--brand);text-decoration:underline;text-underline-offset:2px;}
+.lock-note button:hover{color:var(--foreground);}
 .ai-actionrow{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem;margin-top:1rem;}
 .ai-progress{margin-top:.75rem;font-family:'JetBrains Mono',monospace;font-size:11px;text-transform:uppercase;
   letter-spacing:.16em;color:var(--muted-foreground);text-align:right;transition:opacity .2s;}
@@ -1067,8 +1086,8 @@ footer.site{border-top:1px solid var(--hairline);}
           <div class="intake-pane dropzone" id="paneCv" role="tabpanel" tabindex="0"
                aria-label="Upload your CV"
                ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleCVDrop(event)"
-               onclick="document.getElementById('cvFile').click()"
-               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('cvFile').click();}">
+               onclick="openCvPicker()"
+               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openCvPicker();}">
             <div class="dz-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M5 11l7-7 7 7M4 20h16"/></svg></div>
             <p class="dz-title" id="dzTitle">Drop your CV</p>
             <p class="dz-sub" id="dzSub">PDF, DOCX or TXT. Or click anywhere in this panel to browse.</p>
@@ -1093,7 +1112,7 @@ footer.site{border-top:1px solid var(--hairline);}
                 Open my LinkedIn
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>
               </a>
-              <button class="li-drop" onclick="document.getElementById('cvFile').click()">Choose the PDF</button>
+              <button class="li-drop" onclick="openCvPicker()">Choose the PDF</button>
             </div>
             <p class="li-note">We never ask for your LinkedIn password and never sign in as you.
               The export is yours, and it is read exactly like a CV.</p>
@@ -1104,6 +1123,10 @@ footer.site{border-top:1px solid var(--hairline);}
             <span class="label-xs">text only</span>
             <span class="label-xs">gdpr erasable</span>
           </div>
+          <p class="lock-note" id="cvLockNote" hidden>
+            <span>Using <b>your written description</b> instead.
+              <button type="button" onclick="clearAiText()">Clear it</button> to upload a file.</span>
+          </p>
         </div>
 
         <!-- RIGHT: the engine + the "describe yourself" path, one console -->
@@ -1118,6 +1141,10 @@ footer.site{border-top:1px solid var(--hairline);}
 
           <div class="side-body">
             <span class="label-xs">or describe yourself</span>
+            <p class="lock-note" id="txtLockNote" hidden>
+              <span>Using <b id="txtLockFile">your uploaded file</b> instead.
+                <button type="button" onclick="clearCV()">Remove it</button> to type here.</span>
+            </p>
             <div class="ai-tips">
               <button class="ai-tip" onclick="setAiTip(this,'I am a 21 year old college student studying psychology and I want to get into intelligence')">Starting out</button>
               <button class="ai-tip" onclick="setAiTip(this,'Software engineer with 3 years Python &amp; ML experience, interested in AI/product roles')">Tech &amp; AI</button>
@@ -1715,6 +1742,11 @@ function handleDragOver(e){e.preventDefault();document.getElementById('paneCv').
 function handleDragLeave(e){document.getElementById('paneCv').classList.remove('drag');}
 function handleCVDrop(e){
   e.preventDefault();document.getElementById('paneCv').classList.remove('drag');
+  // pointer-events:none on the locked pane stops clicks but NOT a file
+  // drop, so the mutual-exclusion rule has to be re-checked here too
+  if(document.getElementById('aiInput').value.trim()){
+    toast('Clear your written description first');return;
+  }
   const file=e.dataTransfer?.files?.[0];if(file)processFile(file);
 }
 function handleCVFile(input){const file=input.files?.[0];if(file)processFile(file);}
@@ -1724,6 +1756,7 @@ function clearCV(){
   document.getElementById('cvFile').value='';
   document.getElementById('dzTitle').textContent='Drop your CV';
   document.getElementById('dzSub').textContent='PDF, DOCX or TXT. Or click anywhere in this panel to browse.';
+  syncIntakeLock();
 }
 function processFile(file){
   if(file.size>5*1024*1024){toast('File too large — max 5MB');return;}
@@ -1736,16 +1769,75 @@ function processFile(file){
   // from the LinkedIn tab has to land back here or the user gets no
   // feedback at all that it worked.
   setIntake('cv');
+  syncIntakeLock();
   toast('Loaded — ready to analyse');
 }
 
 // ── AI FORM ──────────────────────────────────────────────
-function updateCharCount(){const l=document.getElementById('aiInput').value.length;document.getElementById('aiCharCount').textContent=l+' / 5000';}
+function updateCharCount(){
+  const l=document.getElementById('aiInput').value.length;
+  document.getElementById('aiCharCount').textContent=l+' / 5000';
+  syncIntakeLock();
+}
 function setAiTip(btn,t){
-  document.getElementById('aiInput').value=t;
+  if(cvFileData){toast('Remove the uploaded file first');return;}
+  const inp=document.getElementById('aiInput');
+  // A second click on the selected chip clears it, so someone who taps one
+  // by accident is not stuck having to hand-delete the text.
+  if(btn&&btn.classList.contains('active')){
+    btn.classList.remove('active'); inp.value='';
+  }else{
+    inp.value=t;
+    document.querySelectorAll('.ai-tip').forEach(c=>c.classList.remove('active'));
+    if(btn)btn.classList.add('active');
+  }
   updateCharCount();
+}
+function clearAiText(){
+  document.getElementById('aiInput').value='';
   document.querySelectorAll('.ai-tip').forEach(c=>c.classList.remove('active'));
-  if(btn)btn.classList.add('active');
+  updateCharCount();
+}
+/* A CV and a typed description are two answers to the same question.
+   Whichever one has content locks the other, so they can never be sent
+   together - the backend concatenates them, which would splice a
+   quick-fill chip's claims into a real CV and describe a person who does
+   not exist. Refinement answers are unaffected: those travel as a
+   separate argument to submitAI(), not through this textarea. */
+function syncIntakeLock(){
+  const inp=document.getElementById('aiInput');
+  const intake=document.querySelector('.intake');
+  const sideBody=document.querySelector('.side-body');
+  if(!inp||!intake||!sideBody)return;
+  const hasFile=!!cvFileData;
+  const hasText=inp.value.trim().length>0;
+
+  // text side locked by a file
+  sideBody.classList.toggle('io-locked',hasFile);
+  inp.disabled=hasFile;
+  document.querySelectorAll('.ai-tip').forEach(c=>c.disabled=hasFile);
+  const tNote=document.getElementById('txtLockNote');
+  if(tNote){
+    tNote.hidden=!hasFile;
+    tNote.classList.remove('io-locked');           // the note must stay clickable
+    const f=document.getElementById('txtLockFile');
+    if(f&&hasFile)f.textContent=cvFileData.name||'your uploaded file';
+  }
+
+  // upload side locked by typed text
+  const tabs=intake.querySelector('.intake-tabs');
+  const paneCv=document.getElementById('paneCv');
+  const paneLi=document.getElementById('paneLi');
+  [tabs,paneCv,paneLi].forEach(el=>el&&el.classList.toggle('io-locked',hasText));
+  const cNote=document.getElementById('cvLockNote');
+  if(cNote)cNote.hidden=!hasText;
+}
+function openCvPicker(){
+  if(document.getElementById('aiInput').value.trim()){
+    toast('Clear your written description first');
+    return;
+  }
+  document.getElementById('cvFile').click();
 }
 // CV vs LinkedIn intake. Both end at the same place - a file in the same
 // <input>, parsed server-side by the same extractor - so nothing
@@ -2298,6 +2390,9 @@ window.addEventListener('scroll',()=>{
   fetchEvents();
   setInterval(fetchEvents,30*60*1000);
   initConsent();
+  // Establish the CV-vs-text lock from whatever state the page loads in
+  // (a browser restoring a typed value on back/refresh, for instance).
+  syncIntakeLock();
 })();
 </script>
 </body>
