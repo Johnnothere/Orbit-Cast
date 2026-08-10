@@ -411,29 +411,74 @@ html[data-theme="day"] header.nav.solid .nav-inner{
 .tile h3{margin-top:1rem;font-size:1.125rem;font-weight:500;letter-spacing:-.02em;}
 .tile p{margin-top:.75rem;font-size:.875rem;line-height:1.7;color:var(--muted-foreground);}
 
-/* submission console */
-.console-grid{margin-top:2rem;display:grid;gap:1rem;}
-@media(min-width:1024px){.console-grid{grid-template-columns:1.45fr 1fr;}}
-.dropzone{position:relative;cursor:pointer;overflow:hidden;border-radius:2rem;padding:2.5rem;}
-@media(min-width:640px){.dropzone{padding:3.5rem;}}
-.dropzone.drag{border-color:color-mix(in oklab,var(--primary) 60%,transparent);box-shadow:var(--shadow-glow);}
-.dz-icon{display:flex;height:4rem;width:4rem;align-items:center;justify-content:center;border-radius:1rem;
+/* submission console - two glass panels: intake (left) and engine (right).
+   Both are .card-lux, so they share the material hierarchy from the HIG
+   pass; the panes inside them use the concentric --r-nested radius. */
+.console-grid{margin-top:2rem;display:grid;gap:1rem;align-items:stretch;}
+@media(min-width:1024px){.console-grid{grid-template-columns:1.15fr 1fr;}}
+
+.intake{position:relative;display:flex;flex-direction:column;border-radius:2rem;padding:1.25rem;}
+@media(min-width:640px){.intake{padding:1.5rem;}}
+.intake-tabs{display:flex;gap:.375rem;margin-bottom:1rem;flex-shrink:0;}
+.intake-tab{display:inline-flex;align-items:center;gap:.4rem;min-height:2.5rem;padding:0 1rem;
+  border-radius:999px;border:1px solid transparent;background:none;cursor:pointer;
+  font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--muted-foreground);transition:all .2s;}
+.intake-tab:hover{color:var(--foreground);background:color-mix(in oklab,var(--foreground) 7%,transparent);}
+.intake-tab.active{background:var(--gradient-lux);color:var(--primary-foreground);border-color:transparent;}
+.intake-tab svg{flex-shrink:0;}
+.intake-pane{flex:1;border-radius:var(--r-nested);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;text-align:center;padding:2rem 1.5rem;
+  background:color-mix(in oklab,white 4%,transparent);border:1px solid var(--hairline);}
+html[data-theme="day"] .intake-pane{background:color-mix(in oklab,oklch(0.22 0.05 262) 3%,transparent);}
+.dropzone{cursor:pointer;transition:border-color .3s,box-shadow .3s;}
+.dropzone.drag{border-color:color-mix(in oklab,var(--brand) 60%,transparent);box-shadow:0 0 0 4px var(--ring);}
+.dz-icon{display:flex;height:3.25rem;width:3.25rem;align-items:center;justify-content:center;border-radius:1rem;
   color:var(--primary-foreground);background:var(--gradient-lux);box-shadow:var(--shadow-glow);
   transition:transform .5s;}
 .dropzone:hover .dz-icon{transform:scale(1.05);}
 .dropzone.drag .dz-icon{transform:scale(1.1);}
-.dz-icon svg{width:1.5rem;height:1.5rem;}
-.dz-title{font-family:'Space Grotesk',sans-serif;margin-top:1.75rem;font-size:1.5rem;font-weight:600;letter-spacing:-.02em;}
-.dz-sub{margin-top:.5rem;max-width:24rem;font-size:.875rem;line-height:1.7;color:var(--muted-foreground);}
-.dz-tags{margin-top:2rem;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1.5rem;}
-.side-panel{position:relative;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;
-  border-radius:2rem;padding:2rem;}
+.dz-icon svg{width:1.375rem;height:1.375rem;}
+.dz-title{font-family:'Space Grotesk',sans-serif;margin-top:1.25rem;font-size:1.375rem;font-weight:600;letter-spacing:-.02em;}
+.dz-sub{margin-top:.5rem;max-width:22rem;font-size:.875rem;line-height:1.7;color:var(--muted-foreground);}
+.dz-tags{margin-top:1.25rem;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;
+  gap:.5rem 1.25rem;flex-shrink:0;}
+
+/* LinkedIn intake - a guided export, not an API import. See the note in
+   the pane copy: LinkedIn's public scopes return name/photo/email only,
+   never work history, so "sign in" would not give the engine anything it
+   can actually reason about. The user's own PDF export does. */
+.li-pane{justify-content:flex-start;text-align:left;gap:1rem;}
+.li-lede{font-size:.875rem;line-height:1.65;color:var(--muted-foreground);}
+.li-steps{list-style:none;display:flex;flex-direction:column;gap:.625rem;}
+.li-steps li{display:flex;align-items:flex-start;gap:.625rem;font-size:.875rem;line-height:1.5;}
+.li-steps b{font-weight:600;color:var(--foreground);}
+.li-n{flex-shrink:0;width:1.375rem;height:1.375rem;border-radius:999px;display:inline-flex;
+  align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:11px;
+  background:color-mix(in oklab,var(--brand) 26%,transparent);color:var(--foreground);}
+.li-actions{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.25rem;}
+.li-open,.li-drop{display:inline-flex;align-items:center;gap:.4rem;min-height:2.75rem;padding:0 1.125rem;
+  border-radius:999px;font-size:.8125rem;font-weight:500;cursor:pointer;text-decoration:none;
+  transition:transform .3s cubic-bezier(.34,1.56,.64,1),background .2s;}
+.li-open{background:#0A66C2;color:#fff;border:none;}        /* LinkedIn brand blue */
+.li-open:hover{transform:translateY(-2px);}
+.li-drop{background:color-mix(in oklab,var(--foreground) 10%,transparent);color:var(--foreground);
+  border:1px solid var(--hairline);}
+.li-drop:hover{transform:translateY(-2px);}
+.li-note{font-size:12px;line-height:1.6;color:var(--muted-foreground);opacity:.85;}
+
+.side-panel{position:relative;display:flex;flex-direction:column;border-radius:2rem;padding:1.5rem;gap:1.25rem;}
+@media(min-width:640px){.side-panel{padding:1.75rem;}}
+.side-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;}
 .side-panel .mono-label{font-family:'JetBrains Mono',monospace;font-size:11px;text-transform:uppercase;
-  letter-spacing:.26em;color:oklch(1 0 0/0.45);}
-.side-num{margin-top:1rem;font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:3rem;font-variant-numeric:tabular-nums;color:#fff;line-height:1;}
-.side-sub{margin-top:.25rem;font-size:.875rem;color:oklch(1 0 0/0.6);}
-.side-note{margin-top:1rem;font-family:'JetBrains Mono',monospace;font-size:11px;text-transform:uppercase;
-  line-height:1.7;letter-spacing:.18em;color:oklch(1 0 0/0.35);}
+  letter-spacing:.26em;color:var(--muted-foreground);}
+.side-num{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:2.75rem;
+  font-variant-numeric:tabular-nums;color:var(--foreground);line-height:1;flex-shrink:0;}
+.side-sub{margin-top:.375rem;max-width:15rem;font-size:.875rem;line-height:1.5;color:var(--muted-foreground);}
+.side-body{flex:1;display:flex;flex-direction:column;}
+.side-foot{margin-top:auto;}
+.side-note{margin-top:.75rem;font-family:'JetBrains Mono',monospace;font-size:11px;text-transform:uppercase;
+  line-height:1.7;letter-spacing:.14em;color:var(--muted-foreground);text-align:center;}
 
 /* textarea + tips */
 .ai-textarea{width:100%;min-height:7rem;border-radius:1.25rem;padding:1rem 1.125rem;resize:vertical;outline:none;
@@ -443,7 +488,7 @@ html[data-theme="day"] header.nav.solid .nav-inner{
 .ai-textarea:focus{border-color:color-mix(in oklab,var(--brand) 55%,transparent);
   background:color-mix(in oklab,white 9%,transparent);box-shadow:0 0 0 4px var(--ring),var(--rim-light);}
 .ai-textarea::placeholder{color:var(--muted-foreground);opacity:.7;}
-.ai-tips{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.875rem;}
+.ai-tips{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.75rem;margin-bottom:.875rem;}
 .ai-tip{cursor:pointer;border-radius:999px;min-height:2.5rem;padding:0 1rem;display:inline-flex;align-items:center;
   font-size:12px;color:var(--muted-foreground);
   border:1px solid var(--hairline);background:color-mix(in oklab,white 6%,transparent);
@@ -1004,41 +1049,92 @@ footer.site{border-top:1px solid var(--hairline);}
 
     <div class="reveal" data-delay="80">
       <div class="console-grid">
-        <div class="dropzone card-lux" id="cvDropZone" tabindex="0" role="button" aria-label="Upload your CV"
-             ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleCVDrop(event)"
-             onclick="document.getElementById('cvFile').click()"
-             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('cvFile').click();}">
-          <div class="gridlines" style="opacity:.7"></div>
+        <!-- LEFT: source of truth about the person - a file, or their LinkedIn -->
+        <div class="intake card-lux">
+          <div class="intake-tabs" role="tablist" aria-label="How to provide your background">
+            <button class="intake-tab active" id="tabCv" role="tab" aria-selected="true"
+                    aria-controls="paneCv" onclick="setIntake('cv')">CV / Résumé</button>
+            <button class="intake-tab" id="tabLi" role="tab" aria-selected="false"
+                    aria-controls="paneLi" onclick="setIntake('li')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4.98 3.5a2.5 2.5 0 11-.02 5 2.5 2.5 0 01.02-5zM3 21h4V9H3v12zM10 9h3.8v1.7h.05c.53-.95 1.83-1.95 3.75-1.95C21.4 8.75 22 11 22 14.1V21h-4v-6.1c0-1.45-.03-3.3-2.05-3.3-2.06 0-2.37 1.57-2.37 3.2V21h-4V9z"/></svg>
+              LinkedIn
+            </button>
+          </div>
+
           <input type="file" id="cvFile" accept=".pdf,.docx,.txt" style="display:none" onchange="handleCVFile(this)">
-          <div style="position:relative;z-index:1">
+
+          <!-- CV pane -->
+          <div class="intake-pane dropzone" id="paneCv" role="tabpanel" tabindex="0"
+               aria-label="Upload your CV"
+               ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleCVDrop(event)"
+               onclick="document.getElementById('cvFile').click()"
+               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('cvFile').click();}">
             <div class="dz-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M5 11l7-7 7 7M4 20h16"/></svg></div>
             <p class="dz-title" id="dzTitle">Drop your CV</p>
             <p class="dz-sub" id="dzSub">PDF, DOCX or TXT. Or click anywhere in this panel to browse.</p>
-            <div class="dz-tags">
-              <span class="label-xs">server-side parsing</span>
-              <span class="label-xs">text only</span>
-              <span class="label-xs">gdpr erasable</span>
-            </div>
-            <div id="cvFileInfo" style="display:none;margin-top:1.25rem;align-items:center;gap:.625rem;">
-              <span class="label-xs" style="color:var(--primary)">loaded</span>
+            <div id="cvFileInfo" style="display:none;margin-top:1.25rem;align-items:center;justify-content:center;gap:.625rem;">
+              <span class="label-xs" style="color:var(--brand)">loaded</span>
               <span class="mono" style="font-size:12px" id="cvFileName"></span>
-              <button onclick="event.stopPropagation();clearCV()" style="background:none;border:none;color:var(--muted-foreground);cursor:pointer;font-size:1rem;">&times;</button>
+              <button onclick="event.stopPropagation();clearCV()" aria-label="Remove file"
+                      style="background:none;border:none;color:var(--muted-foreground);cursor:pointer;font-size:1rem;">&times;</button>
             </div>
+          </div>
+
+          <!-- LinkedIn pane -->
+          <div class="intake-pane li-pane" id="paneLi" role="tabpanel" tabindex="0" style="display:none">
+            <p class="li-lede">Bring your LinkedIn across without retyping it. LinkedIn exports your
+              own profile as a PDF &mdash; roles, dates, skills, the lot.</p>
+            <ol class="li-steps">
+              <li><span class="li-n">1</span>Open your profile, then <b>More &rarr; Save to PDF</b></li>
+              <li><span class="li-n">2</span>Drop that PDF here &mdash; same analysis, nothing retyped</li>
+            </ol>
+            <div class="li-actions">
+              <a class="li-open" href="https://www.linkedin.com/in/me/" target="_blank" rel="noopener">
+                Open my LinkedIn
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>
+              </a>
+              <button class="li-drop" onclick="document.getElementById('cvFile').click()">Choose the PDF</button>
+            </div>
+            <p class="li-note">We never ask for your LinkedIn password and never sign in as you.
+              The export is yours, and it is read exactly like a CV.</p>
+          </div>
+
+          <div class="dz-tags">
+            <span class="label-xs">server-side parsing</span>
+            <span class="label-xs">text only</span>
+            <span class="label-xs">gdpr erasable</span>
           </div>
         </div>
 
-        <div class="side-panel inkwell">
-          <div style="position:relative;z-index:1">
-            <span class="mono-label">Engine</span>
+        <!-- RIGHT: the engine + the "describe yourself" path, one console -->
+        <div class="side-panel card-lux">
+          <div class="side-head">
+            <div>
+              <span class="mono-label">Engine</span>
+              <p class="side-sub">live London events currently in the catalog</p>
+            </div>
             <p class="side-num" id="sidePanelCount">—</p>
-            <p class="side-sub">live London events in the catalog</p>
-            <div style="margin-top:1.5rem;display:flex;gap:.375rem;">
-              <span style="height:2px;flex:1;border-radius:999px;background:oklch(1 0 0/0.85)"></span>
-              <span style="height:2px;flex:1;border-radius:999px;background:oklch(1 0 0/0.5)"></span>
-              <span style="height:2px;flex:1;border-radius:999px;background:oklch(1 0 0/0.25)"></span>
+          </div>
+
+          <div class="side-body">
+            <span class="label-xs">or describe yourself</span>
+            <div class="ai-tips">
+              <button class="ai-tip" onclick="setAiTip(this,'I am a 21 year old college student studying psychology and I want to get into intelligence')">Starting out</button>
+              <button class="ai-tip" onclick="setAiTip(this,'Software engineer with 3 years Python &amp; ML experience, interested in AI/product roles')">Tech &amp; AI</button>
+              <button class="ai-tip" onclick="setAiTip(this,'Business professional seeking networking with founders and investors in London')">Business</button>
+              <button class="ai-tip" onclick="setAiTip(this,'Cybersecurity analyst interested in threat intelligence and infosec conferences')">Security</button>
+              <button class="ai-tip" onclick="setAiTip(this,'PhD student researching defence technology, geopolitics, and AI governance')">Research</button>
+              <button class="ai-tip" onclick="setAiTip(this,'Founder looking for co-founders, investors and hackathons to build and ship fast')">Founder</button>
+            </div>
+            <textarea class="ai-textarea" id="aiInput"
+              placeholder="Roles actually held. Things actually shipped."
+              oninput="updateCharCount()"></textarea>
+            <div class="ai-actionrow">
+              <span class="label-xs" id="aiCharCount">0 / 5000</span>
             </div>
           </div>
-          <div style="position:relative;z-index:1;margin-top:2.5rem;">
+
+          <div class="side-foot">
             <button class="btn-white sheen" id="aiSubmitBtn" onclick="submitAI()">
               <span class="btn-text">Run the analysis <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
               <span class="btn-loading" style="display:none;align-items:center;gap:.5rem;">
@@ -1047,29 +1143,9 @@ footer.site{border-top:1px solid var(--hairline);}
               </span>
             </button>
             <p class="side-note">Sub-65 scores are discarded in code, not in prose.</p>
+            <div class="ai-progress" id="aiProgress" style="display:none"></div>
           </div>
         </div>
-      </div>
-    </div>
-
-    <div class="reveal" data-delay="120">
-      <div style="margin-top:1.5rem;">
-        <span class="label-xs">or describe yourself</span>
-        <textarea class="ai-textarea" id="aiInput" style="margin-top:.75rem;"
-          placeholder="A sentence is enough. &quot;I'm a 21 year old psychology student and I want to get into intelligence&quot; works — you'll get what that field actually looks like right now, the questions worth answering, and matches anyway."
-          oninput="updateCharCount()"></textarea>
-        <div class="ai-tips">
-          <span class="ai-tip" tabindex="0" role="button" onclick="setAiTip('I am a 21 year old college student studying psychology and I want to get into intelligence')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">Starting out</span>
-          <span class="ai-tip" tabindex="0" role="button" onclick="setAiTip('Software engineer with 3 years Python & ML experience, interested in AI/product roles')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">Tech &amp; AI</span>
-          <span class="ai-tip" tabindex="0" role="button" onclick="setAiTip('Business professional seeking networking with founders and investors in London')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">Business</span>
-          <span class="ai-tip" tabindex="0" role="button" onclick="setAiTip('Cybersecurity analyst interested in threat intelligence and infosec conferences')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">Security</span>
-          <span class="ai-tip" tabindex="0" role="button" onclick="setAiTip('PhD student researching defence technology, geopolitics, and AI governance')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">Research</span>
-          <span class="ai-tip" tabindex="0" role="button" onclick="setAiTip('Founder looking for co-founders, investors and hackathons to build and ship fast')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">Founder</span>
-        </div>
-        <div class="ai-actionrow">
-          <span class="label-xs" id="aiCharCount">0 / 5000</span>
-        </div>
-        <div class="ai-progress" id="aiProgress" style="display:none"></div>
       </div>
     </div>
 
@@ -1635,10 +1711,10 @@ function filterNew(){
 function openLink(url){if(url&&url!=='#')window.open(url,'_blank','noopener');}
 
 // ── CV HANDLING ──────────────────────────────────────────
-function handleDragOver(e){e.preventDefault();document.getElementById('cvDropZone').classList.add('drag');}
-function handleDragLeave(e){document.getElementById('cvDropZone').classList.remove('drag');}
+function handleDragOver(e){e.preventDefault();document.getElementById('paneCv').classList.add('drag');}
+function handleDragLeave(e){document.getElementById('paneCv').classList.remove('drag');}
 function handleCVDrop(e){
-  e.preventDefault();document.getElementById('cvDropZone').classList.remove('drag');
+  e.preventDefault();document.getElementById('paneCv').classList.remove('drag');
   const file=e.dataTransfer?.files?.[0];if(file)processFile(file);
 }
 function handleCVFile(input){const file=input.files?.[0];if(file)processFile(file);}
@@ -1656,12 +1732,32 @@ function processFile(file){
   document.getElementById('cvFileInfo').style.display='flex';
   document.getElementById('dzTitle').textContent=file.name;
   document.getElementById('dzSub').textContent='Ready. Run the analysis when you are.';
-  toast('CV loaded');
+  // The loaded-state confirmation lives in the CV pane, so a file picked
+  // from the LinkedIn tab has to land back here or the user gets no
+  // feedback at all that it worked.
+  setIntake('cv');
+  toast('Loaded — ready to analyse');
 }
 
 // ── AI FORM ──────────────────────────────────────────────
 function updateCharCount(){const l=document.getElementById('aiInput').value.length;document.getElementById('aiCharCount').textContent=l+' / 5000';}
-function setAiTip(t){document.getElementById('aiInput').value=t;updateCharCount();}
+function setAiTip(btn,t){
+  document.getElementById('aiInput').value=t;
+  updateCharCount();
+  document.querySelectorAll('.ai-tip').forEach(c=>c.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+}
+// CV vs LinkedIn intake. Both end at the same place - a file in the same
+// <input>, parsed server-side by the same extractor - so nothing
+// downstream needs to know which tab the user came through.
+function setIntake(mode){
+  const isCv=mode==='cv';
+  document.getElementById('paneCv').style.display=isCv?'flex':'none';
+  document.getElementById('paneLi').style.display=isCv?'none':'flex';
+  const tc=document.getElementById('tabCv'), tl=document.getElementById('tabLi');
+  tc.classList.toggle('active',isCv); tl.classList.toggle('active',!isCv);
+  tc.setAttribute('aria-selected',isCv); tl.setAttribute('aria-selected',!isCv);
+}
 
 const AI_PROGRESS_STEPS=[
   'Reading your background…','Checking honesty on strengths & gaps…',
