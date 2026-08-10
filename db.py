@@ -389,6 +389,218 @@ def get_funnel_analytics():
         return []
 
 
+def _rows(cur, sql, params=None):
+    """Run a query and return a list of dicts keyed by the cursor's own
+    column names, so a SELECT can be edited without also editing a
+    hand-maintained column list next to it."""
+    cur.execute(sql, params or ())
+    cols = [d[0] for d in cur.description]
+    return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
+def get_analytics_overview(days: int = 30):
+    """Everything the admin analytics page renders, in one round trip.
+
+    Deliberately exhaustive: every table and column we persist is
+    represented somewhere below, because a metric that exists in the
+    database but nowhere in the UI is a metric nobody acts on. Each block
+    is independent - one failing query returns an empty section rather
+    than taking down the whole page.
+
+    Note the honesty metrics (zero_match_rate, fit score distribution,
+    matches-per-analysis): those exist to make the product's central claim
+    - "two to four strong matches, frequently none" - measurable rather
+    than just asserted."""
+    out = {
+        "totals": {}, "daily": [], "fit_hist": [], "matches_dist": [],
+        "categories": [], "evidence": [], "input_kinds": [], "seniority": [],
+        "fields": [], "top_events": [], "clicked_events": [], "hours": [],
+        "weekdays": [], "repeat": [], "files": {}, "file_types": [],
+        "locations": [], "location_consent": {}, "labeled": [],
+        "traffic_detail": [], "recent": [],
+    }
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return out
+
+            def safe(key, sql, params=None, single=False):
+                """One bad query must not blank the whole dashboard."""
+                try:
+                    rows = _rows(cur, sql, params)
+                    out[key] = (rows[0] if rows else {}) if single else rows
+                except Exception as exc:
+                    log.warning(f"analytics[{key}] failed: {exc}")
+
+            # ---- headline counters -------------------------------------
+            safe("totals", """
+                select
+                  (select count(*) from consent)                          as visitors,
+                  (select count(*) from consent where consented)          as accepted,
+                  (select count(*) from consent where consented = false)  as declined,
+                  (select count(*) from analyses)                         as analyses,
+                  (select count(distinct oc_uid) from analyses)           as people_analysed,
+                  (select count(*) from analyses where is_cv)             as usable_inputs,
+                  (select count(*) from recommendations)                  as recommendations,
+                  (select count(*) from interactions)                     as clicks,
+                  (select count(*) from raw_files)                        as files,
+                  (select count(*) from user_locations)                   as location_pings,
+                  (select count(*) from labeled_examples)                 as labeled_examples,
+                  (select coalesce(round(avg(fit_score)::numeric,1),0) from recommendations) as avg_fit,
+                  (select coalesce(max(fit_score),0) from recommendations)                   as max_fit,
+                  (select coalesce(min(fit_score),0) from recommendations)                   as min_fit
+            """, single=True)
+
+            # ---- activity over time ------------------------------------
+            # Generated date spine so quiet days plot as zero instead of
+            # silently collapsing the x-axis.
+            safe("daily", """
+                with spine as (
+                  select generate_series(
+                    (current_date - (%s || ' days')::interval)::date,
+                    current_date, '1 day')::date as d
+                )
+                select to_char(s.d,'YYYY-MM-DD') as day,
+                  (select count(*) from consent c
+                     where c.consented and c.consented_at::date = s.d)      as accepted,
+                  (select count(*) from analyses a
+                     where a.created_at::date = s.d)                        as analyses,
+                  (select count(*) from interactions i
+                     where i.created_at::date = s.d)                        as clicks
+                from spine s order by s.d
+            """, (days,))
+
+            # ---- the honesty curve -------------------------------------
+            safe("fit_hist", """
+                select width_bucket(fit_score, 60, 100, 8) as bucket,
+                       60 + (width_bucket(fit_score, 60, 100, 8) - 1) * 5 as lo,
+                       count(*) as n
+                from recommendations where fit_score is not null
+                group by 1,2 order by 1
+            """)
+            safe("matches_dist", """
+                select n_matches, count(*) as analyses from (
+                  select a.id, count(r.id) as n_matches
+                  from analyses a
+                  left join recommendations r on r.analysis_id = a.id
+                  where a.is_cv group by a.id
+                ) t group by n_matches order by n_matches
+            """)
+
+            # ---- what the engine actually recommends -------------------
+            safe("categories", """
+                select coalesce(nullif(category,''),'Uncategorised') as category,
+                       count(*) as n, round(avg(fit_score)::numeric,1) as avg_fit
+                from recommendations group by 1 order by n desc
+            """)
+            safe("top_events", """
+                select title, coalesce(nullif(category,''),'—') as category,
+                       count(*) as times_recommended,
+                       round(avg(fit_score)::numeric,1) as avg_fit
+                from recommendations where title is not null and title <> ''
+                group by title, category order by times_recommended desc, avg_fit desc limit 12
+            """)
+            safe("clicked_events", """
+                select r.title, count(*) as clicks
+                from interactions i join recommendations r on r.id = i.recommendation_id
+                where r.title is not null and r.title <> ''
+                group by r.title order by clicks desc limit 12
+            """)
+
+            # ---- who the people are ------------------------------------
+            safe("evidence", """
+                select coalesce(nullif(evidence_level,''),'unknown') as evidence_level,
+                       count(*) as n
+                from analyses group by 1 order by n desc
+            """)
+            safe("input_kinds", """
+                select case when is_cv then 'usable (CV / self-description)'
+                            else 'unusable input' end as kind, count(*) as n
+                from analyses group by 1 order by n desc
+            """)
+            safe("seniority", """
+                select coalesce(nullif(profile->>'seniority',''),'unstated') as seniority,
+                       count(*) as n
+                from analyses where profile is not null group by 1 order by n desc
+            """)
+            safe("fields", """
+                select coalesce(nullif(field,''),'unstated') as field, count(*) as n
+                from analyses group by 1 order by n desc limit 12
+            """)
+
+            # ---- rhythm -------------------------------------------------
+            safe("hours", """
+                select extract(hour from created_at)::int as hour, count(*) as n
+                from analyses group by 1 order by 1
+            """)
+            safe("weekdays", """
+                select extract(isodow from created_at)::int as dow, count(*) as n
+                from analyses group by 1 order by 1
+            """)
+            safe("repeat", """
+                select n_analyses, count(*) as people from (
+                  select oc_uid, count(*) as n_analyses from analyses group by oc_uid
+                ) t group by n_analyses order by n_analyses
+            """)
+
+            # ---- uploads ------------------------------------------------
+            safe("files", """
+                select count(*) as n,
+                       coalesce(sum(size_bytes),0) as total_bytes,
+                       coalesce(round(avg(size_bytes))::bigint,0) as avg_bytes,
+                       coalesce(max(size_bytes),0) as max_bytes
+                from raw_files
+            """, single=True)
+            safe("file_types", """
+                select coalesce(nullif(lower(regexp_replace(filename,'^.*\\.','')),''),'unknown') as ext,
+                       count(*) as n, coalesce(round(avg(size_bytes))::bigint,0) as avg_bytes
+                from raw_files group by 1 order by n desc
+            """)
+
+            # ---- location ------------------------------------------------
+            safe("location_consent", """
+                select
+                  count(*) filter (where location_consented is true)  as granted,
+                  count(*) filter (where location_consented is false) as refused,
+                  count(*) filter (where location_consented is null)  as never_asked
+                from consent
+            """, single=True)
+            safe("locations", """
+                select round(lat::numeric,4) as lat, round(lng::numeric,4) as lng,
+                       round(coalesce(accuracy_m,0)::numeric,0) as accuracy_m,
+                       to_char(created_at,'YYYY-MM-DD') as day
+                from user_locations order by created_at desc limit 500
+            """)
+
+            # ---- training data + traffic detail --------------------------
+            safe("labeled", """
+                select judgment, count(*) as n from labeled_examples
+                group by 1 order by n desc
+            """)
+            safe("traffic_detail", """
+                select
+                  coalesce(nullif(utm_source,''),'—')   as utm_source,
+                  coalesce(nullif(utm_medium,''),'—')   as utm_medium,
+                  coalesce(nullif(utm_campaign,''),'—') as utm_campaign,
+                  coalesce(nullif(regexp_replace(referrer,'^https?://([^/]+).*$','\\1'),''),'—') as referrer,
+                  count(*) as people
+                from consent where consented
+                group by 1,2,3,4 order by people desc limit 20
+            """)
+            safe("recent", """
+                select to_char(a.created_at,'YYYY-MM-DD HH24:MI') as at,
+                       a.is_cv, coalesce(nullif(a.evidence_level,''),'—') as evidence_level,
+                       coalesce(nullif(a.field,''),'—') as field,
+                       coalesce(nullif(a.profile->>'seniority',''),'—') as seniority,
+                       (select count(*) from recommendations r where r.analysis_id = a.id) as matches,
+                       left(a.oc_uid, 8) as uid
+                from analyses a order by a.created_at desc limit 15
+            """)
+    except Exception as exc:
+        log.warning(f"get_analytics_overview failed: {exc}")
+    return out
+
+
 def list_users(limit: int = 200):
     """Admin dashboard: one row per oc_uid ever asked for consent (whether
     they said yes or no), with activity counts, most recently active first.

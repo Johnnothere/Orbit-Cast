@@ -524,7 +524,12 @@ def api_admin_download_raw(analysis_id):
 def api_admin_analytics():
     if not _admin_authorized():
         return jsonify({"error": "Unauthorized"}), 401
-    return jsonify({"funnel": db.get_funnel_analytics()})
+    days = request.args.get("days", type=int) or 30
+    days = max(7, min(days, 180))
+    payload = {"funnel": db.get_funnel_analytics()}
+    payload.update(db.get_analytics_overview(days=days))
+    payload["days"] = days
+    return jsonify(payload)
 
 
 @app.route("/api/admin/users", methods=["GET"])

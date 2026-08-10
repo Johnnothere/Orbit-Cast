@@ -112,6 +112,60 @@ textarea:focus,input:focus,select:focus{border-color:var(--blue);}
   border-radius:8px;display:flex;align-items:center;padding:0 10px;color:#fff;font-family:'IBM Plex Mono',monospace;
   font-size:.72rem;font-weight:600;white-space:nowrap;transition:width .5s ease;}
 .funnel-pct{width:110px;flex-shrink:0;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:var(--t3);}
+
+/* ---------- analytics: charts ----------
+   Charts are hand-rolled SVG on purpose: the admin page has a strict CSP
+   and no build step, so pulling a charting library off a CDN is not an
+   option. SVG also scales crisply and needs no canvas sizing dance. */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:14px;}
+.kpi{background:var(--sf2);border:1px solid var(--border);border-radius:12px;padding:12px 14px;position:relative;overflow:hidden;}
+.kpi::after{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:linear-gradient(180deg,var(--navy),var(--blue) 60%,var(--sky));}
+.kpi-v{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:1.5rem;color:var(--navy);
+  line-height:1.1;font-variant-numeric:tabular-nums;}
+.kpi-l{font-size:.68rem;color:var(--t2);margin-top:3px;line-height:1.35;}
+.kpi-sub{font-family:'IBM Plex Mono',monospace;font-size:.6rem;color:var(--t3);margin-top:4px;}
+.kpi.good .kpi-v{color:#047857;} .kpi.good::after{background:linear-gradient(180deg,#047857,#34d399);}
+.kpi.warn .kpi-v{color:#b45309;} .kpi.warn::after{background:linear-gradient(180deg,#b45309,#fbbf24);}
+
+.chart-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-top:14px;}
+.chart-box{background:var(--sf2);border:1px solid var(--border);border-radius:12px;padding:14px;}
+.chart-box h3{font-family:'Space Grotesk',sans-serif;font-size:.82rem;font-weight:600;color:var(--navy);margin-bottom:2px;}
+.chart-box .hint{font-size:.68rem;margin-bottom:10px;}
+.chart-box svg{display:block;width:100%;height:auto;overflow:visible;}
+.c-axis{font-family:'IBM Plex Mono',monospace;font-size:8.5px;fill:var(--t3);}
+.c-val{font-family:'IBM Plex Mono',monospace;font-size:9px;fill:var(--navy);font-weight:600;}
+.c-grid{stroke:var(--border);stroke-width:1;}
+.c-bar{transition:opacity .15s;} .c-bar:hover{opacity:.75;}
+
+/* horizontal bar list - used for categories, fields, events */
+.hbar{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin-top:9px;}
+.hbar-top{display:flex;justify-content:space-between;gap:8px;font-size:.72rem;margin-bottom:3px;}
+.hbar-name{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hbar-track{height:7px;background:var(--border);border-radius:4px;overflow:hidden;}
+.hbar-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--navy),var(--blue) 70%,var(--sky));
+  transition:width .5s ease;}
+.hbar-n{font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--t2);white-space:nowrap;}
+
+/* legend for donuts */
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;}
+.legend span{display:inline-flex;align-items:center;gap:5px;font-size:.7rem;color:var(--t2);}
+.legend i{width:9px;height:9px;border-radius:3px;display:inline-block;flex-shrink:0;}
+.donut-wrap{display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+.donut-wrap svg{width:120px;height:120px;flex-shrink:0;}
+.donut-mid{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:15px;fill:var(--navy);}
+.donut-sub{font-family:'IBM Plex Mono',monospace;font-size:7.5px;fill:var(--t3);}
+
+/* 24h activity strip */
+.hstrip{display:grid;grid-template-columns:repeat(24,1fr);gap:2px;margin-top:8px;}
+.hcell{aspect-ratio:1;border-radius:3px;background:var(--border);position:relative;}
+.hstrip-ax{display:grid;grid-template-columns:repeat(24,1fr);gap:2px;margin-top:4px;
+  font-family:'IBM Plex Mono',monospace;font-size:7px;color:var(--t3);text-align:center;}
+.an-map{height:260px;border-radius:10px;overflow:hidden;border:1px solid var(--border);margin-top:10px;}
+.range-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;}
+.range-row button{font-family:'IBM Plex Mono',monospace;font-size:.68rem;padding:5px 11px;border-radius:8px;
+  border:1px solid var(--border2);background:var(--surface);color:var(--t2);cursor:pointer;}
+.range-row button.on{background:var(--navy);color:#fff;border-color:var(--navy);}
 .tl-body{padding:0 16px 16px;border-top:1px solid var(--border);}
 .tl-body p.summary-full{font-size:.82rem;line-height:1.6;margin:12px 0;}
 .tl-cv{font-size:.78rem;color:var(--t2);white-space:pre-wrap;background:var(--sf2);border-radius:8px;padding:10px 12px;margin-top:8px;max-height:200px;overflow-y:auto;}
@@ -249,9 +303,125 @@ textarea:focus,input:focus,select:focus{border-color:var(--blue);}
     <!-- ANALYTICS -->
     <div class="panel" id="panel-analytics">
       <div class="card">
+        <h2>The numbers</h2>
+        <p class="hint">Every figure below is counted live from the database, not sampled or estimated.</p>
+        <div class="range-row">
+          <span class="hint" style="margin:0">Time-series window:</span>
+          <button data-days="7"  onclick="setAnRange(7)">7 days</button>
+          <button data-days="30" class="on" onclick="setAnRange(30)">30 days</button>
+          <button data-days="90" onclick="setAnRange(90)">90 days</button>
+        </div>
+        <div class="kpi-grid" id="an-kpis"></div>
+      </div>
+
+      <div class="card">
         <h2>What's happening, in plain terms</h2>
         <p class="hint" id="an-plain-summary">Loading…</p>
         <div id="an-funnel-viz"></div>
+      </div>
+
+      <div class="card">
+        <h2>Activity over time</h2>
+        <p class="hint">Consent accepted, analyses run, and event click-throughs per day.</p>
+        <div id="an-timeseries"></div>
+      </div>
+
+      <div class="card">
+        <h2>Is the engine actually being honest?</h2>
+        <p class="hint">The product's core claim is "two to four strong matches, frequently none."
+          These two charts are what make that claim checkable rather than just asserted.</p>
+        <div class="chart-grid">
+          <div class="chart-box">
+            <h3>Fit-score distribution</h3>
+            <p class="hint">Every score the engine has ever returned. Nothing below 65 should exist —
+              that floor is enforced in code, so a bar to the left of 65 would be a real bug.</p>
+            <div id="an-fit"></div>
+          </div>
+          <div class="chart-box">
+            <h3>Matches per analysis</h3>
+            <p class="hint">How many events each person actually got. Zero is a legitimate, honest
+              outcome — not a failure.</p>
+            <div id="an-matches"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Who is using it</h2>
+        <div class="chart-grid">
+          <div class="chart-box"><h3>Evidence level</h3>
+            <p class="hint">"Thin" means a stated ambition with little track record — it triggers the orientation write-up.</p>
+            <div id="an-evidence"></div></div>
+          <div class="chart-box"><h3>Seniority</h3>
+            <p class="hint">As read from the CV by the profile engine.</p>
+            <div id="an-seniority"></div></div>
+          <div class="chart-box"><h3>Input usability</h3>
+            <p class="hint">Whether we could get a real person out of what was submitted.</p>
+            <div id="an-kinds"></div></div>
+          <div class="chart-box"><h3>Fields people are aiming at</h3>
+            <div id="an-fields"></div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>What gets recommended, and what gets clicked</h2>
+        <div class="chart-grid">
+          <div class="chart-box"><h3>By category</h3>
+            <p class="hint">Volume of recommendations, with the average fit score each category earns.</p>
+            <div id="an-categories"></div></div>
+          <div class="chart-box"><h3>Most-recommended events</h3>
+            <div id="an-topevents"></div></div>
+          <div class="chart-box"><h3>Most-clicked events</h3>
+            <p class="hint">Recommendations that people actually opened.</p>
+            <div id="an-clicked"></div></div>
+          <div class="chart-box"><h3>Return usage</h3>
+            <p class="hint">How many analyses each person has run.</p>
+            <div id="an-repeat"></div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>When people use it</h2>
+        <div class="chart-grid">
+          <div class="chart-box"><h3>By hour of day</h3>
+            <p class="hint">Server time (UTC). Darker means busier.</p>
+            <div id="an-hours"></div></div>
+          <div class="chart-box"><h3>By day of week</h3>
+            <div id="an-weekdays"></div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Uploads and location</h2>
+        <div class="chart-grid">
+          <div class="chart-box"><h3>Files received</h3>
+            <p class="hint">Only the extracted text is kept for analysis; these are the file records themselves.</p>
+            <div id="an-files"></div></div>
+          <div class="chart-box"><h3>Location permission</h3>
+            <p class="hint">Asked only after consent, and always optional.</p>
+            <div id="an-locconsent"></div></div>
+        </div>
+        <h3 style="font-family:'Space Grotesk',sans-serif;font-size:.82rem;color:var(--navy);margin-top:16px;">Where people are</h3>
+        <p class="hint">Every location point users have shared, at the precision their browser reported.</p>
+        <div class="an-map" id="an-map"></div>
+      </div>
+
+      <div class="card">
+        <h2>Training data</h2>
+        <p class="hint">Human-reviewed examples in the retrieval set, by verdict. These feed the scorer's few-shot context.</p>
+        <div id="an-labeled"></div>
+      </div>
+
+      <div class="card">
+        <h2>Latest analyses</h2>
+        <p class="hint">The most recent runs, newest first.</p>
+        <div id="an-recent"></div>
+      </div>
+
+      <div class="card">
+        <h2>Full traffic attribution</h2>
+        <p class="hint">Every UTM combination and referrer we have recorded, per consented visitor.</p>
+        <div id="an-traffic"></div>
       </div>
 
       <div class="card">
@@ -531,6 +701,149 @@ function initAdminLocMap(el) {
 
 // ANALYTICS
 let FUNNEL_DATA = [];
+/* ============================================================
+   Tiny SVG chart kit. No external library - the admin page runs under a
+   strict CSP with no build step, so charts are generated as plain SVG
+   strings. Every helper takes already-shaped data and returns markup.
+   ============================================================ */
+const C_PALETTE = ["#11133a","#2563eb","#38bdf8","#7c3aed","#0891b2","#059669",
+                   "#d97706","#dc2626","#64748b","#a855f7"];
+const anEsc = s => escapeHtml(String(s == null ? "" : s));
+const anNum = n => Number(n || 0).toLocaleString();
+function anBytes(b){
+  b = Number(b || 0);
+  if (!b) return "0 B";
+  const u = ["B","KB","MB","GB"]; let i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return (i ? b.toFixed(1) : b) + " " + u[i];
+}
+function anEmpty(msg){ return `<div class="empty">${anEsc(msg)}</div>`; }
+
+/* multi-series line + area, with a generated date spine so quiet days
+   render as zero rather than distorting the x-axis */
+function svgSeries(rows, series, opts){
+  opts = opts || {};
+  if (!rows || !rows.length) return anEmpty("Nothing recorded yet.");
+  const W = 720, H = 200, P = { t: 12, r: 12, b: 26, l: 34 };
+  const max = Math.max(1, ...rows.flatMap(r => series.map(s => Number(r[s.key]) || 0)));
+  const x = i => P.l + (i * (W - P.l - P.r)) / Math.max(1, rows.length - 1);
+  const y = v => P.t + (H - P.t - P.b) * (1 - (Number(v) || 0) / max);
+  let g = "";
+  for (let i = 0; i <= 4; i++) {
+    const v = Math.round((max * i) / 4), yy = y(v);
+    g += `<line class="c-grid" x1="${P.l}" y1="${yy}" x2="${W - P.r}" y2="${yy}"/>`
+       + `<text class="c-axis" x="${P.l - 6}" y="${yy + 3}" text-anchor="end">${v}</text>`;
+  }
+  let paths = "";
+  series.forEach((s, si) => {
+    const pts = rows.map((r, i) => `${x(i)},${y(r[s.key])}`).join(" ");
+    const col = s.color || C_PALETTE[si % C_PALETTE.length];
+    paths += `<polygon points="${P.l},${y(0)} ${pts} ${x(rows.length - 1)},${y(0)}"
+                fill="${col}" opacity=".10"/>`
+           + `<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2"
+                stroke-linejoin="round" stroke-linecap="round"/>`;
+    rows.forEach((r, i) => {
+      if (Number(r[s.key]) > 0)
+        paths += `<circle cx="${x(i)}" cy="${y(r[s.key])}" r="2.5" fill="${col}"><title>${anEsc(r[opts.xKey || "day"])} · ${anEsc(s.label)}: ${anNum(r[s.key])}</title></circle>`;
+    });
+  });
+  const step = Math.max(1, Math.ceil(rows.length / 8));
+  let ticks = "";
+  rows.forEach((r, i) => {
+    if (i % step === 0 || i === rows.length - 1)
+      ticks += `<text class="c-axis" x="${x(i)}" y="${H - 8}" text-anchor="middle">${anEsc(String(r[opts.xKey || "day"]).slice(5))}</text>`;
+  });
+  const legend = series.map((s, si) =>
+    `<span><i style="background:${s.color || C_PALETTE[si % C_PALETTE.length]}"></i>${anEsc(s.label)}</span>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" role="img">${g}${paths}${ticks}</svg>
+          <div class="legend">${legend}</div>`;
+}
+
+/* vertical bars with value labels */
+function svgBars(rows, keyLabel, keyVal, opts){
+  opts = opts || {};
+  if (!rows || !rows.length) return anEmpty("Nothing recorded yet.");
+  const W = 720, H = 200, P = { t: 18, r: 8, b: 30, l: 34 };
+  const max = Math.max(1, ...rows.map(r => Number(r[keyVal]) || 0));
+  const iw = (W - P.l - P.r) / rows.length, bw = Math.min(46, iw * 0.68);
+  let g = "";
+  for (let i = 0; i <= 4; i++) {
+    const v = Math.round((max * i) / 4), yy = P.t + (H - P.t - P.b) * (1 - i / 4);
+    g += `<line class="c-grid" x1="${P.l}" y1="${yy}" x2="${W - P.r}" y2="${yy}"/>`
+       + `<text class="c-axis" x="${P.l - 6}" y="${yy + 3}" text-anchor="end">${v}</text>`;
+  }
+  const bars = rows.map((r, i) => {
+    const v = Number(r[keyVal]) || 0;
+    const h = (H - P.t - P.b) * (v / max);
+    const bx = P.l + i * iw + (iw - bw) / 2, by = H - P.b - h;
+    const col = opts.colorFor ? opts.colorFor(r, i) : C_PALETTE[i % C_PALETTE.length];
+    return `<rect class="c-bar" x="${bx}" y="${by}" width="${bw}" height="${Math.max(1, h)}" rx="4" fill="${col}">
+              <title>${anEsc(r[keyLabel])}: ${anNum(v)}</title></rect>
+            <text class="c-val" x="${bx + bw / 2}" y="${by - 5}" text-anchor="middle">${anNum(v)}</text>
+            <text class="c-axis" x="${bx + bw / 2}" y="${H - 10}" text-anchor="middle">${anEsc(r[keyLabel])}</text>`;
+  }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" role="img">${g}${bars}</svg>`;
+}
+
+/* horizontal bar list - better than a pie for ranked categories */
+function hbars(rows, keyLabel, keyVal, opts){
+  opts = opts || {};
+  if (!rows || !rows.length) return anEmpty("Nothing recorded yet.");
+  const max = Math.max(1, ...rows.map(r => Number(r[keyVal]) || 0));
+  return rows.map(r => {
+    const v = Number(r[keyVal]) || 0;
+    const extra = opts.note ? opts.note(r) : "";
+    return `<div>
+      <div class="hbar-top">
+        <span class="hbar-name" title="${anEsc(r[keyLabel])}">${anEsc(r[keyLabel])}</span>
+        <span class="hbar-n">${anNum(v)}${extra ? " · " + anEsc(extra) : ""}</span>
+      </div>
+      <div class="hbar-track"><div class="hbar-fill" style="width:${Math.max(2, (v / max) * 100)}%"></div></div>
+    </div>`;
+  }).join("");
+}
+
+/* donut - only for genuine part-of-whole splits */
+function donut(rows, keyLabel, keyVal, centreLabel){
+  if (!rows || !rows.length) return anEmpty("Nothing recorded yet.");
+  const total = rows.reduce((t, r) => t + (Number(r[keyVal]) || 0), 0);
+  if (!total) return anEmpty("Nothing recorded yet.");
+  const R = 42, C = 2 * Math.PI * R;
+  let off = 0;
+  const arcs = rows.map((r, i) => {
+    const v = Number(r[keyVal]) || 0, frac = v / total;
+    const seg = `<circle cx="60" cy="60" r="${R}" fill="none" stroke="${C_PALETTE[i % C_PALETTE.length]}"
+        stroke-width="15" stroke-dasharray="${frac * C} ${C}" stroke-dashoffset="${-off}"
+        transform="rotate(-90 60 60)"><title>${anEsc(r[keyLabel])}: ${anNum(v)} (${Math.round(frac * 100)}%)</title></circle>`;
+    off += frac * C;
+    return seg;
+  }).join("");
+  const legend = rows.map((r, i) =>
+    `<span><i style="background:${C_PALETTE[i % C_PALETTE.length]}"></i>${anEsc(r[keyLabel])} · ${anNum(r[keyVal])}</span>`).join("");
+  return `<div class="donut-wrap">
+      <svg viewBox="0 0 120 120" role="img">${arcs}
+        <text class="donut-mid" x="60" y="59" text-anchor="middle">${anNum(total)}</text>
+        <text class="donut-sub" x="60" y="72" text-anchor="middle">${anEsc(centreLabel || "total")}</text>
+      </svg>
+      <div class="legend" style="flex-direction:column;gap:5px">${legend}</div>
+    </div>`;
+}
+
+function anTable(rows, cols){
+  if (!rows || !rows.length) return anEmpty("Nothing recorded yet.");
+  return `<table class="u-table"><thead><tr>${cols.map(c => `<th>${anEsc(c.label)}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map(r => `<tr>${cols.map(c =>
+      `<td>${c.render ? c.render(r) : anEsc(r[c.key])}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+}
+
+let AN_DAYS = 30, AN_MAP = null;
+function setAnRange(d){
+  AN_DAYS = d;
+  document.querySelectorAll(".range-row button").forEach(b =>
+    b.classList.toggle("on", Number(b.dataset.days) === d));
+  loadAnalytics();
+}
+
 async function loadAnalytics() {
   const body = document.getElementById("analytics-body");
   const viz = document.getElementById("an-funnel-viz");
@@ -539,8 +852,9 @@ async function loadAnalytics() {
   summary.textContent = "Loading…";
   viz.innerHTML = "";
   try {
-    const data = await api("/api/admin/analytics");
+    const data = await api("/api/admin/analytics?days=" + AN_DAYS);
     FUNNEL_DATA = data.funnel || [];
+    renderAnalyticsCharts(data);
 
     if (!FUNNEL_DATA.length) {
       summary.textContent = "No one has accepted the consent banner yet - this fills in once real visitors start using the app.";
@@ -583,6 +897,160 @@ async function loadAnalytics() {
     body.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`;
   }
 }
+
+function renderAnalyticsCharts(d) {
+  const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
+  const t = d.totals || {};
+
+  // ---- headline counters -------------------------------------------
+  const acceptRate = t.visitors ? Math.round((t.accepted / t.visitors) * 100) : 0;
+  const usableRate = t.analyses ? Math.round((t.usable_inputs / t.analyses) * 100) : 0;
+  const recsPer = t.usable_inputs ? (t.recommendations / t.usable_inputs).toFixed(1) : "0";
+  // Zero-match rate is a FEATURE metric, not an error rate - it is the
+  // product refusing to pad. Labelled as such so nobody "fixes" it.
+  const md = d.matches_dist || [];
+  const mdTotal = md.reduce((s, r) => s + Number(r.analyses || 0), 0);
+  const zero = md.find(r => Number(r.n_matches) === 0);
+  const zeroPct = mdTotal ? Math.round((Number(zero && zero.analyses || 0) / mdTotal) * 100) : 0;
+
+  const kpi = (v, l, sub, cls) =>
+    `<div class="kpi ${cls || ""}"><div class="kpi-v">${v}</div><div class="kpi-l">${anEsc(l)}</div>
+     ${sub ? `<div class="kpi-sub">${anEsc(sub)}</div>` : ""}</div>`;
+  set("an-kpis",
+      kpi(anNum(t.visitors), "Browsers seen", `${t.accepted || 0} accepted · ${t.declined || 0} declined`)
+    + kpi(acceptRate + "%", "Accepted consent", "of everyone who saw the banner")
+    + kpi(anNum(t.people_analysed), "People analysed", `${anNum(t.analyses)} analyses run`)
+    + kpi(anNum(t.recommendations), "Recommendations made", `${recsPer} per usable analysis`)
+    + kpi(anNum(t.clicks), "Event click-throughs", "recommendations actually opened")
+    + kpi(t.avg_fit ?? "—", "Average fit score", `range ${t.min_fit ?? "—"}–${t.max_fit ?? "—"}`)
+    + kpi(zeroPct + "%", "Returned no matches", "honest refusals, by design", "good")
+    + kpi(usableRate + "%", "Inputs usable", `${anNum(t.usable_inputs)} of ${anNum(t.analyses)}`)
+    + kpi(anNum(t.files), "Files uploaded", anBytes((d.files || {}).total_bytes))
+    + kpi(anNum(t.location_pings), "Location points", "shared voluntarily")
+    + kpi(anNum(t.labeled_examples), "Training examples", "human-reviewed", t.labeled_examples ? "" : "warn")
+  );
+
+  // ---- time series --------------------------------------------------
+  set("an-timeseries", svgSeries(d.daily || [], [
+    { key: "accepted", label: "Accepted consent", color: "#11133a" },
+    { key: "analyses", label: "Analyses run",     color: "#2563eb" },
+    { key: "clicks",   label: "Event clicks",     color: "#38bdf8" },
+  ]));
+
+  // ---- honesty ------------------------------------------------------
+  const fh = (d.fit_hist || []).map(r => ({ band: `${r.lo}–${Number(r.lo) + 4}`, n: r.n, lo: r.lo }));
+  set("an-fit", fh.length
+    ? svgBars(fh, "band", "n", { colorFor: r => Number(r.lo) >= 85 ? "#047857" : (Number(r.lo) >= 75 ? "#2563eb" : "#64748b") })
+      + `<p class="hint" style="margin-top:8px">Lowest score ever returned: <b>${t.min_fit ?? "—"}</b>${
+          (t.min_fit ?? 65) >= 65 ? " — the 65 floor is holding." : " — BELOW THE FLOOR, investigate."}</p>`
+    : anEmpty("No recommendations scored yet."));
+  set("an-matches", md.length
+    ? svgBars(md.map(r => ({ label: r.n_matches + (Number(r.n_matches) === 1 ? " match" : " matches"), n: r.analyses })),
+              "label", "n", { colorFor: r => r.label.startsWith("0") ? "#b45309" : "#2563eb" })
+      + `<p class="hint" style="margin-top:8px"><b>${zeroPct}%</b> of analyses returned nothing at all.
+         That is the refusal working, not a bug.</p>`
+    : anEmpty("No analyses yet."));
+
+  // ---- who --------------------------------------------------------
+  set("an-evidence",  donut(d.evidence || [], "evidence_level", "n", "analyses"));
+  set("an-seniority", hbars(d.seniority || [], "seniority", "n"));
+  set("an-kinds",     donut(d.input_kinds || [], "kind", "n", "inputs"));
+  set("an-fields",    hbars(d.fields || [], "field", "n"));
+
+  // ---- output -----------------------------------------------------
+  set("an-categories", hbars(d.categories || [], "category", "n",
+      { note: r => "avg fit " + r.avg_fit }));
+  set("an-topevents",  hbars(d.top_events || [], "title", "times_recommended",
+      { note: r => "avg fit " + r.avg_fit }));
+  set("an-clicked",    hbars(d.clicked_events || [], "title", "clicks"));
+  set("an-repeat",     hbars((d.repeat || []).map(r => ({
+        label: r.n_analyses + (Number(r.n_analyses) === 1 ? " analysis" : " analyses"), people: r.people
+      })), "label", "people"));
+
+  // ---- rhythm -----------------------------------------------------
+  const hrs = d.hours || [];
+  if (hrs.length) {
+    const byHour = {}; hrs.forEach(r => byHour[Number(r.hour)] = Number(r.n));
+    const hmax = Math.max(1, ...Object.values(byHour));
+    let cells = "", axis = "";
+    for (let h = 0; h < 24; h++) {
+      const n = byHour[h] || 0, a = n ? 0.15 + 0.85 * (n / hmax) : 0;
+      cells += `<div class="hcell" style="${n ? `background:rgba(37,99,235,${a})` : ""}" title="${h}:00 — ${n} analyses"></div>`;
+      axis += `<div>${h % 3 === 0 ? h : ""}</div>`;
+    }
+    set("an-hours", `<div class="hstrip">${cells}</div><div class="hstrip-ax">${axis}</div>`);
+  } else set("an-hours", anEmpty("No analyses yet."));
+
+  const DOW = { 1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun" };
+  set("an-weekdays", (d.weekdays || []).length
+    ? svgBars((d.weekdays || []).map(r => ({ day: DOW[Number(r.dow)] || r.dow, n: r.n })), "day", "n",
+              { colorFor: r => (r.day === "Sat" || r.day === "Sun") ? "#94a3b8" : "#2563eb" })
+    : anEmpty("No analyses yet."));
+
+  // ---- files + location -------------------------------------------
+  const f = d.files || {};
+  set("an-files", (Number(f.n) || 0)
+    ? `<div class="kpi-grid" style="margin-top:0">
+         ${kpi(anNum(f.n), "files")}${kpi(anBytes(f.total_bytes), "total")}
+         ${kpi(anBytes(f.avg_bytes), "average")}${kpi(anBytes(f.max_bytes), "largest")}
+       </div>` + hbars(d.file_types || [], "ext", "n", { note: r => "avg " + anBytes(r.avg_bytes) })
+    : anEmpty("No files uploaded yet."));
+
+  const lc = d.location_consent || {};
+  set("an-locconsent", donut([
+      { k: "Granted", n: lc.granted || 0 },
+      { k: "Refused", n: lc.refused || 0 },
+      { k: "Never asked", n: lc.never_asked || 0 },
+    ].filter(r => r.n), "k", "n", "visitors"));
+
+  // ---- map ---------------------------------------------------------
+  const locs = d.locations || [];
+  const mapEl = document.getElementById("an-map");
+  if (mapEl && typeof L !== "undefined") {
+    if (!locs.length) {
+      mapEl.innerHTML = `<div class="empty" style="height:100%;display:flex;align-items:center;justify-content:center">No location points shared yet.</div>`;
+    } else {
+      // Leaflet cannot re-init onto a container it already owns, so tear
+      // the old instance down before rebuilding on a range change.
+      if (AN_MAP) { AN_MAP.remove(); AN_MAP = null; }
+      mapEl.innerHTML = "";
+      AN_MAP = L.map(mapEl, { scrollWheelZoom: false });
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        { maxZoom: 18, attribution: "&copy; OpenStreetMap" }).addTo(AN_MAP);
+      const pts = locs.map(p => [Number(p.lat), Number(p.lng)]);
+      locs.forEach(p => L.circleMarker([Number(p.lat), Number(p.lng)], {
+          radius: 6, color: "#2563eb", weight: 2, fillColor: "#38bdf8", fillOpacity: .65,
+        }).addTo(AN_MAP).bindPopup(`${anEsc(p.day)}<br>±${anEsc(p.accuracy_m)} m`));
+      AN_MAP.fitBounds(L.latLngBounds(pts).pad(0.25));
+      if (pts.length === 1) AN_MAP.setZoom(12);
+    }
+  }
+
+  // ---- tables ------------------------------------------------------
+  set("an-labeled", (d.labeled || []).length
+    ? donut(d.labeled, "judgment", "n", "examples")
+    : anEmpty("No human-reviewed examples yet — add them in the Examples tab to improve scoring."));
+
+  set("an-recent", anTable(d.recent || [], [
+    { label: "When", key: "at" },
+    { label: "User", render: r => `<span class="mono">${anEsc(r.uid)}…</span>` },
+    { label: "Usable", render: r => r.is_cv ? "yes" : "no" },
+    { label: "Evidence", key: "evidence_level" },
+    { label: "Field", key: "field" },
+    { label: "Seniority", key: "seniority" },
+    { label: "Matches", render: r => Number(r.matches) === 0
+        ? `<b style="color:#b45309">0</b>` : anEsc(r.matches) },
+  ]));
+
+  set("an-traffic", anTable(d.traffic_detail || [], [
+    { label: "UTM source", key: "utm_source" },
+    { label: "UTM medium", key: "utm_medium" },
+    { label: "UTM campaign", key: "utm_campaign" },
+    { label: "Referrer", key: "referrer" },
+    { label: "People", key: "people" },
+  ]));
+}
+
 function renderFunnel() {
   const body = document.getElementById("analytics-body");
   const filter = (document.getElementById("an-filter-input").value || "").toLowerCase().trim();
