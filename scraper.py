@@ -1322,10 +1322,26 @@ CURATED_LONDON_EVENTS = [
      "date": "2026-11-17",
      "url": "https://www.chathamhouse.org/events/all/conference/competition-policy-conference-2026",
      "category": "Business & Networking"},
-    # NOT INCLUDED: "Chatham House Berlin conference 2026" (25-26 Nov) - it is
-    # in Berlin, and is_london() would drop it anyway.
-    # NOT INCLUDED: the members' Annual General Meeting - institutional
-    # business rather than an event anyone would come to this catalog for.
+    # Both of the following were left out on a first pass, reading only the
+    # listing page. Opening the event pages themselves contradicted it:
+    #
+    # The AGM's venue line is "HYBRID - CHATHAM HOUSE AND ONLINE", so it is a
+    # London event, not just institutional paperwork. It is genuinely
+    # members-only though ("Guests will not be able to gain access"), which
+    # the title says outright rather than letting someone find out at the door.
+    {"title": "Chatham House Annual General Meeting (members only)",
+     "date": "2026-09-08", "location": "London (hybrid)",
+     "url": "https://www.chathamhouse.org/events/all/members-event/annual-general-meeting-5",
+     "category": "Business & Networking"},
+    # The Berlin conference is "RITZ-CARLTON BERLIN AND ONLINE" - the listing
+    # showed no format label at all, and the earlier note that is_london()
+    # would drop it was right only about the in-person half. There is an
+    # online option, so it is attendable from London; the location says both
+    # so nobody books a flight on our say-so.
+    {"title": "Chatham House Berlin conference 2026: Securing Europe's strategic autonomy",
+     "date": "2026-11-25", "location": "Online (venue is Berlin)",
+     "url": "https://www.chathamhouse.org/events/all/standard-event/chatham-house-berlin-conference-2026",
+     "category": "Defence & Geopolitics"},
 ]
 
 _CURATED_EMOJI = {
