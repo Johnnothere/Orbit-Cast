@@ -1533,6 +1533,11 @@ async function fetchEvents(){
       return {
         id:e.id||('ev'+i),cat:e.category||'Tech & AI',src:e.source||'',
         emoji:e.emoji||'',title:e.title||'',date:d,
+        // Other names the same event goes by. Aggregators retitle events -
+        // Hackathon Atlas lists one Softr hackathon by its subtitle while the
+        // organiser uses a completely different headline - so searching the
+        // displayed title alone misses events that are sitting right there.
+        aliases:Array.isArray(e.aliases)?e.aliases:[],
         rawDate:e.date||'',
         url:e.url||'#',
         // hasDate keys off the PARSED date, not merely a non-empty string.
@@ -1651,7 +1656,7 @@ function getFiltered(){
     if(activeSrc&&e.src!==activeSrc)return false;
     if(upcomingOnly&&!isUp(e))return false;
     if(savedOnly&&!saved.has(e.id))return false;
-    if(q&&![e.title,e.src,e.cat].join(' ').toLowerCase().includes(q))return false;
+    if(q&&![e.title,...(e.aliases||[]),e.src,e.cat].join(' ').toLowerCase().includes(q))return false;
     if(dateRange!=='all'){
       // An undated event cannot satisfy a specific date range. Previously the
       // whole block was skipped when e.date was null, so every undated event

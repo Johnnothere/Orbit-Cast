@@ -2132,35 +2132,99 @@ def luma_slug(url):
     return slug
 
 
-def resolve_luma_host(slug, timeout=10):
-    """The calendar hosting one Luma event, as a plain dict, or None.
+# slug -> {"host": {...}|None, "title": str|None}. One lookup answers two
+# different questions - who hosts this, and what does the organiser call it -
+# so both callers share a cache instead of each paying for the same request.
+_luma_event_cache = {}
 
-    Uses api.luma.com/url, which answers with {"kind":"event","data":{...}}.
-    The calendar sits at data.calendar - reading it off the top level instead
-    is what made an earlier pass at this conclude, wrongly, that the endpoint
-    exposed no host information."""
+
+def resolve_luma_event(slug, timeout=10):
+    """Host calendar and canonical title for one Luma event.
+
+    Uses api.luma.com/url, which answers {"kind":"event","data":{...}}. The
+    two fields live at DIFFERENT depths, which has now cost this project three
+    separate mistakes:
+        data.calendar        - the host calendar
+        data.event.name      - the organiser's own title
+    Reading the title off data.name (where the calendar sits) returns None
+    silently, which reads exactly like "the titles agree" and hid every
+    mismatch behind a clean-looking audit."""
+    if slug in _luma_event_cache:
+        return _luma_event_cache[slug]
+    out = {"host": None, "title": None}
     try:
         r = requests.get("https://api.luma.com/url", params={"url": slug},
                          headers={"User-Agent": HEADERS["User-Agent"],
                                   "Accept": "application/json"},
                          timeout=timeout)
-        if r.status_code != 200:
-            return None
-        data = (r.json() or {}).get("data") or {}
-        cal  = data.get("calendar") or {}
-        cal_id = cal.get("api_id")
-        if not cal_id:
-            return None
-        return {
-            "identifier": cal_id,
-            "name": (cal.get("name") or "").strip(),
-            "slug": cal.get("slug"),
-            "city": (cal.get("geo_city") or "").strip(),
-            "timezone": (cal.get("timezone") or "").strip(),
-        }
+        if r.status_code == 200:
+            data = (r.json() or {}).get("data") or {}
+            cal  = data.get("calendar") or {}
+            if cal.get("api_id"):
+                out["host"] = {
+                    "identifier": cal["api_id"],
+                    "name": (cal.get("name") or "").strip(),
+                    "slug": cal.get("slug"),
+                    "city": (cal.get("geo_city") or "").strip(),
+                    "timezone": (cal.get("timezone") or "").strip(),
+                }
+            out["title"] = ((data.get("event") or {}).get("name") or "").strip() or None
     except Exception as e:
-        log.debug(f"Luma host lookup failed for {slug}: {e}")
-        return None
+        log.debug(f"Luma event lookup failed for {slug}: {e}")
+    # successes only - a cached failure would hide this event for the life of
+    # the process, and the callers' budgets already bound retrying
+    if out["host"] or out["title"]:
+        _luma_event_cache[slug] = out
+    return out
+
+
+def resolve_luma_host(slug, timeout=10):
+    """The calendar hosting one Luma event, as a plain dict, or None."""
+    return resolve_luma_event(slug, timeout=timeout)["host"]
+
+
+def add_source_titles(events, max_lookups=150):
+    """Attach the organiser's own title to aggregator-sourced events.
+
+    Aggregators rewrite titles. Hackathon Atlas lists the Softr hackathon by
+    its subtitle, "From Spreadsheet Chaos to One Source of Truth", while the
+    organiser calls it "AI Hackathon for EventProfs & Event Operators in
+    London with Softr". Same event, two names.
+
+    The stored title is left ALONE - it is what the catalog shows, and the
+    aggregator's phrasing is not wrong. The organiser's title is added to
+    `aliases` instead, so both names find the event in search and both are
+    available to cross-source dedupe. Nothing is renamed and nothing is lost.
+
+    Budgeted and cached. The budget is set high enough to cover the whole
+    Luma-linked catalog in ONE pass rather than converging over several: a
+    lower ceiling meant the aliases attached in some later scrape and a search
+    could miss an event in the meantime, which is the exact failure this
+    exists to prevent. The cost is paid once - resolved slugs are cached for
+    the life of the process and shared with harvest_luma_hosts(), so a steady
+    state costs only the handful of events that are genuinely new."""
+    budget = max_lookups
+    tagged = 0
+    for ev in events:
+        slug = luma_slug(ev.get("url"))
+        if not slug:
+            continue
+        if slug not in _luma_event_cache:
+            if budget <= 0:
+                continue
+            budget -= 1
+            resolve_luma_event(slug)
+            time.sleep(0.1)
+        canonical = (_luma_event_cache.get(slug) or {}).get("title")
+        if not canonical or norm_title(canonical) == norm_title(ev.get("title", "")):
+            continue
+        aliases = ev.setdefault("aliases", [])
+        if canonical not in aliases:
+            aliases.append(canonical)
+            tagged += 1
+    if tagged:
+        log.info(f"Title aliases: {tagged} events also known by another name")
+    return events
 
 
 def known_luma_identifiers():
@@ -2178,19 +2242,17 @@ def known_luma_slugs():
     return {u.lower() for u in LUMA_USERS}
 
 
-# Slugs resolved earlier in this process. Host calendars don't change, so
-# re-resolving the same event every 30 minutes would be pure waste - and this
-# is what keeps a recurring scrape from growing into a request storm.
-_resolved_slugs = {}
-
-
 def harvest_luma_hosts(events, known_ids=None, max_lookups=40):
     """Untracked host calendars behind the events we just ingested.
 
     Returns a list of candidate dicts, busiest first. `max_lookups` bounds the
     extra HTTP calls one scrape may make: unresolved slugs are worked through
     a batch at a time, so a catalog with hundreds of Luma events converges
-    over several scrapes instead of hammering the API on one."""
+    over several scrapes instead of hammering the API on one.
+
+    Shares _luma_event_cache with add_source_titles(), so whichever of the two
+    runs first pays for the lookup and the other gets it free - the same
+    request carries both the host and the canonical title."""
     known = set(known_ids if known_ids is not None else known_luma_identifiers())
     known_slugs = known_luma_slugs()
     candidates, budget = {}, max_lookups
@@ -2199,19 +2261,13 @@ def harvest_luma_hosts(events, known_ids=None, max_lookups=40):
         slug = luma_slug(ev.get("url"))
         if not slug:
             continue
-        if slug not in _resolved_slugs:
+        if slug not in _luma_event_cache:
             if budget <= 0:
                 continue                      # leave it for the next scrape
             budget -= 1
-            host = resolve_luma_host(slug)
+            resolve_luma_event(slug)
             time.sleep(0.15)                  # be a polite client
-            # Only successes are remembered. Caching a None would let one
-            # timeout hide that organiser for the entire life of the process,
-            # and the lookup budget already bounds the cost of retrying.
-            if host:
-                _resolved_slugs[slug] = host
-        else:
-            host = _resolved_slugs[slug]
+        host = (_luma_event_cache.get(slug) or {}).get("host")
         if not host or host["identifier"] in known:
             continue
         if (host["slug"] or "").lower() in known_slugs:

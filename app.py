@@ -128,7 +128,8 @@ def run_scrape_background():
     try:
         from scraper import (SOURCES, event_id, HACKATHON_RE, is_london,
                              norm_title, to_iso_date, harvest_luma_hosts,
-                             collapse_series, discover_luma_sources)
+                             collapse_series, discover_luma_sources,
+                             add_source_titles)
         all_events, summary_data = [], []
         lock = threading.Lock()
 
@@ -201,16 +202,26 @@ def run_scrape_background():
         def richness(ev):
             return sum(1 for k in ("date", "time", "location", "url") if ev.get(k))
 
-        by_key, keyless = {}, []
+        # Aggregators rewrite titles, so the same event can arrive under two
+        # different names and match on neither. Attach the organiser's own
+        # title as an alias FIRST, then dedupe against every name an event is
+        # known by - otherwise a title-based key cannot see the collision.
+        add_source_titles(deduped)
+
+        by_key, keyless, kept = {}, [], []
         for ev in sorted(deduped, key=richness, reverse=True):
             iso = to_iso_date(ev.get("date"))
             if not iso:
                 keyless.append(ev)
                 continue
-            key = (norm_title(ev.get("title", "")), iso)
-            if key not in by_key:
-                by_key[key] = ev
-        deduped = list(by_key.values()) + keyless
+            names = [ev.get("title", "")] + list(ev.get("aliases") or [])
+            keys = {(norm_title(n), iso) for n in names if n}
+            if any(k in by_key for k in keys):
+                continue                       # already have it under some name
+            kept.append(ev)
+            for k in keys:
+                by_key[k] = ev
+        deduped = kept + keyless
 
         dupes = len(all_events) - len(deduped)
         all_events = deduped
