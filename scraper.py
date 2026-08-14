@@ -1420,7 +1420,14 @@ for _name, (_cal_id, _emoji, _cat) in LUMA_CALENDARS.items():
 # (HTTP 200, zero entries) - right outcome, wrong reason.
 
 def _luma_user_api_id(username):
-    """Resolve a luma.com/user/<username> handle to its usr- id."""
+    """Resolve a luma.com/user/<handle> to its usr- id.
+
+    The handle in that URL is EITHER a vanity username or a raw usr- id -
+    Luma only mints the vanity form for accounts that choose one, and a
+    profile with username: null is reachable only by its id. An id needs no
+    lookup, so it short-circuits; anything else is resolved off the page."""
+    if (username or "").startswith("usr-"):
+        return username
     try:
         r = requests.get(f"https://luma.com/user/{username}", headers=HEADERS, timeout=12)
         if r.status_code != 200:
@@ -1483,13 +1490,26 @@ def scrape_luma_user(name, username, limit=20):
 
 
 LUMA_USERS = {
-    # username: (display name, emoji, category)
+    # username-or-usr-id: (display name, emoji, category)
     "SuperteamUK": ("Superteam UK", "🟣", "Builder & Tech Community"),
+    # Dormant today - 14 events hosted, none upcoming - and kept anyway, under
+    # the same rule that revived Corgi London: a quiet organiser is not a dead
+    # one, and a source is allowed to return zero. Their past events are all
+    # Europe/London (including "Fundraising Fundamentals with the London
+    # Founders' Network"), so they clear the timezone filter when they resume.
+    # Addressed by usr- id because this profile has no vanity username.
+    "usr-netxIsUXILxiHEt": ("Early-Stage Startup Workshops", "🌱", "Business & Networking"),
     # NOT ADDED: gdglondon. The API works (HTTP 200) but the profile has no
     # upcoming events. Left here as a live note rather than a deletion - if it
     # starts scheduling again, uncomment it.
     # "gdglondon": ("GDG London", "🔴", "Builder & Tech Community"),
 }
+
+# NOT ADDED as a calendar: cal-1PTimjWlm590x39 (luma.com/product-coach, "Early-
+# Stage Startup Workshops"). It is the SAME organiser as the usr- entry above,
+# and the profile is the superset - the calendar's ICS carries 10 events while
+# the profile has 14, including the London Founders' Network one. Adding both
+# would just feed the deduper.
 
 for _username, (_name, _emoji, _cat) in LUMA_USERS.items():
     def _make_user_scraper(u, n, e, cat):
