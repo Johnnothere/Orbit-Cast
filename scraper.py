@@ -5,7 +5,7 @@ Scrapes 20+ sources across Tech, Defence, Intelligence, Business, Education & Ha
 """
 
 import os, json, re, time, hashlib, logging, requests, feedparser
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from bs4 import BeautifulSoup
 from pathlib import Path
 
@@ -1671,7 +1671,14 @@ def _iso_from_month_day(mon_word, day, year=None):
 
     Listing pages routinely print "Aug 16" with no year. A bare month that has
     already passed is read as next year rather than as a date months in the
-    past, which _is_future() would then silently drop."""
+    past, which _is_future() would then silently drop.
+
+    The inference compares actual DATES, not month numbers. An earlier version
+    tested `(today.month - month) > 1`, which left a dead zone one to two
+    months wide: on 15 February a listing showing "Jan 5" resolved to January
+    of the current year, 41 days in the past, and the event was dropped - when
+    an upcoming-events page showing "Jan 5" in mid-February plainly means next
+    January. A day count has no such seam and wraps across December correctly."""
     month = _MONTH_LOOKUP.get((mon_word or "").lower()[:3])
     if not month:
         return None
@@ -1679,16 +1686,26 @@ def _iso_from_month_day(mon_word, day, year=None):
         day = int(day)
     except (TypeError, ValueError):
         return None
-    if year is None:
-        today = datetime.now(timezone.utc).date()
-        year = today.year
-        # more than a month in the past reads as next year's edition
-        if (month, day) < (today.month, today.day) and (today.month - month) > 1:
-            year += 1
+    if year is not None:
+        try:
+            return f"{int(year):04d}-{month:02d}-{day:02d}"
+        except (TypeError, ValueError):
+            return None
+
+    today = datetime.now(timezone.utc).date()
     try:
-        return f"{int(year):04d}-{month:02d}-{day:02d}"
-    except (TypeError, ValueError):
-        return None
+        candidate = date(today.year, month, day)
+    except ValueError:
+        return None                      # e.g. "Feb 30", or Feb 29 in a common year
+    # A little slack before rolling forward: an event that finished a fortnight
+    # ago is a stale listing, not next year's edition. Beyond ~a month, the only
+    # sensible reading of a bare month/day on an upcoming page is the next one.
+    if (today - candidate).days > 31:
+        try:
+            candidate = candidate.replace(year=today.year + 1)
+        except ValueError:               # 29 Feb rolling into a common year
+            return None
+    return candidate.isoformat()
 
 
 def _devpost_dates(period):
