@@ -979,7 +979,9 @@ footer.site{border-top:1px solid var(--hairline);}
       <div class="reveal">
         <div class="hero-eyebrow">
           <span class="hero-dot pulse-ring"></span>
-          <span class="label-xs" id="heroLiveBadge">Access intelligence · London</span>
+          <!-- filled by startHeroClock() on load; the placeholder is only
+               what shows for the frame before that runs -->
+          <span class="label-xs" id="heroLiveBadge">London</span>
         </div>
       </div>
       <div class="reveal" data-delay="90">
@@ -1558,12 +1560,41 @@ async function fetchEvents(){
 // missing element can never throw and take the page down with it.
 function updateHeroStats(){
   const upcoming=allEvents.filter(isUp).length;
-  const badge=document.getElementById('heroLiveBadge');
   const stat=document.getElementById('statEvents');
   const side=document.getElementById('sidePanelCount');
-  if(badge)badge.textContent=upcoming?('Access intelligence · '+upcoming+' live London events'):'Access intelligence · London';
   if(stat)stat.textContent=upcoming?upcoming:'—';
   if(side)side.textContent=upcoming?String(upcoming).padStart(2,'0'):'—';
+}
+
+/* Hero eyebrow: a live London date-time stamp, 24-hour.
+   Pinned to Europe/London rather than the viewer's clock. This is a London
+   catalog, so London is the time that matters - someone reading it in New
+   York seeing their own 17:47 would be reading their evening onto events
+   that start in the middle of London's night.
+   hourCycle:'h23' rather than hour12:false because the latter renders
+   midnight as "24:00" in some engines, which is a real hour nobody writes.
+   The event count that used to live here is not lost - it is still the first
+   cell of the stat grid and the side-panel counter. */
+function updateHeroClock(){
+  const el=document.getElementById('heroLiveBadge');
+  if(!el)return;
+  const now=new Date();
+  try{
+    const date=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/London',
+      day:'2-digit',month:'short',year:'numeric'}).format(now).replace(/,/g,'');
+    const time=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/London',
+      hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(now);
+    const next='London · '+date+' · '+time;
+    if(el.textContent!==next)el.textContent=next;   // avoid pointless repaints
+  }catch(e){
+    el.textContent='London';                        // no Intl tz support
+  }
+}
+function startHeroClock(){
+  updateHeroClock();
+  // display resolves to the minute, so ten seconds is as often as this can
+  // possibly show anything new
+  setInterval(updateHeroClock,10000);
 }
 function renderTicker(){
   const items=['grounded in evidence','no invented profiles','gaps named out loud',
@@ -2377,6 +2408,7 @@ window.addEventListener('scroll',()=>{
 // ── BOOT ────────────────────────────────────────────────
 (function boot(){
   renderTicker();
+  startHeroClock();
   initReveal();
   // Safety net: if IntersectionObserver never fires (unsupported, throttled,
   // or the page renders in a context that doesn't composite), the entire
