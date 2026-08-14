@@ -1026,8 +1026,9 @@ def record_source_candidates(candidates: list) -> int:
                     """
                     insert into source_candidates
                       (identifier, kind, name, url, city, timezone,
-                       event_count, sample_title, times_seen, first_seen, last_seen)
-                    values (%s, %s, %s, %s, %s, %s, %s, %s, 1, now(), now())
+                       event_count, sample_title, discovered_via,
+                       times_seen, first_seen, last_seen)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1, now(), now())
                     on conflict (identifier) do update
                       set name         = excluded.name,
                           url          = excluded.url,
@@ -1035,12 +1036,18 @@ def record_source_candidates(candidates: list) -> int:
                           timezone     = excluded.timezone,
                           event_count  = excluded.event_count,
                           sample_title = excluded.sample_title,
+                          -- keep the FIRST route that found it: the point of
+                          -- this column is which pass widened coverage, and
+                          -- later passes re-find the same lead every scrape
+                          discovered_via = coalesce(source_candidates.discovered_via,
+                                                    excluded.discovered_via),
                           times_seen   = source_candidates.times_seen + 1,
                           last_seen    = now()
                     """,
                     (c["identifier"], c.get("kind", "luma_calendar"), c.get("name"),
                      c.get("url"), c.get("city"), c.get("timezone"),
-                     int(c.get("event_count") or 0), c.get("sample_title")),
+                     int(c.get("event_count") or 0), c.get("sample_title"),
+                     c.get("discovered_via")),
                 )
                 written += 1
             return written
@@ -1058,7 +1065,7 @@ def list_source_candidates(status: str = "new", limit: int = 100):
             sql = """
                 select identifier, kind, name, url, city, timezone,
                        event_count, times_seen, sample_title, status,
-                       first_seen, last_seen
+                       discovered_via, first_seen, last_seen
                   from source_candidates
             """
             params = []

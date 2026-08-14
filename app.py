@@ -128,7 +128,7 @@ def run_scrape_background():
     try:
         from scraper import (SOURCES, event_id, HACKATHON_RE, is_london,
                              norm_title, to_iso_date, harvest_luma_hosts,
-                             collapse_series)
+                             collapse_series, discover_luma_sources)
         all_events, summary_data = [], []
         lock = threading.Lock()
 
@@ -224,7 +224,16 @@ def run_scrape_background():
         # runs after the thing everyone depends on is already stored, inside
         # its own try - a discovery failure must never cost a good scrape.
         try:
+            # Two passes, because they reach different things. The first walks
+            # events we already ingest, so it can only ever find organisers our
+            # existing sources surface. The second goes outside the catalog
+            # entirely - London's whole city feed, plus the past events of
+            # hosts we can see, which is the only route that reaches an
+            # organiser with nothing scheduled right now.
             candidates = harvest_luma_hosts(all_events)
+            seen = {c["identifier"] for c in candidates}
+            candidates += [c for c in discover_luma_sources()
+                           if c["identifier"] not in seen]
             recorded = db.record_source_candidates(candidates)
             if candidates:
                 log.info(f"Source discovery: {len(candidates)} untracked host "

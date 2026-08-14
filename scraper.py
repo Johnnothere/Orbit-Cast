@@ -2045,11 +2045,182 @@ def harvest_luma_hosts(events, known_ids=None, max_lookups=40):
         })
         c["event_count"] += 1
 
+    for c in candidates.values():
+        c.setdefault("discovered_via", "catalog_host")
     ranked = sorted(candidates.values(), key=lambda c: -c["event_count"])
     if ranked:
         log.info(f"Source discovery: {len(ranked)} untracked Luma calendars behind "
                  f"ingested events (top: {ranked[0]['name']} x{ranked[0]['event_count']})")
     return ranked
+
+
+# ── Wider discovery ──────────────────────────────────────────────────────
+#
+# harvest_luma_hosts() can only see organisers our EXISTING sources already
+# surface, which makes it good at filling in a neighbourhood and useless at
+# finding a new one. Two blind spots followed, and both had to be fixed by a
+# human sending a link:
+#
+#   events we never ingest  - anything our sources don't carry, or that the
+#                             category filters drop, has no host to harvest.
+#   dormant organisers      - a calendar with nothing scheduled publishes
+#                             nothing, so there is no event to walk back from.
+#
+# The city feed answers the first: it is every London event Luma knows about,
+# not just ours, and each entry embeds its calendar - a page of ~46 events
+# costs one request instead of 46.
+#
+# Host history answers the second. People outlive their calendars: the host of
+# an event visible today has a profile listing everything they have ever run,
+# and `period=past` on it reaches calendars that have been quiet for months.
+# This is exactly how "Early-Stage Startup Workshops" is reachable - dormant
+# since August 2025, invisible to every other route.
+
+_LUMA_LONDON_GEO = {"geo_latitude": "51.5074", "geo_longitude": "-0.1278",
+                    "geo_type": "circle"}
+
+
+def _is_relevant_calendar(cal_name, event_titles):
+    """Whether a lead is worth a human's attention.
+
+    London's Luma is not a tech directory - one page of the city feed offered
+    Panthers Basketball, a Brazilian dance school and a sports-club booking
+    page. Proposing all of them would bury the real finds, so a lead has to
+    look like tech/builder territory in either its calendar name or something
+    it has actually published."""
+    if HACKATHON_RE.search(cal_name or "") or _BUILDER_TECH_TITLE_RE.search(cal_name or ""):
+        return True
+    return any(HACKATHON_RE.search(t or "") or _BUILDER_TECH_TITLE_RE.search(t or "")
+               for t in event_titles)
+
+
+def _luma_city_feed(pages=3):
+    """Entries from Luma's London discover feed, following the cursor."""
+    entries, cursor = [], None
+    for _ in range(max(1, pages)):
+        params = dict(_LUMA_LONDON_GEO)
+        if cursor:
+            params["pagination_cursor"] = cursor
+        try:
+            r = requests.get("https://api.lu.ma/discover/get-paginated-events",
+                             params=params,
+                             headers={"User-Agent": HEADERS["User-Agent"],
+                                      "Accept": "application/json"},
+                             timeout=15)
+            if r.status_code != 200:
+                log.warning(f"Luma city feed: HTTP {r.status_code}")
+                break
+            data = r.json()
+        except Exception as e:
+            log.warning(f"Luma city feed failed: {e}")
+            break
+        batch = data.get("entries") or []
+        entries.extend(batch)
+        cursor = data.get("next_cursor")
+        if not data.get("has_more") or not cursor:
+            break
+        time.sleep(0.2)
+    return entries
+
+
+def _host_past_calendars(user_api_id, limit=15):
+    """Calendars a host has run in the PAST - dormant ones included."""
+    try:
+        r = requests.get("https://api.luma.com/user/profile/events-hosting",
+                         params={"user_api_id": user_api_id, "period": "past",
+                                 "pagination_limit": limit},
+                         headers={"User-Agent": HEADERS["User-Agent"],
+                                  "Accept": "application/json"},
+                         timeout=12)
+        if r.status_code != 200:
+            return []
+        out = []
+        for entry in r.json().get("entries", []):
+            cal = entry.get("calendar") or {}
+            if cal.get("api_id"):
+                out.append((cal, (entry.get("event") or {}).get("name") or ""))
+        return out
+    except Exception as e:
+        log.debug(f"Host history lookup failed for {user_api_id}: {e}")
+        return []
+
+
+def _as_candidate(cal, sample_title, via):
+    return {
+        "identifier": cal.get("api_id"),
+        "kind": "luma_calendar",
+        "name": (cal.get("name") or "").strip(),
+        "slug": cal.get("slug"),
+        "url": f"https://luma.com/{cal.get('slug')}" if cal.get("slug") else None,
+        "city": (cal.get("geo_city") or "").strip(),
+        "timezone": (cal.get("timezone") or "").strip(),
+        "event_count": 1,
+        "sample_title": sample_title,
+        "discovered_via": via,
+    }
+
+
+def discover_luma_sources(known_ids=None, pages=3, host_lookups=8):
+    """Untracked London calendars from the city feed and from host history.
+
+    Returns candidates in the same shape as harvest_luma_hosts(). Both budgets
+    are deliberately small: this runs on every scrape, and the point is to
+    widen coverage steadily rather than to crawl Luma."""
+    known = set(known_ids if known_ids is not None else known_luma_identifiers())
+    known_slugs = known_luma_slugs()
+    found, titles_by_cal, hosts = {}, {}, {}
+
+    def consider(cal, title, via):
+        cid = cal.get("api_id")
+        if not cid or cid in known:
+            return
+        if (cal.get("slug") or "").lower() in known_slugs or not cal.get("slug"):
+            return                                  # personal calendars have no slug
+        if (cal.get("name") or "").strip().lower() in _SKIP_CALENDAR_NAMES:
+            return
+        # Host history follows PEOPLE, and people run calendars in more than
+        # one city - one London host led to Manila, Berlin and Amsterdam
+        # chapters of the same running club. Drop a calendar that names a city
+        # which isn't London; keep the ones that name none, on the same
+        # conservative principle as is_london().
+        city = (cal.get("geo_city") or "").strip()
+        if city and not re.search(r"\blondon\b", city, re.IGNORECASE) \
+                and _NON_LONDON_CITIES.search(city):
+            return
+        titles_by_cal.setdefault(cid, []).append(title)
+        if cid in found:
+            found[cid]["event_count"] += 1
+        else:
+            found[cid] = _as_candidate(cal, title, via)
+
+    # 1. the city feed - wide, and calendars come embedded
+    for entry in _luma_city_feed(pages=pages):
+        title = (entry.get("event") or {}).get("name") or ""
+        consider(entry.get("calendar") or {}, title, "city_feed")
+        for h in (entry.get("hosts") or []):
+            if h.get("api_id"):
+                hosts.setdefault(h["api_id"], title)
+
+    # 2. host history - the only route to an organiser with nothing scheduled.
+    # Hosts of relevant-looking events are tried first, so a small budget is
+    # spent where a real lead is likeliest.
+    ranked_hosts = sorted(hosts.items(),
+                          key=lambda kv: not _is_relevant_calendar("", [kv[1]]))
+    for user_id, _seen_title in ranked_hosts[:max(0, host_lookups)]:
+        for cal, title in _host_past_calendars(user_id):
+            consider(cal, title, "host_history")
+        time.sleep(0.15)
+
+    relevant = [c for c in found.values()
+                if _is_relevant_calendar(c["name"], titles_by_cal.get(c["identifier"], []))]
+    relevant.sort(key=lambda c: -c["event_count"])
+    if relevant:
+        by_route = {}
+        for c in relevant:
+            by_route[c["discovered_via"]] = by_route.get(c["discovered_via"], 0) + 1
+        log.info(f"Wider discovery: {len(relevant)} untracked London calendars "
+                 f"({dict(by_route)}), {len(found) - len(relevant)} filtered as off-topic")
+    return relevant
 
 
 # ─────────────────────────────────────────────
