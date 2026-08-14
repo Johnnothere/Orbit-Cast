@@ -1263,6 +1263,69 @@ CURATED_LONDON_EVENTS = [
     # (Leading Design and Event Tech Live both moved to live scrapers -
     #  scrape_leading_design / scrape_event_tech_live - so they're no
     #  longer duplicated here.)
+
+    # ── Chatham House ────────────────────────────────────────────────────
+    # The Royal Institute of International Affairs, and the most obvious
+    # omission in the Defence & Geopolitics category next to RUSI, which we
+    # already scrape live.
+    #
+    # Curated rather than scraped because Cloudflare rejects the scraper at
+    # the edge: /events, /events/upcoming, /rss.xml, /events/rss.xml,
+    # /jsonapi/node/event and /feed all return 403, and a full set of browser
+    # headers (UA, Accept, Sec-Fetch-*, encoding) does not change that - the
+    # block is on the TLS handshake, so no amount of header dressing gets
+    # `requests` through. The page has no JSON API behind it either.
+    #
+    # Their robots.txt does NOT disallow /events and sets Crawl-delay: 10,
+    # so their stated policy permits crawling and the Cloudflare rule is
+    # over-broad. Defeating it would still mean circumventing live bot
+    # detection, which is not something to do unilaterally - the standing fix
+    # is to ask Chatham House to allowlist the scraper, which their own
+    # robots.txt suggests they would entertain.
+    #
+    # Recorded from the live public listing at /events/upcoming. Same yearly
+    # manual-refresh caveat as everything else in this list, and more acute:
+    # this organiser publishes continuously, so the entries below will lag.
+    {"title": "Iceland's EU referendum: Implications for EU enlargement and Arctic security",
+     "date": "2026-09-01", "location": "Online",
+     "url": "https://www.chathamhouse.org/events/all/standard-event/icelands-eu-referendum-implications-eu-enlargement-and-arctic-security",
+     "category": "Defence & Geopolitics"},
+    {"title": "Francis Fukuyama on his new political memoir: 'In the Realm of the Last Man'",
+     "date": "2026-09-02",
+     "url": "https://www.chathamhouse.org/events/all/members-event/francis-fukuyama-his-new-political-memoir-realm-last-man",
+     "category": "Defence & Geopolitics"},
+    {"title": "What would a ceasefire in Ukraine mean for Europe and the world?",
+     "date": "2026-09-08",
+     "url": "https://www.chathamhouse.org/events/all/standard-event/what-would-ceasefire-ukraine-mean-europe-and-world",
+     "category": "Defence & Geopolitics"},
+    {"title": "Launch of Chatham House Latin America Programme",
+     "date": "2026-09-08",
+     "url": "https://www.chathamhouse.org/events/all/standard-event/launch-latin-america-programme",
+     "category": "Defence & Geopolitics"},
+    {"title": "US at 250: Separation vs. concentration of power - America's enduring constitutional debate",
+     "date": "2026-09-17",
+     "url": "https://www.chathamhouse.org/events/all/standard-event/us-250-separation-vs-concentration-power-americas-enduring-constitutional",
+     "category": "Defence & Geopolitics"},
+    {"title": "Uzbekistan: assessing 10 years of rule under Mirziyoyev",
+     "date": "2026-09-23", "location": "Online",
+     "url": "https://www.chathamhouse.org/events/all/standard-event/uzbekistan-assessing-10-years-rule-under-mirziyoyev",
+     "category": "Defence & Geopolitics"},
+    {"title": "US at 250: Interest vs. principle - the debate about America's values",
+     "date": "2026-10-06",
+     "url": "https://www.chathamhouse.org/events/all/standard-event/us-250-interest-vs-principle-debate-about-americas-values",
+     "category": "Defence & Geopolitics"},
+    {"title": "Film screening: Amerigo: The Search for the American Dream",
+     "date": "2026-11-05",
+     "url": "https://www.chathamhouse.org/events/all/standard-event/film-screening-amerigo-search-american-dream",
+     "category": "Education & Research"},
+    {"title": "Chatham House Competition policy conference 2026",
+     "date": "2026-11-17",
+     "url": "https://www.chathamhouse.org/events/all/conference/competition-policy-conference-2026",
+     "category": "Business & Networking"},
+    # NOT INCLUDED: "Chatham House Berlin conference 2026" (25-26 Nov) - it is
+    # in Berlin, and is_london() would drop it anyway.
+    # NOT INCLUDED: the members' Annual General Meeting - institutional
+    # business rather than an event anyone would come to this catalog for.
 ]
 
 _CURATED_EMOJI = {
@@ -1271,8 +1334,15 @@ _CURATED_EMOJI = {
 }
 
 def _scrape_curated(category):
+    """Curated entries for `category` that haven't happened yet.
+
+    location defaults to London but an entry may override it - Chatham House
+    runs webinars that are online-only, and stamping "London" on those would
+    tell a reader to travel to something with no venue."""
     return [
-        {**ev, "source": f"Curated — {category}", "location": "London"}
+        {**ev, "source": f"Curated — {category}",
+         "location": ev.get("location", "London"),
+         "is_online": (ev.get("location", "") or "").lower().startswith("online")}
         for ev in CURATED_LONDON_EVENTS
         if ev["category"] == category and _is_future(ev["date"])
     ]
