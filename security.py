@@ -35,6 +35,24 @@ def init_security(app):
     # ── Security response headers ─────────────────────────────────────────────
     @app.after_request
     def add_security_headers(response):
+        # Never let a browser serve a stale page or a stale catalog.
+        #
+        # Nothing here sent Cache-Control at all, and with no Cache-Control,
+        # no Expires and no ETag, browsers fall back to HEURISTIC caching -
+        # they invent their own freshness lifetime and reuse the response
+        # without asking. That is why a deploy could go out, be confirmed live
+        # by curl, and still show the previous version in a browser that had
+        # visited before - including in a private window, which keeps its own
+        # in-session cache.
+        #
+        # "no-cache" does not mean "do not store"; it means "revalidate before
+        # reusing", which is exactly right for a page whose content changes on
+        # deploy and a catalog that re-scrapes every 30 minutes. Applied only
+        # to HTML and JSON - the two things this app actually serves and the
+        # two that go stale. Anything else (a downloaded raw file) keeps
+        # whatever it set for itself.
+        if response.mimetype in ("text/html", "application/json"):
+            response.headers.setdefault("Cache-Control", "no-cache, must-revalidate")
         # Prevent clickjacking
         response.headers["X-Frame-Options"] = "DENY"
         # Prevent MIME sniffing
