@@ -1869,6 +1869,59 @@ def scrape_hackathons_uk():
     return out[:15]
 
 
+# Links that appear on EVERY Hackathon Atlas page - the site's own chrome and
+# its author's socials. They are the reason "first external link" is not a
+# usable rule for finding an event's real home.
+_ATLAS_CHROME_HOSTS = ("hackathonatlas.com", "github.com", "linkedin.com",
+                       "x.com", "twitter.com", "boujaddi.com")
+
+# atlas detail url -> resolved source url. Detail pages don't change their
+# outbound link, so this is resolved once per event for the life of the
+# process instead of on every 30-minute scrape.
+_atlas_source_cache = {}
+
+
+def _atlas_source_url(detail_url, timeout=15):
+    """The event's OWN page behind a Hackathon Atlas listing, or None.
+
+    Atlas is an aggregator: hackathonatlas.com/hackathons/<uuid> is its index
+    card, not the event. Linking there sends a reader to a directory entry and
+    makes them find the real thing themselves, and it hides the event's actual
+    host from source discovery - an Atlas URL tells harvest_luma_hosts()
+    nothing, even when the event underneath it is a Luma event we could have
+    learned a whole calendar from.
+
+    The detail page labels the outbound link "Register" and "Official page",
+    both pointing at the same place; that label is the signal, with a
+    chrome-host exclusion as the fallback."""
+    if detail_url in _atlas_source_cache:
+        return _atlas_source_cache[detail_url]
+    result = None
+    try:
+        soup = fetch(detail_url, timeout=timeout)
+        if soup:
+            externals = []
+            for a in soup.select('a[href^="http"]'):
+                href = a.get("href", "")
+                if any(host in href for host in _ATLAS_CHROME_HOSTS):
+                    continue
+                externals.append((a.get_text(" ", strip=True), href))
+            for text, href in externals:
+                if re.search(r"register|official page", text or "", re.IGNORECASE):
+                    result = href
+                    break
+            if not result and externals:
+                result = externals[0][1]
+    except Exception as e:
+        log.debug(f"Atlas source lookup failed for {detail_url}: {e}")
+    # Only successes are remembered. Caching a None would let one timeout pin
+    # that event to the aggregator link for the life of the process, and the
+    # per-scrape budget already bounds the cost of trying again.
+    if result:
+        _atlas_source_cache[detail_url] = result
+    return result
+
+
 @source("Hackathon Atlas", "🗺️", "Hackathons")
 def scrape_hackathon_atlas():
     """hackathonatlas.com - global hackathon directory, ~500 upcoming.
@@ -1876,7 +1929,15 @@ def scrape_hackathon_atlas():
     Server-rendered, so the cards are in the HTML, but the city filter is
     client-side only - there is no ?city=London URL to request. The whole
     first page is fetched and filtered here instead. Cards print "Aug 16 ·
-    London" with no year; _iso_from_month_day infers it."""
+    London" with no year; _iso_from_month_day infers it.
+
+    Atlas is an AGGREGATOR, so each surviving event is resolved through to the
+    page the organiser actually runs - lu.ma, devpost, the event's own site -
+    and only falls back to the Atlas card if that lookup fails. See
+    _atlas_source_url() for why the aggregator URL is the wrong thing to keep.
+    Resolution costs one request per event, capped and cached, and only
+    happens for events that already passed the date and London/online
+    filters - never for the ~480 we are about to discard."""
     events = []
     soup = fetch("https://hackathonatlas.com")
     if not soup:
@@ -1907,7 +1968,24 @@ def scrape_hackathon_atlas():
                        "source": "Hackathon Atlas",
                        "location": "Online" if online else place,
                        "is_online": online})
-    return events[:25]
+
+    events = events[:25]
+    # Resolve the aggregator cards to the organisers' own pages. Budgeted so a
+    # slow run can't stall the whole scrape; anything unresolved keeps the
+    # Atlas link, which is a worse link but still a working one.
+    budget = 25
+    for ev in events:
+        if budget <= 0:
+            break
+        if "hackathonatlas.com/hackathons/" not in ev["url"]:
+            continue
+        if ev["url"] not in _atlas_source_cache:
+            budget -= 1
+            time.sleep(0.15)
+        real = _atlas_source_url(ev["url"])
+        if real:
+            ev["url"] = real
+    return events
 
 
 @source("MLH", "🏆", "Hackathons")
