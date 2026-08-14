@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OrbitCastAI — Honest CV-to-Event Matching</title>
-<meta name="description" content="OrbitCastAI reads the real person behind a CV, then scores every London event honestly. Two to four survive. Frequently none.">
+<title>OrbitCastAI — The right room at the right time</title>
+<meta name="description" content="OrbitCastAI scores every event in the live London catalog against who you actually are, so you walk into the right room at the right time. Two to four survive. Frequently none.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
@@ -979,28 +979,29 @@ footer.site{border-top:1px solid var(--hairline);}
       <div class="reveal">
         <div class="hero-eyebrow">
           <span class="hero-dot pulse-ring"></span>
-          <span class="label-xs" id="heroLiveBadge">Honest event intelligence · London</span>
+          <span class="label-xs" id="heroLiveBadge">Access intelligence · London</span>
         </div>
       </div>
       <div class="reveal" data-delay="90">
-        <h1 class="display-xl">No flattery.</h1>
+        <h1 class="display-xl">The right room.</h1>
       </div>
       <div class="reveal" data-delay="160">
-        <p class="display-xl hero-line"><span class="serif-accent lux-text">Only</span> the rooms</p>
+        <p class="display-xl hero-line"><span class="serif-accent lux-text">At</span> the right time.</p>
       </div>
       <div class="reveal" data-delay="230">
-        <p class="display-xl hero-line dim">that deserve you.</p>
+        <p class="display-xl hero-line dim">Or no room at all.</p>
       </div>
 
       <div class="hero-foot">
         <div class="reveal" data-delay="280">
-          <p>OrbitCastAI reads the real person behind a CV &mdash; the roles actually held, the projects
-             actually shipped &mdash; then scores every event in the live London catalog. Two to four
-             survive. Frequently none. That refusal is the product.</p>
+          <p>Being in the right room is most of it. OrbitCastAI reads who you actually are, then
+             scores every event in the live London catalog against it &mdash; who is in that room,
+             and whether you should be. Two to four survive. Frequently none. That refusal is
+             the product.</p>
         </div>
         <div class="reveal" data-delay="340">
           <div class="hero-actions">
-            <button class="btn-lux sheen" onclick="scrollToConsole()">Submit your CV <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+            <button class="btn-lux sheen" onclick="scrollToConsole()">Find your rooms <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
             <button class="btn-ghost" onclick="switchView('events')">Browse the catalog</button>
           </div>
         </div>
@@ -1189,7 +1190,7 @@ footer.site{border-top:1px solid var(--hairline);}
           <span class="mono" style="font-size:11px;text-transform:uppercase;letter-spacing:.3em;color:oklch(1 0 0/0.45)">The one non-negotiable</span>
           <p class="display-xl big">Honesty over <span class="serif-accent" style="color:oklch(1 0 0/0.6)">flattery</span> &mdash; in the product, and in how we talk about it.</p>
           <button class="btn-white sheen" style="width:auto;margin-top:2rem;padding:1rem 2rem;" onclick="scrollToConsole()">
-            Submit your CV <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            Find your rooms <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
           </button>
         </div>
       </div>
@@ -1560,7 +1561,7 @@ function updateHeroStats(){
   const badge=document.getElementById('heroLiveBadge');
   const stat=document.getElementById('statEvents');
   const side=document.getElementById('sidePanelCount');
-  if(badge)badge.textContent=upcoming?('Honest event intelligence · '+upcoming+' live London events'):'Honest event intelligence · London';
+  if(badge)badge.textContent=upcoming?('Access intelligence · '+upcoming+' live London events'):'Access intelligence · London';
   if(stat)stat.textContent=upcoming?upcoming:'—';
   if(side)side.textContent=upcoming?String(upcoming).padStart(2,'0'):'—';
 }
