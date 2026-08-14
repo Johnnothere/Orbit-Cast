@@ -127,7 +127,8 @@ def run_scrape_background():
         _scraping = True
     try:
         from scraper import (SOURCES, event_id, HACKATHON_RE, is_london,
-                             norm_title, to_iso_date, harvest_luma_hosts)
+                             norm_title, to_iso_date, harvest_luma_hosts,
+                             collapse_series)
         all_events, summary_data = [], []
         lock = threading.Lock()
 
@@ -148,6 +149,11 @@ def run_scrape_background():
                     category = "Hackathons" if HACKATHON_RE.search(ev.get("title", "")) else src["category"]
                     enriched.append({**ev, "id": event_id(ev.get("title", ""), ev.get("url", "")),
                                       "emoji": src["emoji"], "category": category})
+                # Trim recurring series to their next couple of dates - one
+                # calendar's weekly co-working slot is otherwise 16 of the
+                # rows in this catalog. Done HERE, after the London filter,
+                # so the instances kept are London ones.
+                enriched = collapse_series(enriched, keep=2)
                 # count reflects what actually made it into the catalog, so the
                 # dashboard doesn't claim events that were filtered out
                 summary  = {"source": src["name"], "emoji": src["emoji"],

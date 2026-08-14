@@ -174,20 +174,57 @@ JOB_TITLE_WORDS = [
     " head -", " deputy head", " chief ", " vp ",
 ]
 
+# If a title names a kind of event, it is not a job advert - whatever
+# job-ish words it also contains. Without this, " chief " threw out "The
+# London Chief Product Officer Conference 2026", which is a conference about
+# the role, not a vacancy for it.
+EVENT_TYPE_RE = re.compile(
+    r"\b(conference|summit|hackathon|buildathon|meetup|workshop|webinar|expo"
+    r"|festival|symposium|forum|bootcamp|masterclass|panel|demo day|drinks"
+    r"|party|breakfast|dinner|lunch|social|networking|talk|talks|showcase"
+    r"|unconference|roundtable|briefing|seminar|congress|con)\b", re.IGNORECASE)
+
+# Nav headings that scrapers pick up off listing pages. These are checked
+# exactly rather than by shape, because "shape" heuristics kept eating real
+# events - see the word-count rule in is_valid_event.
+JUNK_TITLES |= {
+    "home", "news", "blog", "events", "event", "menu", "more", "next", "back",
+    "all events", "our events", "past events", "upcoming events", "view all",
+    "our partners", "partners", "sponsors", "team", "faq", "faqs",
+}
+
+
 def is_valid_event(title):
-    if not title or len(title) < 8:
+    """True if this looks like a real event title.
+
+    Every rule here has been tightened after it was caught discarding real
+    events. The failure mode matters: a junk title that slips through is
+    visible and fixable, whereas a real event rejected here vanishes with no
+    trace in any log or count."""
+    if not title:
         return False
-    tl = title.lower().strip()
+    t = title.strip()
+    # Was `< 8`, which threw out "44CON" and "Ctrl+W" - both real, recurring
+    # London events. Genuinely empty labels are caught by JUNK_TITLES.
+    if len(t) < 4 or len(t) > 200:
+        return False
+    tl = t.lower()
     if tl in JUNK_TITLES:
         return False
-    if len(title) > 200:
+    # Reject job postings, unless the title names an event type.
+    # Matched against a leading-space-padded copy: every entry in
+    # JOB_TITLE_WORDS starts with a space, so without the pad none of them
+    # could ever match a title that OPENS with the job word - "Head - Threat
+    # Intelligence" walked straight through the job filter.
+    padded = " " + tl
+    if any(jw in padded for jw in JOB_TITLE_WORDS) and not EVENT_TYPE_RE.search(tl):
         return False
-    # Reject job postings
-    if any(jw in tl for jw in JOB_TITLE_WORDS):
-        return False
-    # Reject pure-uppercase titles that are nav headings
-    stripped = title.replace(" ", "").replace("&", "").replace("|", "")
-    if stripped.isupper() and len(stripped) > 10:
+    # Reject pure-uppercase NAV HEADINGS - but a shouty title is how a great
+    # many real conferences style themselves ("DEEP TECH LONDON SUMMIT",
+    # "ONE AI HACKATHON", "NVIDIA GTC LONDON"), and the old rule dropped all
+    # of them. Nav headings are short; three or more words is a name.
+    stripped = t.replace(" ", "").replace("&", "").replace("|", "")
+    if stripped.isupper() and len(stripped) > 10 and len(t.split()) < 3:
         return False
     return True
 
@@ -253,7 +290,13 @@ def collapse_series(events, keep=2):
     Superteam UK's calendar is 16 copies of "Co-Working Fridays : London
     Chapter" stretching to December; Encode Club runs several weekly strands.
     Left alone a single series drowns out every other event in the catalog.
-    Events are sorted by date first so the ones kept are the soonest."""
+    Events are sorted by date first so the ones kept are the soonest.
+
+    Called from the catalog build in app.py, AFTER the London filter, never
+    from inside a scraper. Order matters: collapsing first would spend the
+    quota on a series' two soonest instances wherever they happen to be, and
+    a London instance further down the list would then be gone before the
+    geography filter ever saw it."""
     out, counts = [], {}
     for ev in sorted(events, key=lambda e: e.get("date") or "9999"):
         key = norm_title(ev.get("title", ""))
@@ -1298,7 +1341,7 @@ LUMA_CALENDARS = {
 _LUMA_DEEP_CALENDARS = {"The Hack Collective": 50}
 
 
-def scrape_luma_calendar(name, cal_id, limit=20, series_keep=2):
+def scrape_luma_calendar(name, cal_id, limit=20):
     """One Luma calendar -> its upcoming LONDON events.
 
     Geography matters here because most of these calendars are global.
@@ -1345,7 +1388,7 @@ def scrape_luma_calendar(name, cal_id, limit=20, series_keep=2):
                            "location": city or "London"})
     except Exception as e:
         log.warning(f"Luma {name} failed: {e}")
-    return collapse_series(events, keep=series_keep)
+    return events
 
 for _name, (_cal_id, _emoji, _cat) in LUMA_CALENDARS.items():
     def _make_scraper(n, c, e, cat):
@@ -1394,7 +1437,7 @@ def _luma_user_api_id(username):
         return None
 
 
-def scrape_luma_user(name, username, limit=20, series_keep=2):
+def scrape_luma_user(name, username, limit=20):
     """One Luma user profile -> their upcoming LONDON events.
 
     Same geography rules as scrape_luma_calendar: the event timezone is the
@@ -1436,7 +1479,7 @@ def scrape_luma_user(name, username, limit=20, series_keep=2):
                            "location": city or "London"})
     except Exception as e:
         log.warning(f"Luma user {name} failed: {e}")
-    return collapse_series(events, keep=series_keep)
+    return events
 
 
 LUMA_USERS = {
@@ -1495,7 +1538,7 @@ def scrape_unicorn_mafia():
             "source": "Unicorn Mafia",
             "location": e.get("location") or "London",
         })
-    return collapse_series(events, keep=2)
+    return events
 
 
 # ─────────────────────────────────────────────
@@ -1924,6 +1967,16 @@ def known_luma_identifiers():
     return {cal_id for cal_id, _, _ in LUMA_CALENDARS.values()}
 
 
+def known_luma_slugs():
+    """Vanity slugs we already scrape, as a second way to recognise our own.
+
+    LUMA_USERS is keyed by username, not calendar id, so a profile we already
+    track has no entry in known_luma_identifiers() - and its own events would
+    otherwise come back as a "missing" source, sending whoever reviews the
+    candidate list off to add something already there."""
+    return {u.lower() for u in LUMA_USERS}
+
+
 # Slugs resolved earlier in this process. Host calendars don't change, so
 # re-resolving the same event every 30 minutes would be pure waste - and this
 # is what keeps a recurring scrape from growing into a request storm.
@@ -1938,6 +1991,7 @@ def harvest_luma_hosts(events, known_ids=None, max_lookups=40):
     a batch at a time, so a catalog with hundreds of Luma events converges
     over several scrapes instead of hammering the API on one."""
     known = set(known_ids if known_ids is not None else known_luma_identifiers())
+    known_slugs = known_luma_slugs()
     candidates, budget = {}, max_lookups
 
     for ev in events:
@@ -1948,10 +2002,18 @@ def harvest_luma_hosts(events, known_ids=None, max_lookups=40):
             if budget <= 0:
                 continue                      # leave it for the next scrape
             budget -= 1
-            _resolved_slugs[slug] = resolve_luma_host(slug)
+            host = resolve_luma_host(slug)
             time.sleep(0.15)                  # be a polite client
-        host = _resolved_slugs[slug]
+            # Only successes are remembered. Caching a None would let one
+            # timeout hide that organiser for the entire life of the process,
+            # and the lookup budget already bounds the cost of retrying.
+            if host:
+                _resolved_slugs[slug] = host
+        else:
+            host = _resolved_slugs[slug]
         if not host or host["identifier"] in known:
+            continue
+        if (host["slug"] or "").lower() in known_slugs:
             continue
         if (host["name"] or "").strip().lower() in _SKIP_CALENDAR_NAMES or not host["slug"]:
             continue
