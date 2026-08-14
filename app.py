@@ -7,6 +7,7 @@ Run with: python app.py
 import os
 import json
 import threading
+import time
 import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -46,24 +47,70 @@ LAST_RUN_FILE = Path("last_run.json")
 # CACHE HELPERS
 # ─────────────────────────────────────────────
 
+# Three tiers, most-live first:
+#
+#   1. the database  - survives deploys, shared by every process, always the
+#                      last real scrape
+#   2. the JSON file - same box, same boot; written by every scrape, and the
+#                      whole story when no DATABASE_URL is configured
+#   3. empty         - nothing to serve yet
+#
+# Tier 3 was the entire cold-boot experience before the database tier existed.
+# events_cache.json is gitignored, so it is NOT shipped with the deploy, and
+# Railway's filesystem is ephemeral - which means a fresh container genuinely
+# has no catalog at all, and every visitor for the first minute of a deploy
+# got an empty list. The database tier is what removes that window.
+
+# The live catalog, held in memory. load_events_cache() is called on the hot
+# path of several routes, so it must not hit the database on every request -
+# it resolves the tiers once and then serves from here. The refresh loop
+# replaces this wholesale on each scrape, so "cached" never means "stale":
+# it's the same object the last scrape produced.
+_catalog = None
+_catalog_lock = threading.Lock()
+
+
 def load_events_cache():
-    if EVENTS_FILE.exists():
-        return json.loads(EVENTS_FILE.read_text())
-    return {"events": [], "summary": [], "last_run": None}
+    global _catalog
+    if _catalog is not None:
+        return _catalog
+    with _catalog_lock:
+        if _catalog is not None:                    # filled while we waited
+            return _catalog
+        cached = db.get_events_cache()
+        if cached and cached.get("events"):
+            _catalog = cached
+        elif EVENTS_FILE.exists():
+            _catalog = json.loads(EVENTS_FILE.read_text())
+        else:
+            _catalog = {"events": [], "summary": [], "last_run": None}
+        return _catalog
 
 def load_last_run():
-    if LAST_RUN_FILE.exists():
-        return json.loads(LAST_RUN_FILE.read_text())
-    return {}
+    return {"last_run": load_events_cache().get("last_run")}
 
 def save_events_cache(events, summary):
+    global _catalog
     data = {
         "events":   events,
         "summary":  summary,
         "last_run": datetime.now(timezone.utc).isoformat(),
     }
-    EVENTS_FILE.write_text(json.dumps(data, indent=2))
-    LAST_RUN_FILE.write_text(json.dumps({"last_run": data["last_run"]}))
+    # Serve the new catalog immediately - a single assignment, so a request
+    # arriving mid-write gets the old catalog or the new one, never a
+    # half-built list.
+    _catalog = data
+    # Database first - it's the only copy that outlives this container. The
+    # local file is still written either way: it costs nothing and it is the
+    # whole catalog for a deployment with no DATABASE_URL configured.
+    db.save_events_cache(data)
+    try:
+        EVENTS_FILE.write_text(json.dumps(data, indent=2))
+        LAST_RUN_FILE.write_text(json.dumps({"last_run": data["last_run"]}))
+    except OSError as e:
+        # a read-only or full filesystem must not lose a scrape that already
+        # landed in the database
+        log.warning(f"Local cache write failed (database copy stands): {e}")
 
 # ─────────────────────────────────────────────
 # BACKGROUND SCRAPE
@@ -79,7 +126,8 @@ def run_scrape_background():
             return
         _scraping = True
     try:
-        from scraper import SOURCES, event_id, HACKATHON_RE, is_london
+        from scraper import (SOURCES, event_id, HACKATHON_RE, is_london,
+                             norm_title, to_iso_date, harvest_luma_hosts)
         all_events, summary_data = [], []
         lock = threading.Lock()
 
@@ -131,12 +179,52 @@ def run_scrape_background():
                 continue
             seen_ids.add(ev["id"])
             deduped.append(ev)
+
+        # That id only catches BYTE-identical listings, which is the easy half.
+        # The hard half is the same hackathon on Devpost, Eventbrite, Hackathon
+        # Atlas and a Luma calendar at once, under four different URLs - the
+        # hash differs every time, so all four used to survive. Match on
+        # normalised title + resolved date instead.
+        #
+        # Requiring a date is deliberate. Without one, two genuinely different
+        # instances of a recurring series would collapse into one, which loses
+        # real events; a duplicate that slips through is the cheaper mistake.
+        # Records are ranked so the survivor is the richest one available
+        # rather than whichever thread happened to finish first - as_completed
+        # order is not stable between runs.
+        def richness(ev):
+            return sum(1 for k in ("date", "time", "location", "url") if ev.get(k))
+
+        by_key, keyless = {}, []
+        for ev in sorted(deduped, key=richness, reverse=True):
+            iso = to_iso_date(ev.get("date"))
+            if not iso:
+                keyless.append(ev)
+                continue
+            key = (norm_title(ev.get("title", "")), iso)
+            if key not in by_key:
+                by_key[key] = ev
+        deduped = list(by_key.values()) + keyless
+
         dupes = len(all_events) - len(deduped)
         all_events = deduped
 
         summary_data.sort(key=lambda x: x["source"])
         save_events_cache(all_events, summary_data)
         log.info(f"Scrape done: {len(all_events)} events ({dupes} cross-source duplicates removed)")
+
+        # Save the catalog FIRST, then go looking for what's missing from it.
+        # Discovery makes extra HTTP calls and is the newest code here, so it
+        # runs after the thing everyone depends on is already stored, inside
+        # its own try - a discovery failure must never cost a good scrape.
+        try:
+            candidates = harvest_luma_hosts(all_events)
+            recorded = db.record_source_candidates(candidates)
+            if candidates:
+                log.info(f"Source discovery: {len(candidates)} untracked host "
+                         f"calendars ({recorded} recorded)")
+        except Exception as e:
+            log.warning(f"Source discovery failed (catalog is unaffected): {e}")
     except Exception as e:
         log.error(f"Background scrape failed: {e}")
     finally:
@@ -430,6 +518,35 @@ def api_admin_ingest():
     return jsonify(result)
 
 
+@app.route("/api/admin/source-candidates", methods=["GET"])
+@limiter.limit("120 per hour")
+def api_admin_source_candidates():
+    """Organisers the scraper found hosting events we ingest but that aren't
+    sources yet - i.e. the coverage gaps, which nothing used to report.
+
+    ?status=new (default) | added | ignored | all"""
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    status = request.args.get("status", "new")
+    return jsonify({"candidates": db.list_source_candidates(
+        status=None if status == "all" else status)})
+
+
+@app.route("/api/admin/source-candidates/<identifier>", methods=["POST"])
+@limiter.limit("120 per hour")
+def api_admin_set_source_candidate(identifier):
+    """Accept ('added') or reject ('ignored') a harvested lead. 'ignored'
+    persists across re-harvests, so a rejected calendar stays rejected."""
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    status = (request.get_json(silent=True) or {}).get("status", "")
+    if status not in ("new", "added", "ignored"):
+        return jsonify({"error": "status must be new, added or ignored"}), 400
+    if not db.set_source_candidate_status(identifier, status):
+        return jsonify({"error": "Unknown candidate"}), 404
+    return jsonify({"ok": True, "identifier": identifier, "status": status})
+
+
 @app.route("/api/admin/examples", methods=["GET"])
 @limiter.limit("120 per hour")
 def api_admin_list_examples():
@@ -558,6 +675,34 @@ def api_admin_get_user(oc_uid):
 # STARTUP
 # ─────────────────────────────────────────────
 
+# How often the catalog re-scrapes itself, in minutes. Events are announced
+# and filled up during the day, so a catalog that only refreshes when someone
+# redeploys is stale by definition. 30 minutes is well inside the rate limits
+# of every source and still catches same-day announcements.
+REFRESH_MINUTES = int(os.getenv("REFRESH_MINUTES", "30"))
+
+
+def _refresh_loop():
+    """Scrape at boot, then keep scraping on a timer for the process's life.
+
+    Previously this was a one-shot thread: the catalog was only ever as fresh
+    as the last deploy or the last time someone pressed Refresh by hand. A
+    long-lived container could serve week-old events without anything looking
+    wrong.
+
+    Failures are swallowed by run_scrape_background itself, so a source going
+    down delays nothing - the loop just tries again next interval, and the
+    previous catalog stays served in the meantime."""
+    while True:
+        try:
+            run_scrape_background()
+        except Exception as e:                      # belt and braces
+            log.error(f"Refresh loop iteration failed: {e}")
+        if REFRESH_MINUTES <= 0:                    # opt out for local runs
+            return
+        time.sleep(REFRESH_MINUTES * 60)
+
+
 # Runs on import, not just under `python app.py` - gunicorn imports this
 # module directly and never hits the __main__ guard below. Without this,
 # every deploy boots with an empty cache (Railway's filesystem is
@@ -565,7 +710,7 @@ def api_admin_get_user(oc_uid):
 # Refresh. Safe to run unconditionally: single gunicorn worker process,
 # so this fires exactly once.
 logging.basicConfig(level=logging.INFO)
-threading.Thread(target=run_scrape_background, daemon=True).start()
+threading.Thread(target=_refresh_loop, daemon=True).start()
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))

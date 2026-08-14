@@ -52,14 +52,46 @@ _CITY_PREFIXED_SOURCES = {"Claude Community"}
 # label sits in that slot is the city for these sources.
 _CITY_PREFIX_RE = re.compile(r"^\s*([^|]{2,28})\s*\|")
 
+# An online event has no city, so the London question doesn't apply to it -
+# it's reachable from London like anywhere else. Read off the LOCATION field
+# only, never the title: "Building AI Agents Online" is a title that says
+# nothing about the format, whereas a source that sets location="Online" is
+# making a positive claim. Scrapers that know the format set it explicitly.
+_ONLINE_RE = re.compile(r"^\s*(online|virtual|remote|livestream|webinar)\b", re.IGNORECASE)
+
+
+def is_online(ev) -> bool:
+    """True when the source positively labels the event online/virtual."""
+    if ev.get("is_online"):
+        return True
+    return bool(_ONLINE_RE.match(ev.get("location", "") or ""))
+
+
+# Sources that are NOT London-scoped: a global hackathon directory, a UK-wide
+# student-hackathon charity, a worldwide Devpost search. For these the
+# conservative "keep anything with no city" default is exactly wrong - it
+# waves through every unrecognised city on earth. hackathons.org.uk alone
+# offered up Bradford, Nottingham and Manchester, and only two of those three
+# are on the denylist. Here London (or online) must be stated, not assumed.
+_GLOBAL_SOURCES = {
+    "Devpost London", "Devpost Online", "Hackathon Atlas",
+    "Hackathons UK", "DoraHacks Virtual", "MLH",
+}
+
 
 def is_london(ev, source_name: str = None) -> bool:
-    """True unless the event positively identifies itself as somewhere else.
+    """True when the event belongs in a London catalog.
 
-    Conservative by design: an event is only dropped when it names a city that
-    isn't London. Anything with no location signal is kept, because these
-    sources are London-scoped by default and silently dropping real London
-    events is a worse failure than letting an occasional stray through."""
+    Online events always qualify - they have no city to be wrong about.
+
+    For London-scoped sources the check is deliberately CONSERVATIVE: an event
+    is only dropped when it names a city that isn't London, because silently
+    losing a real London event is worse than letting an occasional stray
+    through. For the global sources in _GLOBAL_SOURCES that default inverts
+    and London has to be named."""
+    if is_online(ev):
+        return True
+
     hay = f"{ev.get('title','')} {ev.get('location','')}"
 
     if source_name in _CITY_PREFIXED_SOURCES:
@@ -70,6 +102,8 @@ def is_london(ev, source_name: str = None) -> bool:
 
     if re.search(r"\blondon\b", hay, re.IGNORECASE):
         return True                       # explicitly London - always keep
+    if source_name in _GLOBAL_SOURCES:
+        return False                      # global source, London not stated
     return not _NON_LONDON_CITIES.search(hay)
 
 TELEGRAM_TOKEN   = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -172,6 +206,61 @@ def fix_url(url, base):
     if url.startswith("/"):
         return base.rstrip("/") + url
     return base.rstrip("/") + "/" + url
+
+
+# Trailing "#3", "Vol. 2", "(Sep 18)", "- London" and similar instance markers
+# are stripped so that the weekly instances of one series collapse together.
+_SERIES_NOISE_RE = re.compile(
+    r"\s*(?:[-–—:|]\s*)?(?:#\s*\d+|vol\.?\s*\d+|part\s*\d+|no\.?\s*\d+|\d{4})\s*$",
+    re.IGNORECASE,
+)
+_PAREN_TAIL_RE = re.compile(r"\s*\([^)]{1,30}\)\s*$")
+
+
+def norm_title(title: str) -> str:
+    """Loose title key used for series collapsing and cross-source dedupe."""
+    t = (title or "").strip().lower()
+    t = _PAREN_TAIL_RE.sub("", t)
+    t = _SERIES_NOISE_RE.sub("", t)
+    return re.sub(r"[^a-z0-9]+", "", t)
+
+
+def to_iso_date(value):
+    """Best-effort ISO date from whatever a source calls a date, else None.
+
+    Sources disagree: Luma and the JSON APIs give "2026-08-14", Eventbrite
+    gives "Fri, Sep 4, 12:30 PM", hackathons.org.uk gives "3 Oct 2026", and
+    some Eventbrite rows give "Sunday at 1:00 PM + 39 more" with no date in
+    them at all. Cross-source dedupe needs one comparable key, and None is an
+    honest answer for the last case rather than a guess."""
+    if not value:
+        return None
+    v = str(value).strip()
+    if re.match(r"^\d{4}-\d{2}-\d{2}", v):
+        return v[:10]
+    m = _LOOSE_DATE_RE.search(v)          # "3 Oct 2026"
+    if m:
+        return _iso_from_match(m)
+    m = re.search(r"\b([A-Za-z]{3,9})\s+(\d{1,2})\b", v)   # "Sep 4"
+    if m and m.group(1).lower()[:3] in _MONTH_LOOKUP:
+        return _iso_from_month_day(m.group(1), m.group(2))
+    return None
+
+
+def collapse_series(events, keep=2):
+    """Keep only the next `keep` occurrences of any recurring series.
+
+    Superteam UK's calendar is 16 copies of "Co-Working Fridays : London
+    Chapter" stretching to December; Encode Club runs several weekly strands.
+    Left alone a single series drowns out every other event in the catalog.
+    Events are sorted by date first so the ones kept are the soonest."""
+    out, counts = [], {}
+    for ev in sorted(events, key=lambda e: e.get("date") or "9999"):
+        key = norm_title(ev.get("title", ""))
+        counts[key] = counts.get(key, 0) + 1
+        if counts[key] <= keep:
+            out.append(ev)
+    return out
 
 # ─────────────────────────────────────────────
 # SOURCE REGISTRY
@@ -1179,18 +1268,37 @@ LUMA_CALENDARS = {
     "Frontline London":  ("cal-TfyKmqJMRKifRSw", "🛰️", "Defence & Geopolitics"),
     "Launch London":     ("cal-Msjwg9quXv2wERr", "🎈", "Business & Networking"),
     "Halkin Offices":    ("cal-sTpcuYmvvYXvEtd", "🏛️", "Business & Networking"),
+    # The Hack Collective is a London hackathon AGGREGATOR calendar, not a
+    # single host - it carries other organisers' events, so it gets a higher
+    # page limit than the host calendars above. luma.com/thehackcollective and
+    # the api.luma.com/ics/get?entity=calendar&id=cal-Qk1P4msjA8eRxCs feed are
+    # the same calendar; the JSON endpoint is used because the ICS one gives
+    # coordinates but no city name.
+    "The Hack Collective": ("cal-Qk1P4msjA8eRxCs", "🛠️", "Hackathons"),
+    # Re-tested and revived: this was previously dismissed for returning zero
+    # upcoming items. That was true on the day and wrong as a policy - a quiet
+    # calendar is not a dead one. Sources are now kept and allowed to return
+    # zero rather than rejected on a single empty read.
+    "Corgi London": ("cal-v8PuFjastlj2pZp", "🐕", "Business & Networking"),
     # RETIRED: "Jody Saunders" (cal-yzm8pBHRjoQCz1E) - the calendar returns
     # HTTP 404, it has been deleted upstream.
     # NOT ADDED, deliberately: "Future: UK" (cal-eP031AKL1RBuO3j) - its only
     # upcoming items are "Optimistic Picnic at Hyde Park" and "Dinners -
     # Interest", which are the same not-a-tech-event category we stripped
-    # out of the Luma Discover feed. "Corgi London", "London AI" and
-    # "KS Events" return zero upcoming items from the API, and one link
-    # resolved to a private personal calendar.
+    # out of the Luma Discover feed.
+    # RE-TESTED, still empty: luma.com/londonai (cal-zUWmkxeBGlQQenp, "Air
+    # Street events") and luma.com/london-ai (cal-OErAx8480sqDAtW, "AI Startup
+    # Events - London") both answer 200 with no upcoming items.
+    # UNRESOLVED: "KS Events" - the original link was never recorded here and
+    # the obvious slugs 404, so it could not be re-tested.
 }
 
+# Aggregator calendars carry many organisers, so they page deeper than the
+# single-host calendars.
+_LUMA_DEEP_CALENDARS = {"The Hack Collective": 50}
 
-def scrape_luma_calendar(name, cal_id):
+
+def scrape_luma_calendar(name, cal_id, limit=20, series_keep=2):
     """One Luma calendar -> its upcoming LONDON events.
 
     Geography matters here because most of these calendars are global.
@@ -1211,7 +1319,8 @@ def scrape_luma_calendar(name, cal_id):
     event is worse than letting an occasional stray through."""
     events = []
     try:
-        url = f"https://api.lu.ma/calendar/get-items?calendar_api_id={cal_id}&pagination_limit=20"
+        url = (f"https://api.lu.ma/calendar/get-items"
+               f"?calendar_api_id={cal_id}&pagination_limit={limit}")
         r   = requests.get(url, headers={"User-Agent":"Mozilla/5.0","Accept":"application/json"}, timeout=12)
         if r.status_code != 200:
             log.warning(f"Luma {name}: HTTP {r.status_code}")
@@ -1236,23 +1345,630 @@ def scrape_luma_calendar(name, cal_id):
                            "location": city or "London"})
     except Exception as e:
         log.warning(f"Luma {name} failed: {e}")
-    return events
+    return collapse_series(events, keep=series_keep)
 
 for _name, (_cal_id, _emoji, _cat) in LUMA_CALENDARS.items():
     def _make_scraper(n, c, e, cat):
         @source(n, e, cat)
         def _scraper():
-            return scrape_luma_calendar(n, c)
+            return scrape_luma_calendar(n, c, limit=_LUMA_DEEP_CALENDARS.get(n, 20))
         return _scraper
     _make_scraper(_name, _cal_id, _emoji, _cat)
 
-# RETIRED: GDG London. lu.ma/user/gdglondon now redirects to luma.com and the
-# page is fully client-rendered - its __NEXT_DATA__ blob contains no events,
-# no calendar id and no event ids, and Luma exposes no public user-events API
-# (get-events / get-profile-items / get-hosting-events all return 404). The
-# old selector also looked for a[href*='lu.ma'], which stopped matching after
-# the luma.com rename. Scraping it would need a headless browser, which is a
-# much heavier dependency than this source is worth.
+
+# ─────────────────────────────────────────────
+# LUMA USER PROFILES
+# ─────────────────────────────────────────────
+#
+# CORRECTION. An earlier version of this file retired GDG London with the note
+# that "Luma exposes no public user-events API (get-events /
+# get-profile-items / get-hosting-events all return 404)" and that a headless
+# browser would be needed. That was wrong. Those 404s came from probing
+# api.LU.MA with guessed path names; the endpoint lives on api.LUMA.COM after
+# the rename - the same rename the note itself had already spotted two lines
+# down, applied to a CSS selector but not to the API host:
+#
+#   GET https://api.luma.com/user/profile/events-hosting
+#       ?user_api_id=usr-XXXX&period=future&pagination_limit=N
+#
+# It returns the identical entries[].event shape the calendar endpoint does,
+# so this is a near-copy of scrape_luma_calendar rather than a new dependency.
+# GDG London itself is re-tested and genuinely has no upcoming events today
+# (HTTP 200, zero entries) - right outcome, wrong reason.
+
+def _luma_user_api_id(username):
+    """Resolve a luma.com/user/<username> handle to its usr- id."""
+    try:
+        r = requests.get(f"https://luma.com/user/{username}", headers=HEADERS, timeout=12)
+        if r.status_code != 200:
+            log.warning(f"Luma user {username}: HTTP {r.status_code}")
+            return None
+        m = re.search(r'id="__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, re.S)
+        if not m:
+            return None
+        data = json.loads(m.group(1))
+        return (data.get("props", {}).get("pageProps", {})
+                    .get("initialData", {}).get("user", {}).get("api_id"))
+    except Exception as e:
+        log.warning(f"Luma user {username} lookup failed: {e}")
+        return None
+
+
+def scrape_luma_user(name, username, limit=20, series_keep=2):
+    """One Luma user profile -> their upcoming LONDON events.
+
+    Same geography rules as scrape_luma_calendar: the event timezone is the
+    reliable signal, geo_address_info supplies the city for the catalog-level
+    is_london() check, and events with no timezone at all are kept."""
+    events = []
+    uid = _luma_user_api_id(username)
+    if not uid:
+        return events
+    try:
+        r = requests.get(
+            "https://api.luma.com/user/profile/events-hosting",
+            params={"user_api_id": uid, "period": "future", "pagination_limit": limit},
+            headers={"User-Agent": HEADERS["User-Agent"], "Accept": "application/json"},
+            timeout=12,
+        )
+        if r.status_code != 200:
+            log.warning(f"Luma user {name}: HTTP {r.status_code}")
+            return events
+        for entry in r.json().get("entries", []):
+            ev    = entry.get("event", entry)
+            title = ev.get("name")
+            if not title:
+                continue
+            tz = (ev.get("timezone") or "").strip()
+            if tz and tz != "Europe/London":
+                continue
+            iso = (ev.get("start_at") or "")[:10]
+            if not _is_future(iso):
+                continue
+            geo  = ev.get("geo_address_info") or {}
+            city = (geo.get("city") or geo.get("city_state") or "").strip()
+            slug = ev.get("url") or ev.get("api_id", "")
+            event_url = f"https://luma.com/{slug}" if slug and not slug.startswith("http") else slug
+            start = ev.get("start_at", "")
+            events.append({"title": title, "date": iso,
+                           "time": start[11:16] if len(start) >= 16 else None,
+                           "url": event_url or "https://luma.com", "source": name,
+                           "location": city or "London"})
+    except Exception as e:
+        log.warning(f"Luma user {name} failed: {e}")
+    return collapse_series(events, keep=series_keep)
+
+
+LUMA_USERS = {
+    # username: (display name, emoji, category)
+    "SuperteamUK": ("Superteam UK", "🟣", "Builder & Tech Community"),
+    # NOT ADDED: gdglondon. The API works (HTTP 200) but the profile has no
+    # upcoming events. Left here as a live note rather than a deletion - if it
+    # starts scheduling again, uncomment it.
+    # "gdglondon": ("GDG London", "🔴", "Builder & Tech Community"),
+}
+
+for _username, (_name, _emoji, _cat) in LUMA_USERS.items():
+    def _make_user_scraper(u, n, e, cat):
+        @source(n, e, cat)
+        def _scraper():
+            return scrape_luma_user(n, u)
+        return _scraper
+    _make_user_scraper(_username, _name, _emoji, _cat)
+
+# GDG London is now handled by the LUMA_USERS block above - see the
+# CORRECTION note there for why the old "no public user-events API"
+# retirement was wrong.
+
+
+# ─────────────────────────────────────────────
+# UNICORN MAFIA
+# ─────────────────────────────────────────────
+
+@source("Unicorn Mafia", "🦄", "Builder & Tech Community")
+def scrape_unicorn_mafia():
+    """unicrnmafia.com - a curated London builder-scene calendar.
+
+    The /e page is a client-rendered Next.js app whose HTML contains the word
+    "EVENTS" and nothing else, so the usual fetch()+soup approach returns
+    zero. The page's own data call is a clean JSON endpoint, which is what is
+    used here. Every entry links out to Luma, and the feed is already
+    London-scoped, so it does in one request what a dozen hand-added host
+    calendars were assembled to approximate."""
+    events = []
+    data = fetch("https://www.unicrnmafia.com/api/calendar", json_mode=True)
+    if not data:
+        return events
+    for e in data.get("events", []):
+        title = (e.get("summary") or "").strip()
+        iso   = (e.get("start", {}).get("dateTime")
+                 or e.get("start", {}).get("date") or "")[:10]
+        if not title or not _is_future(iso):
+            continue
+        url = e.get("externalUrl") or e.get("htmlLink") or "https://www.unicrnmafia.com/e"
+        start = e.get("start", {}).get("dateTime", "")
+        events.append({
+            "title": title,
+            "date": iso,
+            "time": start[11:16] if len(start) >= 16 else None,
+            "url": url,
+            "source": "Unicorn Mafia",
+            "location": e.get("location") or "London",
+        })
+    return collapse_series(events, keep=2)
+
+
+# ─────────────────────────────────────────────
+# HACKATHONS
+# ─────────────────────────────────────────────
+#
+# Two audiences here, and they need different geography rules:
+#   in-person - must be in London, so these sources sit in _GLOBAL_SOURCES
+#               and have to NAME London rather than merely not name a
+#               different city (hackathons.org.uk offers Bradford, and
+#               Bradford is not on any denylist).
+#   online    - no city to be wrong about, so location="Online" passes
+#               is_london() by way of is_online().
+#
+# The same hackathon shows up on Devpost, Eventbrite, Hackathon Atlas and a
+# Luma calendar simultaneously. Cross-source dedupe in app.py is what stops
+# the catalog listing it four times.
+
+_MONTH_DAY_RE = re.compile(r"([A-Za-z]{3,9})\s+(\d{1,2})")
+
+
+def _iso_from_month_day(mon_word, day, year=None):
+    """ISO date from a month word + day, inferring the year when absent.
+
+    Listing pages routinely print "Aug 16" with no year. A bare month that has
+    already passed is read as next year rather than as a date months in the
+    past, which _is_future() would then silently drop."""
+    month = _MONTH_LOOKUP.get((mon_word or "").lower()[:3])
+    if not month:
+        return None
+    try:
+        day = int(day)
+    except (TypeError, ValueError):
+        return None
+    if year is None:
+        today = datetime.now(timezone.utc).date()
+        year = today.year
+        # more than a month in the past reads as next year's edition
+        if (month, day) < (today.month, today.day) and (today.month - month) > 1:
+            year += 1
+    try:
+        return f"{int(year):04d}-{month:02d}-{day:02d}"
+    except (TypeError, ValueError):
+        return None
+
+
+def _devpost_dates(period):
+    """(start, end) out of a Devpost range string.
+
+    Four shapes occur in the wild and all four appear on page one of a London
+    search:
+        "Jul 31 - Oct 01, 2026"   cross-month
+        "Aug 05 - 16, 2026"       same month, end day only
+        "Jul 30, 2026"            single day
+        "Oct 03 - Nov 30, 2025"   cross-month, past year
+    The year is printed once, at the end, and applies to both halves."""
+    if not period:
+        return None, None
+    ym = re.search(r"(\d{4})\s*$", period)
+    year = int(ym.group(1)) if ym else None
+    pairs = _MONTH_DAY_RE.findall(period)
+    if not pairs:
+        return None, None
+    start = _iso_from_month_day(pairs[0][0], pairs[0][1], year)
+    if len(pairs) > 1:
+        return start, _iso_from_month_day(pairs[1][0], pairs[1][1], year)
+    # same-month range: the closing day stands alone after the dash
+    m = re.search(r"-\s*(\d{1,2})\s*,", period)
+    if m:
+        return start, _iso_from_month_day(pairs[0][0], m.group(1), year)
+    return start, start
+
+
+def _window_date(start_iso, end_iso):
+    """The date worth showing for an event with a submission window.
+
+    Online hackathons routinely open weeks before you find them - "Jun 04 -
+    Aug 14" is live today and listing it under June puts it in the catalog's
+    past. Once the start has gone by, the deadline is the date the reader can
+    still act on."""
+    if start_iso and _is_future(start_iso):
+        return start_iso
+    return end_iso or start_iso
+
+
+_DEVPOST_HEADERS = {
+    "User-Agent": HEADERS["User-Agent"],
+    "Accept": "application/json",
+    # Devpost's API answers 403 to a plain request; it wants to look like the
+    # site's own XHR.
+    "X-Requested-With": "XMLHttpRequest",
+}
+
+
+def _scrape_devpost(source_name, params, limit=20):
+    events = []
+    try:
+        r = requests.get("https://devpost.com/api/hackathons",
+                         params=params, headers=_DEVPOST_HEADERS, timeout=15)
+        if r.status_code != 200:
+            log.warning(f"Devpost {source_name}: HTTP {r.status_code}")
+            return events
+        for h in r.json().get("hackathons", []):
+            # "ended" entries dominate a relevance-sorted search - the London
+            # query returns hackathons back to 2014 - so open state is checked
+            # rather than trusted from the query params.
+            if h.get("open_state") not in ("open", "upcoming"):
+                continue
+            title = (h.get("title") or "").strip()
+            start, end = _devpost_dates(h.get("submission_period_dates"))
+            iso   = _window_date(start, end)
+            loc   = (h.get("displayed_location") or {}).get("location") or ""
+            if not is_valid_event(title):
+                continue
+            # a submission window that opened last month is still live, so the
+            # deadline rather than the start decides whether it is worth
+            # showing; keep anything whose window has not closed.
+            if not _is_future(iso):
+                continue
+            events.append({
+                "title": title,
+                "date": iso,
+                "url": h.get("url") or "https://devpost.com/hackathons",
+                "source": source_name,
+                "location": loc,
+                "is_online": loc.strip().lower() in ("online", "virtual"),
+            })
+    except Exception as e:
+        log.warning(f"Devpost {source_name} failed: {e}")
+    return events[:limit]
+
+
+@source("Devpost London", "🏁", "Hackathons")
+def scrape_devpost_london():
+    """In-person London hackathons on Devpost.
+
+    Note for whoever reads the summary line: this legitimately returns very
+    few - Devpost's entire London corpus is 246 hackathons of which only a
+    handful are ever open at once, and today none of the open ones are
+    in-person London. Empty here is a real signal, not a broken selector."""
+    return _scrape_devpost("Devpost London",
+                           {"search": "London", "status[]": ["open", "upcoming"],
+                            "order_by": "deadline"})
+
+
+@source("Devpost Online", "🌍", "Hackathons")
+def scrape_devpost_online():
+    """Open online hackathons - no city, so reachable from London.
+
+    Capped well below the ~80 open at any time: this is a London catalog with
+    an online section, not a Devpost mirror."""
+    return _scrape_devpost("Devpost Online",
+                           {"challenge_type[]": "online",
+                            "status[]": ["open", "upcoming"],
+                            "order_by": "deadline"}, limit=12)
+
+
+@source("Hackathons UK", "🎓", "Hackathons")
+def scrape_hackathons_uk():
+    """hackathons.org.uk - UK student-run hackathons, listed by the charity.
+
+    UK-wide rather than London-scoped, hence its place in _GLOBAL_SOURCES:
+    its current upcoming list is Bradford, Nottingham and Manchester, and
+    without the strict rule Bradford would have been waved through as London
+    purely for not appearing on a denylist."""
+    events = []
+    soup = fetch("https://www.hackathons.org.uk/events/")
+    if not soup:
+        return events
+    # Past events live under their own heading on the same page; everything
+    # before it is upcoming. _is_future() is the real guard, this just avoids
+    # walking hundreds of dead entries.
+    for a in soup.select("a[href]"):
+        block = a.find_parent(["article", "li", "div"]) or a
+        text  = block.get_text(" ", strip=True)
+        # multi-day events print both ends ("24 Oct 2026 - 25 Oct 2026"); the
+        # first is the start, and the venue follows the last.
+        dates = list(_LOOSE_DATE_RE.finditer(text))
+        if not dates:
+            continue
+        m   = dates[-1]
+        iso = _iso_from_match(dates[0])
+        if not _is_future(iso):
+            continue
+        h = block.select_one("h2, h3, h4")
+        title = h.get_text(strip=True) if h else None
+        if not is_valid_event(title):
+            continue
+        url = fix_url(a.get("href", ""), "https://www.hackathons.org.uk")
+        # cards read "Physical <title> <date> <venue> Learn More" - the venue
+        # is what sits between the date and the call to action.
+        venue = text[m.end():].replace("Learn More", "").strip(" -–—·|")
+        events.append({"title": title, "date": iso, "url": url,
+                       "source": "Hackathons UK",
+                       "location": venue or text,
+                       "is_online": bool(re.search(r"\bvirtual\b", text, re.I))})
+    # the same event is reachable through several links in one card
+    seen, out = set(), []
+    for ev in events:
+        k = (norm_title(ev["title"]), ev["date"])
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(ev)
+    return out[:15]
+
+
+@source("Hackathon Atlas", "🗺️", "Hackathons")
+def scrape_hackathon_atlas():
+    """hackathonatlas.com - global hackathon directory, ~500 upcoming.
+
+    Server-rendered, so the cards are in the HTML, but the city filter is
+    client-side only - there is no ?city=London URL to request. The whole
+    first page is fetched and filtered here instead. Cards print "Aug 16 ·
+    London" with no year; _iso_from_month_day infers it."""
+    events = []
+    soup = fetch("https://hackathonatlas.com")
+    if not soup:
+        return events
+    for a in soup.select('a[href^="/hackathons/"]'):
+        spans = [s.get_text(strip=True) for s in a.select("span")]
+        spans = [s for s in spans if s]
+        if len(spans) < 2:
+            continue
+        # last span is the "Aug 16 · London" meta line, the one before it the title
+        meta  = spans[-1]
+        title = spans[-2]
+        if "·" not in meta:
+            continue
+        date_part, _, place = meta.partition("·")
+        place = place.strip()
+        m = _MONTH_DAY_RE.search(date_part)
+        if not m:
+            continue
+        iso = _iso_from_month_day(m.group(1), m.group(2))
+        if not _is_future(iso) or not is_valid_event(title):
+            continue
+        online = place.lower() in ("online", "virtual", "remote")
+        if not online and not re.search(r"\blondon\b", place, re.IGNORECASE):
+            continue
+        events.append({"title": title, "date": iso,
+                       "url": fix_url(a.get("href", ""), "https://hackathonatlas.com"),
+                       "source": "Hackathon Atlas",
+                       "location": "Online" if online else place,
+                       "is_online": online})
+    return events[:25]
+
+
+@source("MLH", "🏆", "Hackathons")
+def scrape_mlh():
+    """Major League Hacking - the global student hackathon league.
+
+    The season page is an Inertia app: the whole event list is already in the
+    page as JSON inside <script data-page="app">, so there is no HTML card
+    parsing and no second request. formatType is authoritative for online vs
+    in-person, which is better than guessing from a location string that says
+    "Everywhere, Worldwide".
+
+    Global, so it sits in _GLOBAL_SOURCES and has to name London. Today it
+    carries no UK events at all - MLH's London dates are seasonal, and this
+    returning only its digital events is correct, not broken."""
+    events = []
+    season = datetime.now(timezone.utc).year + 1        # MLH seasons run ahead
+    soup = fetch(f"https://mlh.io/seasons/{season}/events")
+    if not soup:
+        return events
+    tag = soup.find("script", attrs={"data-page": "app"})
+    if not tag:
+        log.warning("MLH: no data-page blob")
+        return events
+    try:
+        data = json.loads(tag.string or tag.get_text() or "")
+    except (json.JSONDecodeError, TypeError) as e:
+        log.warning(f"MLH: unparseable blob: {e}")
+        return events
+    for e in data.get("props", {}).get("upcomingEvents", []):
+        title = (e.get("name") or "").strip()
+        iso   = (e.get("startsAt") or "")[:10]
+        if not title or not _is_future(iso):
+            continue
+        online = e.get("formatType") != "physical"
+        url = e.get("url") or ""
+        events.append({
+            "title": title,
+            "date": iso,
+            "url": fix_url(url, "https://mlh.io"),
+            "source": "MLH",
+            "location": "Online" if online else (e.get("location") or ""),
+            "is_online": online,
+        })
+    return events[:20]
+
+
+@source("Eventbrite Hackathons London", "🎫", "Hackathons")
+def scrape_eventbrite_hackathons():
+    """Eventbrite's London hackathon category - already London-scoped by URL,
+    so it does not need the strict rule the global directories do."""
+    return _scrape_eventbrite("hackathon", "Eventbrite Hackathons London")
+
+
+@source("DoraHacks Virtual", "⚡", "Hackathons")
+def scrape_dorahacks_virtual():
+    """dorahacks.io virtual hackathons - online, so no city to filter on.
+
+    The API answers 405 without a Referer header; with one it returns clean
+    JSON with unix timestamps. 572 are live at any time, so this is capped."""
+    events = []
+    try:
+        r = requests.get(
+            "https://dorahacks.io/api/v1/hub/hackathons",
+            params={"page": 1, "page_size": 30, "venue_form": "Virtual"},
+            headers={"User-Agent": HEADERS["User-Agent"],
+                     "Accept": "application/json, text/plain, */*",
+                     "Referer": "https://dorahacks.io/hackathon"},
+            timeout=15,
+        )
+        if r.status_code != 200:
+            log.warning(f"DoraHacks: HTTP {r.status_code}")
+            return events
+        for h in r.json().get("results", []):
+            title = (h.get("title") or "").strip()
+            ts    = h.get("timeline_start")
+            end   = h.get("timeline_end")
+            if not title or not ts:
+                continue
+            start_iso = datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%d")
+            # a hackathon that opened weeks ago but is still accepting
+            # submissions is live and worth listing, so the END of the window
+            # decides, not the start.
+            end_iso = (datetime.fromtimestamp(end, timezone.utc).strftime("%Y-%m-%d")
+                       if end else start_iso)
+            if not _is_future(end_iso):
+                continue
+            iso = _window_date(start_iso, end_iso)
+            uname = h.get("uname") or ""
+            events.append({
+                "title": title,
+                "date": iso,
+                "url": f"https://dorahacks.io/hackathon/{uname}/detail" if uname
+                       else "https://dorahacks.io/hackathon",
+                "source": "DoraHacks Virtual",
+                "location": "Online",
+                "is_online": True,
+            })
+    except Exception as e:
+        log.warning(f"DoraHacks failed: {e}")
+    return events[:15]
+
+
+# ─────────────────────────────────────────────
+# SOURCE DISCOVERY
+# ─────────────────────────────────────────────
+#
+# Every source in this file arrived the same way: somebody noticed an event
+# that wasn't in the catalog and sent a link. That makes coverage a function
+# of how much event-hunting the operator happens to do, and it means a whole
+# organiser can go missing indefinitely without anything looking wrong - the
+# run summary counts what we found, never what we didn't.
+#
+# The evidence to fix that is already in hand. Aggregator calendars like The
+# Hack Collective and Unicorn Mafia carry OTHER people's events, and every one
+# of those events names the calendar that hosts it. So each scrape already
+# tells us about organisers we don't track; we just used to throw that away.
+#
+# This resolves ingested Luma events back to their host calendar and reports
+# the ones missing from LUMA_CALENDARS / LUMA_USERS. It proposes, it does not
+# auto-add: a candidate is a lead for a human to accept or reject, because
+# "hosted a London event once" is not the same as "worth a permanent source".
+
+_LUMA_SLUG_RE = re.compile(r"^https?://(?:lu\.ma|luma\.com)/([A-Za-z0-9\-_]+)/?$", re.IGNORECASE)
+
+# Calendar names that are never worth proposing. Luma gives every personal
+# account a calendar called "Personal" with no slug; those are individuals
+# posting one event, not organisers with a schedule to follow.
+_SKIP_CALENDAR_NAMES = {"personal"}
+
+
+def luma_slug(url):
+    """The vanity slug out of a Luma event URL, or None if it isn't one.
+
+    Both hosts appear in the catalog - lu.ma from the older calendar API and
+    luma.com from the newer user API - and they are the same site."""
+    m = _LUMA_SLUG_RE.match((url or "").strip())
+    if not m:
+        return None
+    slug = m.group(1)
+    # /user/<name> and /event/<id> are not event slugs
+    if slug.lower() in ("user", "event", "discover", "signin"):
+        return None
+    return slug
+
+
+def resolve_luma_host(slug, timeout=10):
+    """The calendar hosting one Luma event, as a plain dict, or None.
+
+    Uses api.luma.com/url, which answers with {"kind":"event","data":{...}}.
+    The calendar sits at data.calendar - reading it off the top level instead
+    is what made an earlier pass at this conclude, wrongly, that the endpoint
+    exposed no host information."""
+    try:
+        r = requests.get("https://api.luma.com/url", params={"url": slug},
+                         headers={"User-Agent": HEADERS["User-Agent"],
+                                  "Accept": "application/json"},
+                         timeout=timeout)
+        if r.status_code != 200:
+            return None
+        data = (r.json() or {}).get("data") or {}
+        cal  = data.get("calendar") or {}
+        cal_id = cal.get("api_id")
+        if not cal_id:
+            return None
+        return {
+            "identifier": cal_id,
+            "name": (cal.get("name") or "").strip(),
+            "slug": cal.get("slug"),
+            "city": (cal.get("geo_city") or "").strip(),
+            "timezone": (cal.get("timezone") or "").strip(),
+        }
+    except Exception as e:
+        log.debug(f"Luma host lookup failed for {slug}: {e}")
+        return None
+
+
+def known_luma_identifiers():
+    """Calendar ids we already scrape, so harvesting only reports the gaps."""
+    return {cal_id for cal_id, _, _ in LUMA_CALENDARS.values()}
+
+
+# Slugs resolved earlier in this process. Host calendars don't change, so
+# re-resolving the same event every 30 minutes would be pure waste - and this
+# is what keeps a recurring scrape from growing into a request storm.
+_resolved_slugs = {}
+
+
+def harvest_luma_hosts(events, known_ids=None, max_lookups=40):
+    """Untracked host calendars behind the events we just ingested.
+
+    Returns a list of candidate dicts, busiest first. `max_lookups` bounds the
+    extra HTTP calls one scrape may make: unresolved slugs are worked through
+    a batch at a time, so a catalog with hundreds of Luma events converges
+    over several scrapes instead of hammering the API on one."""
+    known = set(known_ids if known_ids is not None else known_luma_identifiers())
+    candidates, budget = {}, max_lookups
+
+    for ev in events:
+        slug = luma_slug(ev.get("url"))
+        if not slug:
+            continue
+        if slug not in _resolved_slugs:
+            if budget <= 0:
+                continue                      # leave it for the next scrape
+            budget -= 1
+            _resolved_slugs[slug] = resolve_luma_host(slug)
+            time.sleep(0.15)                  # be a polite client
+        host = _resolved_slugs[slug]
+        if not host or host["identifier"] in known:
+            continue
+        if (host["name"] or "").strip().lower() in _SKIP_CALENDAR_NAMES or not host["slug"]:
+            continue
+
+        c = candidates.setdefault(host["identifier"], {
+            **host, "kind": "luma_calendar",
+            "url": f"https://luma.com/{host['slug']}",
+            "event_count": 0, "sample_title": ev.get("title", ""),
+        })
+        c["event_count"] += 1
+
+    ranked = sorted(candidates.values(), key=lambda c: -c["event_count"])
+    if ranked:
+        log.info(f"Source discovery: {len(ranked)} untracked Luma calendars behind "
+                 f"ingested events (top: {ranked[0]['name']} x{ranked[0]['event_count']})")
+    return ranked
+
 
 # ─────────────────────────────────────────────
 # MAIN RUNNER

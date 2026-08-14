@@ -935,3 +935,165 @@ def delete_config(key: str) -> bool:
     except Exception as exc:
         log.warning(f"delete_config failed: {exc}")
         return False
+
+
+# --------------------------------------------------------------------------
+# Event catalog
+# --------------------------------------------------------------------------
+# The scraped catalog is cached to disk in events_cache.json, but Railway's
+# filesystem is ephemeral: every deploy wipes it and the app falls back to
+# whatever snapshot is committed to git. Mirroring the catalog here makes it
+# survive deploys, so a cold boot serves the last real scrape instead of a
+# hand-committed file that ages the moment it lands.
+#
+# Same graceful-degradation contract as the rest of this module: with no
+# DATABASE_URL these return None/False and the caller falls back to the JSON
+# file exactly as before.
+
+def get_events_cache():
+    """The stored catalog snapshot, or None if unavailable/never written."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute("select payload from events_cache where id = 1")
+            row = cur.fetchone()
+            if not row or not row[0]:
+                return None
+            payload = row[0]
+            # psycopg2 decodes jsonb to dict already; tolerate text columns too
+            return json.loads(payload) if isinstance(payload, str) else payload
+    except Exception as exc:
+        log.warning(f"get_events_cache failed: {exc}")
+        return None
+
+
+def save_events_cache(payload: dict) -> bool:
+    """Replace the stored catalog in one atomic swap.
+
+    Written as a single upsert so readers always see a complete catalog -
+    either the previous one or the new one, never a half-applied rewrite."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                """
+                insert into events_cache (id, payload, event_count, source_count, last_run)
+                values (1, %s, %s, %s, now())
+                on conflict (id) do update
+                  set payload      = excluded.payload,
+                      event_count  = excluded.event_count,
+                      source_count = excluded.source_count,
+                      last_run     = now()
+                """,
+                (json.dumps(payload),
+                 len(payload.get("events") or []),
+                 len(payload.get("summary") or [])),
+            )
+            return True
+    except Exception as exc:
+        log.warning(f"save_events_cache failed: {exc}")
+        return False
+
+
+# --------------------------------------------------------------------------
+# Source discovery
+# --------------------------------------------------------------------------
+# Leads harvested from ingested events - host calendars that clearly run
+# London events but aren't tracked as sources yet. See
+# scraper.harvest_luma_hosts() for where they come from and
+# 0007_source_candidates.sql for why they are proposed rather than auto-added.
+
+def record_source_candidates(candidates: list) -> int:
+    """Upsert harvested candidates. Returns how many rows were written.
+
+    A human's decision outlives the harvester: `status` is deliberately NOT in
+    the update list, so a candidate marked 'ignored' stays ignored however
+    many times it is re-harvested. Everything else refreshes, because a
+    calendar can be renamed or move city between scrapes."""
+    if not candidates:
+        return 0
+    written = 0
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return 0
+            for c in candidates:
+                if not c.get("identifier"):
+                    continue
+                cur.execute(
+                    """
+                    insert into source_candidates
+                      (identifier, kind, name, url, city, timezone,
+                       event_count, sample_title, times_seen, first_seen, last_seen)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, 1, now(), now())
+                    on conflict (identifier) do update
+                      set name         = excluded.name,
+                          url          = excluded.url,
+                          city         = excluded.city,
+                          timezone     = excluded.timezone,
+                          event_count  = excluded.event_count,
+                          sample_title = excluded.sample_title,
+                          times_seen   = source_candidates.times_seen + 1,
+                          last_seen    = now()
+                    """,
+                    (c["identifier"], c.get("kind", "luma_calendar"), c.get("name"),
+                     c.get("url"), c.get("city"), c.get("timezone"),
+                     int(c.get("event_count") or 0), c.get("sample_title")),
+                )
+                written += 1
+            return written
+    except Exception as exc:
+        log.warning(f"record_source_candidates failed: {exc}")
+        return written
+
+
+def list_source_candidates(status: str = "new", limit: int = 100):
+    """Harvested leads, busiest first. status=None returns every state."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return []
+            sql = """
+                select identifier, kind, name, url, city, timezone,
+                       event_count, times_seen, sample_title, status,
+                       first_seen, last_seen
+                  from source_candidates
+            """
+            params = []
+            if status:
+                sql += " where status = %s"
+                params.append(status)
+            sql += " order by event_count desc, times_seen desc limit %s"
+            params.append(limit)
+            cur.execute(sql, params)
+            cols = [d[0] for d in cur.description]
+            out = []
+            for row in cur.fetchall():
+                rec = dict(zip(cols, row))
+                rec["first_seen"] = _iso(rec["first_seen"])
+                rec["last_seen"] = _iso(rec["last_seen"])
+                out.append(rec)
+            return out
+    except Exception as exc:
+        log.warning(f"list_source_candidates failed: {exc}")
+        return []
+
+
+def set_source_candidate_status(identifier: str, status: str) -> bool:
+    """Mark a lead as 'added' (now a real source) or 'ignored' (rejected)."""
+    if status not in ("new", "added", "ignored"):
+        return False
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                "update source_candidates set status = %s where identifier = %s",
+                (status, identifier),
+            )
+            return cur.rowcount > 0
+    except Exception as exc:
+        log.warning(f"set_source_candidate_status failed: {exc}")
+        return False
