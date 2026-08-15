@@ -871,6 +871,43 @@ def _brainstation_is_london(title: str) -> bool:
     return code not in _BRAINSTATION_OTHER_CAMPUSES
 
 
+def _brainstation_date(raw):
+    """ISO date for BrainStation's bare "May20" / "Jun02" strings.
+
+    to_iso_date() would roll anything more than 60 days old forward to next
+    year, which is the right call for a listing page that only advertises
+    upcoming events - a bare "Jan 5" seen in December means next January. This
+    page is not that: it carries past events alongside upcoming ones, so the
+    roll-forward turned five finished May/June sessions into June 2027 and
+    published them as upcoming. ("Design Evenings LDN" dated Jun02 was live in
+    the catalog as a 2027 event.)
+
+    So: read a bare month/day as THIS year, and only roll forward when that
+    would put it absurdly far in the past - which is how the December-to-
+    January wrap still resolves correctly, without resurrecting a session that
+    finished in the spring."""
+    iso = to_iso_date(raw)
+    if not iso:
+        return None
+    m = re.match(r"^([A-Za-z]{3,9})\.?\s*(\d{1,2})$", str(raw).strip())
+    if not m:
+        return iso                      # already carried a real year
+    month = _MONTH_LOOKUP.get(m.group(1).lower()[:3])
+    if not month:
+        return iso
+    today = datetime.now(timezone.utc).date()
+    try:
+        candidate = date(today.year, month, int(m.group(2)))
+    except ValueError:
+        return iso
+    if (today - candidate).days > 300:   # December seeing next January
+        try:
+            candidate = candidate.replace(year=today.year + 1)
+        except ValueError:
+            return iso
+    return candidate.isoformat()
+
+
 @source("BrainStation London", "📚", "Education & Research")
 def scrape_brainstation():
     events = []
@@ -892,8 +929,9 @@ def scrape_brainstation():
         # This listing carries past events as well as upcoming ones ("Jul08",
         # "Aug05" were both live in a mid-August catalog). Drop the ones we can
         # date and confirm have happened; keep anything undateable, same as
-        # everywhere else.
-        iso = to_iso_date(date)
+        # everywhere else. See _brainstation_date for why the shared parser is
+        # not the right one here.
+        iso = _brainstation_date(date)
         if iso and not _is_future(iso):
             continue
         seen.add(title)
