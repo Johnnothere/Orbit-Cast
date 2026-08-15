@@ -725,6 +725,129 @@ def api_admin_remove_link():
     return jsonify({"ok": True, "url": url})
 
 
+@app.route("/api/admin/sources", methods=["GET"])
+@limiter.limit("120 per hour")
+def api_admin_list_sources():
+    """Luma organisers approved from the dashboard. The hardcoded ones in
+    scraper.py are not listed - they are not editable from here."""
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    return jsonify({"sources": db.list_luma_sources()})
+
+
+@app.route("/api/admin/sources/verify", methods=["POST"])
+@limiter.limit("120 per hour")
+def api_admin_verify_source():
+    """Dry run for an organiser: already tracked? real upcoming London events?
+    a category we host? Writes nothing."""
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    identifier, name, kind = _parse_organiser_input(data)
+    if not identifier:
+        return jsonify({"error": "Give a Luma calendar link or a cal- id."}), 400
+    import link_intake
+    try:
+        return jsonify(link_intake.verify_organiser(identifier, name, kind))
+    except Exception as e:
+        log.warning(f"Organiser verify failed for {identifier}: {e}")
+        return jsonify({"error": f"Could not check that organiser: {e}"}), 500
+
+
+@app.route("/api/admin/sources", methods=["POST"])
+@limiter.limit("60 per hour")
+def api_admin_add_source():
+    """Verify an organiser and, if it passes, start scraping it every refresh.
+
+    No deploy involved: the DB-backed Luma sources read this table at scrape
+    time, so a source approved here feeds from the next refresh onward."""
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    identifier, name, kind = _parse_organiser_input(data)
+    if not identifier:
+        return jsonify({"error": "Give a Luma calendar link or a cal- id."}), 400
+    import link_intake
+    try:
+        verdict = link_intake.verify_organiser(identifier, name, kind)
+    except Exception as e:
+        log.warning(f"Organiser verify failed for {identifier}: {e}")
+        return jsonify({"error": f"Could not check that organiser: {e}"}), 500
+
+    src = verdict.get("source")
+    forced = bool(data.get("force"))
+    if not verdict.get("ok") and not forced:
+        failed = [c["check"] for c in verdict.get("checks", []) if not c["ok"]]
+        return jsonify({"ok": False, "added": False, "verdict": verdict,
+                         "error": "Did not pass: " + ", ".join(failed)}), 422
+    if not src:
+        # Forced past a failure that ran before a category was established -
+        # there is nothing to store, so a category has to be supplied.
+        category = (data.get("category") or "").strip()
+        if category not in link_intake.CATEGORIES:
+            return jsonify({"ok": False, "added": False, "verdict": verdict,
+                             "error": "Forcing this one needs an explicit category."}), 422
+        src = {"identifier": identifier, "kind": kind, "name": name or identifier,
+               "category": category,
+               "emoji": link_intake.CATEGORY_EMOJI.get(category, "🟣")}
+
+    verdict["forced"] = forced
+    if not db.upsert_luma_source(src["identifier"], src["kind"], src["name"],
+                                  src["category"], emoji=src.get("emoji"),
+                                  verdict=verdict,
+                                  added_by=request.headers.get("X-Admin-User")):
+        return jsonify({"ok": False, "added": False, "verdict": verdict,
+                         "error": "Could not save it - is DATABASE_URL configured?"}), 503
+    # Mark the matching lead reviewed, so an organiser accepted here stops
+    # reappearing at the top of the candidates list on the next harvest.
+    try:
+        db.set_source_candidate_status(src["identifier"], "added")
+    except Exception:
+        pass
+    return jsonify({"ok": True, "added": True, "forced": forced,
+                     "verdict": verdict, "source": src})
+
+
+@app.route("/api/admin/sources/status", methods=["POST"])
+@limiter.limit("60 per hour")
+def api_admin_set_source_status():
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    identifier = (data.get("identifier") or "").strip()
+    status = (data.get("status") or "").strip()
+    if not db.set_luma_source_status(identifier, status):
+        return jsonify({"error": "Unknown source, or bad status "
+                                  "(use active or paused)."}), 404
+    return jsonify({"ok": True, "identifier": identifier, "status": status})
+
+
+def _parse_organiser_input(data):
+    """Accept either a raw cal-/usr- id or a Luma URL pasted from the browser.
+
+    lu.ma and luma.com both appear in the wild, and a calendar URL can carry the
+    api id (/cal-XXXX) or a vanity handle (/londonai). A vanity handle is a user
+    profile as far as the scraper is concerned."""
+    import re as _re
+    raw = (data.get("identifier") or data.get("url") or "").strip()
+    name = (data.get("name") or "").strip()
+    kind = (data.get("kind") or "").strip() or "calendar"
+    if not raw:
+        return "", name, kind
+    m = _re.search(r"(cal-[A-Za-z0-9]+)", raw)
+    if m:
+        return m.group(1), name, "calendar"
+    m = _re.search(r"(usr-[A-Za-z0-9]+)", raw)
+    if m:
+        return m.group(1), name, "user"
+    m = _re.search(r"(?:lu\.ma|luma\.com)/u/([A-Za-z0-9_.-]+)", raw)
+    if m:
+        return m.group(1), name, "user"
+    if _re.match(r"^[A-Za-z0-9_.-]+$", raw):
+        return raw, name, kind
+    return "", name, kind
+
+
 @app.route("/api/admin/examples", methods=["GET"])
 @limiter.limit("120 per hour")
 def api_admin_list_examples():

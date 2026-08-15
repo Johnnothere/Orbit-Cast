@@ -393,3 +393,135 @@ def reverify(verdict: dict, event: dict, catalog_events=None) -> dict:
     verdict["checks"] = keep
     verdict["ok"] = all(c["ok"] for c in keep)
     return verdict
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# ORGANISER (Luma calendar) intake
+# ──────────────────────────────────────────────────────────────────────────
+#
+# Adding an ORGANISER is a bigger commitment than adding an event: it is scraped
+# every refresh from then on. So it is verified against the organiser's REAL
+# upcoming events rather than against whatever a spreadsheet claims, which also
+# sidesteps the fact that an export's timezone field is not a city -
+# "Europe/London" is equally true of Manchester, Edinburgh and Cardiff.
+#
+# Three questions, in the order that makes the cheapest one first:
+#   1. Do we already track it? Then stop - a second feed for one calendar is
+#      pure duplicate work.
+#   2. Does it actually have upcoming LONDON events? scrape_luma_calendar
+#      already applies the timezone + city checks, so this is the real answer,
+#      not a guess from the export.
+#   3. Do those events belong to a category OrbitCast hosts? An organiser
+#      running run clubs and brunches is a real organiser and still not ours.
+
+
+def _known_luma_identifiers():
+    """Everything already tracked, hardcoded or approved, so nothing is added
+    twice under two names."""
+    known = set(scraper._HARDCODED_LUMA_IDS)
+    try:
+        import db
+        known |= {r["identifier"] for r in db.get_active_luma_sources()}
+    except Exception as exc:
+        log.warning(f"Could not read tracked Luma sources: {exc}")
+    return known
+
+
+def _classify_organiser(name, titles):
+    """Which OrbitCast category this organiser feeds, from its real event
+    titles - or None when it does not belong in the catalog at all.
+
+    The None answer matters as much as the category. Luma's London feed is full
+    of genuine, well-run organisers doing run clubs, supper clubs and yoga, and
+    a recommendation engine for "the right room" is not improved by any of
+    them."""
+    listed = "\n".join(f"- {t}" for t in titles[:10])
+    if scraper.HACKATHON_RE.search(" ".join(titles)):
+        return "Hackathons", "at least one event is explicitly a hackathon"
+    import ai_engine
+    system = (
+        "You decide whether an events organiser belongs in a London event "
+        "intelligence catalog, and if so under which category.\n"
+        f"Categories: {', '.join(CATEGORIES)}.\n"
+        "The catalog is for professional/industry rooms: defence, intelligence, "
+        "security, technology, AI, research, startups, business networking, "
+        "hackathons.\n"
+        "It is NOT for social, fitness, wellness, hobby, nightlife, dating, "
+        "religious, arts or purely consumer events - those must be refused even "
+        "when the organiser is legitimate and well run.\n"
+        "Return bare JSON: {\"belongs\": bool, \"category\": str|null, "
+        "\"why\": str}. Judge the organiser as a whole from its events; if it is "
+        "mixed, go with what most of its events are."
+    )
+    try:
+        out = ai_engine._call(system, f"Organiser: {name}\nUpcoming events:\n{listed}",
+                              max_tokens=400, model=ai_engine.MODEL_EXTRACT)
+    except Exception as exc:
+        log.warning(f"Organiser classification failed for {name}: {exc}")
+        return None, "could not classify - refused rather than guessed"
+    if not out.get("belongs"):
+        return None, _first_text(out.get("why")) or "not a category OrbitCast hosts"
+    cat = out.get("category")
+    if cat not in CATEGORIES:
+        return None, f"classified outside the catalog's categories ({cat!r})"
+    return cat, _first_text(out.get("why"))
+
+
+def verify_organiser(identifier: str, name: str = "", kind: str = "calendar",
+                     min_events: int = 1):
+    """Check one Luma organiser and say whether it should become a source.
+
+    Returns the same shape as verify_link: `ok`, `checks`, and on success the
+    row to store. Writes nothing."""
+    identifier = (identifier or "").strip()
+    result = {"ok": False, "identifier": identifier, "name": name, "kind": kind,
+              "checks": [], "source": None, "sample_titles": [],
+              "checked_at": datetime.now(timezone.utc).isoformat()}
+    if not identifier:
+        result["checks"].append(_check("valid identifier", False, "No calendar id given."))
+        return result
+
+    if identifier in _known_luma_identifiers():
+        result["checks"].append(_check(
+            "not already tracked", False,
+            "Already a source - adding it again would scrape the same calendar twice."))
+        return result
+    result["checks"].append(_check("not already tracked", True, "Not tracked yet."))
+
+    # The real events, London-filtered by the existing scraper.
+    try:
+        if kind == "user":
+            events = scraper.scrape_luma_user(name or identifier, identifier)
+        else:
+            events = scraper.scrape_luma_calendar(name or identifier, identifier)
+    except Exception as exc:
+        result["checks"].append(_check("reachable", False, f"Could not read that calendar: {exc}"))
+        return result
+
+    upcoming = [e for e in events if scraper._is_future(scraper.to_iso_date(e.get("date")))]
+    titles = [e.get("title", "") for e in upcoming if e.get("title")]
+    result["sample_titles"] = titles[:6]
+
+    if len(upcoming) < min_events:
+        result["checks"].append(_check(
+            "has upcoming London events", False,
+            f"{len(upcoming)} upcoming London events right now - nothing to verify it on. "
+            "A quiet organiser is not a dead one, so this is worth retrying later "
+            "rather than a permanent no."))
+        return result
+    result["checks"].append(_check(
+        "has upcoming London events", True,
+        f"{len(upcoming)} upcoming, already London-filtered by the scraper."))
+
+    category, why = _classify_organiser(name or identifier, titles)
+    if not category:
+        result["checks"].append(_check(
+            "category OrbitCast hosts", False, why))
+        return result
+    result["checks"].append(_check("category OrbitCast hosts", True, f"{category} — {why}"))
+
+    result["source"] = {"identifier": identifier, "kind": kind,
+                        "name": name or identifier, "category": category,
+                        "emoji": CATEGORY_EMOJI.get(category, "🟣")}
+    result["ok"] = all(c["ok"] for c in result["checks"])
+    return result

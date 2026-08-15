@@ -1233,3 +1233,115 @@ def set_manual_event_status(url: str, status: str) -> bool:
     except Exception as exc:
         log.warning(f"set_manual_event_status failed: {exc}")
         return False
+
+
+# ─────────────────────────────────────────────
+# LUMA SOURCES  (organisers approved from the dashboard)
+# ─────────────────────────────────────────────
+# LUMA_CALENDARS / LUMA_USERS in scraper.py are still the hardcoded set. These
+# rows are the additive, no-deploy half: read at scrape time by the DB-backed
+# Luma sources, so approving an organiser makes it feed on the next refresh.
+
+
+def upsert_luma_source(identifier: str, kind: str, name: str, category: str,
+                       emoji: str = None, verdict: dict = None, added_by: str = None) -> bool:
+    """Track a Luma organiser as a recurring source.
+
+    Keyed on identifier, so re-approving one that is already tracked updates it
+    rather than creating a second feed for the same calendar."""
+    if kind not in ("calendar", "user"):
+        return False
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                """
+                insert into luma_sources
+                    (identifier, kind, name, emoji, category, verdict, added_by,
+                     status, updated_at)
+                values (%s, %s, %s, %s, %s, %s, %s, 'active', now())
+                on conflict (identifier) do update set
+                    kind       = excluded.kind,
+                    name       = excluded.name,
+                    emoji      = excluded.emoji,
+                    category   = excluded.category,
+                    verdict    = excluded.verdict,
+                    added_by   = excluded.added_by,
+                    status     = 'active',
+                    updated_at = now()
+                """,
+                (identifier, kind, name, emoji, category,
+                 json.dumps(verdict) if verdict else None, added_by),
+            )
+            return True
+    except Exception as exc:
+        log.warning(f"upsert_luma_source failed: {exc}")
+        return False
+
+
+def get_active_luma_sources(category: str = None):
+    """The scrape-time read. Exception-safe: this runs inside a scraper source,
+    and a database hiccup must cost these organisers only, never the scrape."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return []
+            sql = ("select identifier, kind, name, emoji, category "
+                   "from luma_sources where status = 'active'")
+            params = []
+            if category:
+                sql += " and category = %s"
+                params.append(category)
+            cur.execute(sql, params)
+            cols = [d[0] for d in cur.description]
+            return [dict(zip(cols, row)) for row in cur.fetchall()]
+    except Exception as exc:
+        log.warning(f"get_active_luma_sources failed: {exc}")
+        return []
+
+
+def list_luma_sources(limit: int = 500):
+    """Every tracked organiser, for the admin list."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return []
+            cur.execute(
+                """
+                select identifier, kind, name, emoji, category, status,
+                       verdict, added_by, created_at, updated_at
+                  from luma_sources
+                 order by created_at desc
+                 limit %s
+                """, (limit,))
+            cols = [d[0] for d in cur.description]
+            out = []
+            for row in cur.fetchall():
+                rec = dict(zip(cols, row))
+                rec["created_at"] = _iso(rec["created_at"])
+                rec["updated_at"] = _iso(rec["updated_at"])
+                out.append(rec)
+            return out
+    except Exception as exc:
+        log.warning(f"list_luma_sources failed: {exc}")
+        return []
+
+
+def set_luma_source_status(identifier: str, status: str) -> bool:
+    """'paused' stops an organiser being scraped without deleting the record of
+    it - a quiet organiser is not a dead one, so removal is deliberately not
+    the way to silence one."""
+    if status not in ("active", "paused"):
+        return False
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                "update luma_sources set status = %s, updated_at = now() "
+                "where identifier = %s", (status, identifier))
+            return cur.rowcount > 0
+    except Exception as exc:
+        log.warning(f"set_luma_source_status failed: {exc}")
+        return False

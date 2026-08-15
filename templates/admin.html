@@ -230,6 +230,7 @@ textarea:focus,input:focus,select:focus{border-color:var(--blue);}
   <main>
     <div class="tabs">
       <button class="tab active" data-tab="addlink">Add by Link</button>
+      <button class="tab" data-tab="sources">Sources</button>
       <button class="tab" data-tab="upload">Upload Dataset</button>
       <button class="tab" data-tab="examples">Examples</button>
       <button class="tab" data-tab="rules">Scoring Rules</button>
@@ -260,6 +261,41 @@ textarea:focus,input:focus,select:focus{border-color:var(--blue);}
         <p class="hint">These are re-emitted into the catalog on every scrape, and drop off on
           their own once the date passes.</p>
         <div id="links-list"></div>
+      </div>
+    </div>
+
+
+    <!-- SOURCES -->
+    <div class="panel" id="panel-sources">
+      <div class="card">
+        <h2>Add a recurring organiser</h2>
+        <p class="hint">Paste a Luma calendar link or a <code>cal-</code> id. It gets checked against the
+          organiser's real upcoming events: already tracked, actually London, and a category OrbitCast
+          hosts. Approving one starts it feeding on the next refresh - no deploy.</p>
+        <label>Luma calendar link or id</label>
+        <input type="text" id="src-id" placeholder="https://lu.ma/cal-… or cal-…" autocomplete="off">
+        <label>Organiser name (optional)</label>
+        <input type="text" id="src-name" placeholder="shown as the source name">
+        <div class="row-btns">
+          <button class="btn" id="src-check-btn">Check it</button>
+          <button class="btn secondary" id="src-add-btn" style="display:none;">Add as a source</button>
+        </div>
+        <div class="msg" id="src-msg"></div>
+        <div id="src-verdict"></div>
+      </div>
+
+      <div class="card">
+        <h2>Tracked organisers</h2>
+        <p class="hint">Approved from here and scraped every refresh. Pausing keeps the record but stops
+          the scrape - a quiet organiser is not a dead one.</p>
+        <div id="sources-list"></div>
+      </div>
+
+      <div class="card">
+        <h2>Discovered leads</h2>
+        <p class="hint">Organisers the scraper found hosting events we already ingest, or on Luma's London
+          feed. Proposals only - nothing here feeds until you check and add it.</p>
+        <div id="candidates-list"></div>
       </div>
     </div>
 
@@ -510,6 +546,8 @@ async function tryUnlock(secret) {
   loadRules();
   loadUsers();
   loadLinks();
+  loadSources();
+  loadCandidates();
 }
 
 document.getElementById("unlock-btn").onclick = async () => {
@@ -696,6 +734,150 @@ document.getElementById("reset-rules-btn").onclick = async () => {
     msg.textContent = e.message;
   }
 };
+
+// ── SOURCES (recurring organisers) ───────────────────────────────────────
+// Adding an organiser is a bigger commitment than adding an event - it is
+// scraped every refresh from then on - so the same two-step applies: check
+// first, add only once the verdict is on screen.
+function renderSrcVerdict(v) {
+  const box = document.getElementById("src-verdict");
+  if (!v) { box.innerHTML = ""; return; }
+  const rows = (v.checks || []).map(c => `
+    <div class="check-row">
+      <span class="check-mark ${c.ok ? "pass" : "fail"}">${c.ok ? "PASS" : "FAIL"}</span>
+      <div><b>${escapeHtml(c.check)}</b><p>${escapeHtml(c.detail || "")}</p></div>
+    </div>`).join("");
+  const sample = (v.sample_titles || []).length
+    ? `<div class="note-line"><b>Its upcoming events:</b><br>${v.sample_titles.map(t => escapeHtml(t)).join("<br>")}</div>` : "";
+  box.innerHTML = `<div class="checks">${rows}</div>${sample}`;
+}
+
+async function checkSource() {
+  const identifier = document.getElementById("src-id").value.trim();
+  const name = document.getElementById("src-name").value.trim();
+  const msg = document.getElementById("src-msg");
+  const addBtn = document.getElementById("src-add-btn");
+  addBtn.style.display = "none"; renderSrcVerdict(null);
+  if (!identifier) { msg.className = "msg err"; msg.textContent = "Paste a calendar link or id."; return; }
+  msg.className = "msg"; msg.textContent = "Reading that organiser's real events…";
+  try {
+    const v = await api("/api/admin/sources/verify", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identifier, name })
+    });
+    renderSrcVerdict(v);
+    if (v.ok) {
+      msg.className = "msg ok";
+      msg.textContent = `Passes — would feed ${v.source ? v.source.category : ""}.`;
+      addBtn.style.display = "";
+    } else {
+      msg.className = "msg err";
+      msg.textContent = "Refused: " + (v.checks || []).filter(c => !c.ok).map(c => c.check).join(", ");
+    }
+  } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
+}
+
+async function addSource() {
+  const identifier = document.getElementById("src-id").value.trim();
+  const name = document.getElementById("src-name").value.trim();
+  const msg = document.getElementById("src-msg");
+  msg.className = "msg"; msg.textContent = "Adding…";
+  try {
+    const r = await api("/api/admin/sources", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identifier, name })
+    });
+    msg.className = "msg ok";
+    msg.textContent = `Added ${r.source.name} — feeds ${r.source.category} from the next refresh.`;
+    document.getElementById("src-id").value = "";
+    document.getElementById("src-name").value = "";
+    renderSrcVerdict(null);
+    document.getElementById("src-add-btn").style.display = "none";
+    loadSources(); loadCandidates();
+  } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
+}
+
+async function loadSources() {
+  const list = document.getElementById("sources-list");
+  try {
+    const { sources } = await api("/api/admin/sources");
+    if (!sources.length) { list.innerHTML = `<div class="empty">No organisers added yet.</div>`; return; }
+    list.innerHTML = sources.map(s => `
+      <div class="ex-item">
+        <div class="ex-head">
+          <span class="ex-src">${escapeHtml(s.category || "")}</span>
+          <button class="btn secondary js-src-status" data-id="${escapeHtml(s.identifier)}"
+                  data-next="${s.status === "active" ? "paused" : "active"}"
+                  style="font-size:.62rem;padding:4px 10px;">${s.status === "active" ? "Pause" : "Resume"}</button>
+        </div>
+        <p><b>${escapeHtml(s.emoji || "")} ${escapeHtml(s.name || "")}</b>
+           <span class="badge ${s.status === "active" ? "good" : ""}">${escapeHtml(s.status)}</span></p>
+        <div class="ex-meta">${escapeHtml(s.identifier)} · ${escapeHtml(s.kind)} · ${fmtDate(s.created_at)}</div>
+      </div>`).join("");
+    list.querySelectorAll(".js-src-status").forEach(b => {
+      b.onclick = async () => {
+        try {
+          await api("/api/admin/sources/status", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ identifier: b.dataset.id, status: b.dataset.next })
+          });
+          loadSources();
+        } catch (e) { alert(e.message); }
+      };
+    });
+  } catch (e) { list.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`; }
+}
+
+async function loadCandidates() {
+  const list = document.getElementById("candidates-list");
+  try {
+    const { candidates } = await api("/api/admin/source-candidates?status=new");
+    if (!candidates.length) { list.innerHTML = `<div class="empty">No unreviewed leads.</div>`; return; }
+    list.innerHTML = candidates.map(c => `
+      <div class="ex-item">
+        <div class="ex-head">
+          <span class="ex-src">${escapeHtml(c.discovered_via || "discovered")}</span>
+          <span>
+            <button class="btn js-cand-check" data-id="${escapeHtml(c.identifier)}"
+                    data-name="${escapeHtml(c.name || "")}" style="font-size:.62rem;padding:4px 10px;">Check</button>
+            <button class="btn danger js-cand-ignore" data-id="${escapeHtml(c.identifier)}"
+                    style="font-size:.62rem;padding:4px 10px;">Ignore</button>
+          </span>
+        </div>
+        <p><b>${escapeHtml(c.name || c.identifier)}</b></p>
+        <p>${c.event_count} events seen · in ${c.times_seen} scrapes${c.city ? " · " + escapeHtml(c.city) : ""}</p>
+        ${c.sample_title ? `<p class="ex-meta">e.g. ${escapeHtml(c.sample_title)}</p>` : ""}
+        <div class="ex-meta">${escapeHtml(c.identifier)}</div>
+      </div>`).join("");
+    // "Check" drops the lead into the form above rather than acting on it -
+    // an organiser should never be added without its verdict being seen.
+    list.querySelectorAll(".js-cand-check").forEach(b => {
+      b.onclick = () => {
+        document.getElementById("src-id").value = b.dataset.id;
+        document.getElementById("src-name").value = b.dataset.name;
+        document.getElementById("src-id").scrollIntoView({ behavior: "smooth", block: "center" });
+        checkSource();
+      };
+    });
+    list.querySelectorAll(".js-cand-ignore").forEach(b => {
+      b.onclick = async () => {
+        try {
+          await api(`/api/admin/source-candidates/${encodeURIComponent(b.dataset.id)}`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "ignored" })
+          });
+          loadCandidates();
+        } catch (e) { alert(e.message); }
+      };
+    });
+  } catch (e) { list.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`; }
+}
+
+document.getElementById("src-check-btn").onclick = checkSource;
+document.getElementById("src-add-btn").onclick = addSource;
+document.getElementById("src-id").addEventListener("keydown", e => {
+  if (e.key === "Enter") checkSource();
+});
 
 // ── ADD BY LINK ──────────────────────────────────────────────────────────
 // Two-step by design: "Check it" never writes anything, so a link can be

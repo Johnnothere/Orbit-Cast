@@ -1769,6 +1769,62 @@ for _username, (_name, _emoji, _cat) in LUMA_USERS.items():
         return _scraper
     _make_user_scraper(_username, _name, _emoji, _cat)
 
+
+# ─────────────────────────────────────────────
+# LUMA ORGANISERS APPROVED FROM THE DASHBOARD
+# ─────────────────────────────────────────────
+#
+# The two loops above register one @source per organiser, at import. That is
+# fine for a hardcoded dict and useless for anything approved at runtime: a new
+# row could not register a source until the next redeploy, which is exactly why
+# source_candidates could collect leads but never act on them.
+#
+# So instead of one source per organiser, this is one source per CATEGORY, each
+# reading the organisers assigned to it at scrape time. New organisers are
+# picked up on the very next refresh with no deploy, and the category stays
+# correct because app.py takes an event's category from its source.
+#
+# Identifiers already covered by the hardcoded dicts are skipped rather than
+# scraped twice - dedupe in app.py would collapse the duplicate events anyway,
+# but fetching the same calendar twice per refresh is pure waste.
+_HARDCODED_LUMA_IDS = ({cid for cid, _, _ in LUMA_CALENDARS.values()}
+                       | set(LUMA_USERS.keys()))
+
+
+def _scrape_luma_db(category):
+    """Every dashboard-approved Luma organiser feeding `category`.
+
+    One organiser failing (deleted calendar, Luma hiccup) must not cost the
+    others in the same category, so each is wrapped individually."""
+    try:
+        sources = db.get_active_luma_sources(category)
+    except Exception as exc:
+        log.warning(f"DB Luma sources unavailable: {exc}")
+        return []
+    out = []
+    for src in sources:
+        ident = src.get("identifier") or ""
+        if ident in _HARDCODED_LUMA_IDS:
+            continue
+        name = src.get("name") or ident
+        try:
+            if src.get("kind") == "user":
+                out.extend(scrape_luma_user(name, ident))
+            else:
+                out.extend(scrape_luma_calendar(name, ident))
+        except Exception as exc:
+            log.warning(f"DB Luma source {name} ({ident}) failed: {exc}")
+    return out
+
+
+for _cat in _ALL_CATEGORIES:
+    def _make_luma_db_scraper(c):
+        @source(f"Luma — {c}", "🟣", c)
+        def _scraper():
+            return _scrape_luma_db(c)
+        return _scraper
+    _make_luma_db_scraper(_cat)
+
 # GDG London is now handled by the LUMA_USERS block above - see the
 # CORRECTION note there for why the old "no public user-events API"
 # retirement was wrong.
