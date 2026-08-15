@@ -13,7 +13,7 @@ Then decorate your /api/refresh route:
         ...
 """
 
-from flask import request, jsonify
+from flask import request, jsonify, render_template
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
@@ -94,10 +94,22 @@ def init_security(app):
     def not_found(e):
         if request.path.startswith("/api/"):
             return jsonify(error="not found"), 404
-        # Serve the SPA for non-API 404s so client-side routing works
-        return app.send_static_file("index.html") if app.static_folder else (
-            jsonify(error="not found"), 404
-        )
+        # Serve the app itself for non-API 404s, so a mistyped or stale URL
+        # lands on something usable instead of a dead end.
+        #
+        # This used to call send_static_file("index.html"). There is no
+        # static/ directory in this project - the page is a Jinja template -
+        # but app.static_folder is a non-empty path string regardless of
+        # whether that directory exists, so the ternary ALWAYS took the
+        # send_static_file branch, which raised NotFound from inside the 404
+        # handler. Flask does not re-enter error handling for that, so every
+        # unknown non-API path returned 500 with a full traceback in the logs:
+        # /events, /home, any typo. Render the real template instead, and keep
+        # an honest 404 status rather than pretending the URL exists.
+        try:
+            return render_template("index.html"), 404
+        except Exception:          # template missing/unrenderable - never 500 here
+            return jsonify(error="not found"), 404
 
     @app.errorhandler(405)
     def method_not_allowed(e):
