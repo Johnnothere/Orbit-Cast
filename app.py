@@ -697,14 +697,27 @@ def api_admin_list_links():
 def api_admin_remove_link():
     if not _admin_authorized():
         return jsonify({"error": "Unauthorized"}), 401
-    url = ((request.get_json(silent=True) or {}).get("url") or "").strip()
-    if not db.set_manual_event_status(url, "removed"):
+    import link_intake
+    raw = ((request.get_json(silent=True) or {}).get("url") or "").strip()
+    # Rows are keyed on the NORMALISED url, because that is what the add path
+    # stores - trailing slash and tracking params stripped. Removing by the
+    # link as originally pasted therefore missed the row and answered "Unknown
+    # event". Normalise the same way here, and still accept the raw string so
+    # a row written before this existed is also reachable.
+    url = link_intake._norm_url(raw)
+    removed = db.set_manual_event_status(url, "removed")
+    if not removed and raw and raw != url:
+        removed, url = db.set_manual_event_status(raw, "removed"), raw
+    if not removed:
         return jsonify({"error": "Unknown event"}), 404
     # Drop it from the in-memory catalog too, so it disappears immediately
-    # rather than lingering until the next scrape rebuilds without it.
+    # rather than lingering until the next scrape rebuilds without it. Compare
+    # normalised on both sides - the catalog copy came from the scrape, whose
+    # url may differ from the stored key by exactly that trailing slash.
     try:
         cache = load_events_cache()
-        remaining = [e for e in cache.get("events", []) if e.get("url") != url]
+        remaining = [e for e in cache.get("events", [])
+                     if link_intake._norm_url(e.get("url") or "") != url]
         save_events_cache(remaining, cache.get("summary", []),
                           last_run=cache.get("last_run"))
     except Exception as e:
