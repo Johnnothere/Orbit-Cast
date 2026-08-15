@@ -127,7 +127,22 @@ def fetch(url, json_mode=False, timeout=15):
             h["Accept"] = "application/json"
         r = requests.get(url, headers=h, timeout=timeout, allow_redirects=True)
         r.raise_for_status()
-        return r.json() if json_mode else BeautifulSoup(r.text, "lxml")
+        if json_mode:
+            return r.json()
+        # r.content, not r.text, deliberately.
+        #
+        # requests only trusts the charset in the Content-Type header, and when
+        # a server omits it for a text/* response it falls back to ISO-8859-1
+        # (the old HTTP/1.1 default). Eventbrite serves exactly that: a bare
+        # "Content-Type: text/html" on pages that are really UTF-8. Decoding
+        # UTF-8 bytes as Latin-1 is what produced titles like
+        # "London Tech ConnectorÂ®" and a Cyrillic hackathon rendered as
+        # "Ð¨Ð¾ÑÑÐ¸Ð¹ ..." - visible mojibake in the live catalog.
+        #
+        # Handing the raw bytes to BeautifulSoup lets it read the document's
+        # own <meta charset> / BOM, which is the declaration that actually
+        # matters, and fall back to sniffing when there isn't one.
+        return BeautifulSoup(r.content, "lxml")
     except Exception as e:
         log.warning(f"Fetch failed {url}: {e}")
         return None
@@ -278,6 +293,15 @@ def to_iso_date(value):
     m = _LOOSE_DATE_RE.search(v)          # "3 Oct 2026"
     if m:
         return _iso_from_match(m)
+    # "Aug26" / "Aug 26" - BrainStation prints the month and day with no
+    # separator at all. The general pattern below requires whitespace, so this
+    # form used to fall through and return None, which meant those events had
+    # no dedupe key and could never be recognised as already past. Both the
+    # frontend parser and ai_engine.parse_event_date already accept it;
+    # this brings the third parser into line with them.
+    m = re.match(r"^([A-Za-z]{3,9})\.?\s*(\d{1,2})$", v)
+    if m and m.group(1).lower()[:3] in _MONTH_LOOKUP:
+        return _iso_from_month_day(m.group(1), m.group(2))
     m = re.search(r"\b([A-Za-z]{3,9})\s+(\d{1,2})\b", v)   # "Sep 4"
     if m and m.group(1).lower()[:3] in _MONTH_LOOKUP:
         return _iso_from_month_day(m.group(1), m.group(2))
@@ -817,6 +841,36 @@ def scrape_imperial():
             events.append({"title": title, "date": date, "url": url, "source": "Imperial College"})
     return events[:15]
 
+# BrainStation runs campuses in several cities and tags each event with a
+# campus code rather than a city name: "Demo Event TO", "Product Evenings TO",
+# "Marketing Evenings LDN". Even on the /events/london page the other
+# campuses' listings come through, and because the code is an abbreviation,
+# is_london() cannot see it - "TO" is not the word "toronto", so the generic
+# non-London city check passes it straight into a London-only catalog. Four
+# Toronto events were live in the catalog because of this.
+_BRAINSTATION_LONDON_CODES = {"LDN", "LON"}
+_BRAINSTATION_OTHER_CAMPUSES = {"TO", "TOR", "NYC", "NY", "VAN", "MIA", "CHI", "BOS", "SF", "LA"}
+# The code sits at the end of the headline part of the title, before any
+# ":subtitle" - "Demo Event TO", "Demo Event TO:How Product Managers ...".
+_BRAINSTATION_CAMPUS_RE = re.compile(r"\b([A-Z]{2,4})\s*$")
+
+
+def _brainstation_is_london(title: str) -> bool:
+    """False only when the title carries a campus code for another city.
+
+    Deliberately a denylist, not an allowlist: an untagged title is kept,
+    because this is the London page and silence means London. Plenty of real
+    titles end in an unrelated acronym ("...for the NHS"), and dropping a real
+    London event is the worse mistake."""
+    m = _BRAINSTATION_CAMPUS_RE.search((title or "").split(":")[0].strip())
+    if not m:
+        return True
+    code = m.group(1)
+    if code in _BRAINSTATION_LONDON_CODES:
+        return True
+    return code not in _BRAINSTATION_OTHER_CAMPUSES
+
+
 @source("BrainStation London", "📚", "Education & Research")
 def scrape_brainstation():
     events = []
@@ -831,9 +885,19 @@ def scrape_brainstation():
         title = h.get_text(strip=True) if h else None
         url   = fix_url(a["href"] if a else "", "https://brainstation.io")
         date  = d.get_text(strip=True) if d else None
-        if title and len(title) > 5 and title not in seen and is_valid_url(url):
-            seen.add(title)
-            events.append({"title": title, "date": date, "url": url, "source": "BrainStation London"})
+        if not (title and len(title) > 5 and title not in seen and is_valid_url(url)):
+            continue
+        if not _brainstation_is_london(title):
+            continue
+        # This listing carries past events as well as upcoming ones ("Jul08",
+        # "Aug05" were both live in a mid-August catalog). Drop the ones we can
+        # date and confirm have happened; keep anything undateable, same as
+        # everywhere else.
+        iso = to_iso_date(date)
+        if iso and not _is_future(iso):
+            continue
+        seen.add(title)
+        events.append({"title": title, "date": date, "url": url, "source": "BrainStation London"})
     return events[:15]
 
 # ─────────────────────────────────────────────
@@ -1698,9 +1762,19 @@ def _iso_from_month_day(mon_word, day, year=None):
     except ValueError:
         return None                      # e.g. "Feb 30", or Feb 29 in a common year
     # A little slack before rolling forward: an event that finished a fortnight
-    # ago is a stale listing, not next year's edition. Beyond ~a month, the only
-    # sensible reading of a bare month/day on an upcoming page is the next one.
-    if (today - candidate).days > 31:
+    # ago is a stale listing, not next year's edition. Beyond the window, the
+    # only sensible reading of a bare month/day on an upcoming page is the
+    # next one.
+    #
+    # 60 days, matching ai_engine._infer_year() and _inferYear() in
+    # templates/index.html. This was 31, and the disagreement was real: a
+    # listing printed "Jul08" was read here as NEXT July (so it counted as
+    # upcoming and kept its dedupe key in the future) while the frontend and
+    # the scoring engine both read it as this July and correctly treated it as
+    # past. Same string, three parsers, two answers. Rolling forward later is
+    # also the more honest default - it leaves a stale listing looking stale
+    # instead of resurrecting it as next year's edition.
+    if (today - candidate).days > 60:
         try:
             candidate = candidate.replace(year=today.year + 1)
         except ValueError:               # 29 Feb rolling into a common year
@@ -2033,11 +2107,41 @@ def scrape_mlh():
     return events[:20]
 
 
+# Eventbrite's /hackathon/ search is a fuzzy keyword match, not a category:
+# it returns anything it thinks is adjacent. In the live catalog that meant
+# "Networking Hacks for Introverts", "Black Girls Hike: Cockfosters to Enfield
+# Lock", "PULL UP! - THE JUNGLE DANCE LAB" and a run of cybersecurity
+# breakfast-networking listings, all filed under Hackathons - which is a
+# top-level tab, so the noise is the first thing anyone browsing it sees.
+#
+# HACKATHON_RE alone is too tight here: it wants the literal word, and misses
+# the jam/datathon family that genuinely belongs. This adds those, and nothing
+# looser - a title that says none of these is not a hackathon.
+# "хакатон" is here because London's Ukrainian tech community advertises in
+# Ukrainian on Eventbrite ("Шостий Жіночий Хакатон від EduHub" - a real
+# women's hackathon). Worth noting this only became matchable once fetch()
+# stopped mangling UTF-8: before that the title arrived as "Ð¥Ð°ÐºÐ°ÑÐ¾Ð½"
+# and no rule of any kind could have recognised it.
+_HACKATHON_ADJACENT_RE = re.compile(
+    r"(\b(hack[\s-]?athon|game\s?jam|code\s?jam|hack\s?jam|datathon|codeathon|makeathon"
+    r"|build[\s-]?athon|ctf|capture\s+the\s+flag)\b|хакатон)", re.IGNORECASE)
+
+
+def _looks_like_hackathon(title: str) -> bool:
+    t = title or ""
+    return bool(HACKATHON_RE.search(t) or _HACKATHON_ADJACENT_RE.search(t))
+
+
 @source("Eventbrite Hackathons London", "🎫", "Hackathons")
 def scrape_eventbrite_hackathons():
-    """Eventbrite's London hackathon category - already London-scoped by URL,
-    so it does not need the strict rule the global directories do."""
-    return _scrape_eventbrite("hackathon", "Eventbrite Hackathons London")
+    """Eventbrite's London hackathon search - already London-scoped by URL,
+    so it does not need the strict rule the global directories do.
+
+    It DOES need a title check: the search is fuzzy and everything it returns
+    is filed under Hackathons by this source's category, so an unfiltered feed
+    fills the Hackathons tab with dance nights and hikes. See the note above."""
+    return [e for e in _scrape_eventbrite("hackathon", "Eventbrite Hackathons London")
+            if _looks_like_hackathon(e.get("title", ""))]
 
 
 @source("DoraHacks Virtual", "⚡", "Hackathons")
