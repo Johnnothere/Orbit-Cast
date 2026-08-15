@@ -70,6 +70,24 @@ textarea:focus,input:focus,select:focus{border-color:var(--blue);}
 .msg.ok{color:var(--ok);}
 .msg.err{color:var(--dead);}
 
+/* ADD BY LINK */
+.checks{margin-top:16px;border-top:1px solid var(--border);}
+.check-row{display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border);}
+.check-mark{font-family:'IBM Plex Mono',monospace;font-size:.6rem;font-weight:600;letter-spacing:.06em;
+  padding:3px 7px;border-radius:4px;flex-shrink:0;min-width:44px;text-align:center;}
+.check-mark.pass{color:var(--ok);background:rgba(5,150,105,.1);}
+.check-mark.fail{color:var(--dead);background:rgba(220,38,38,.1);}
+.check-row b{font-size:.78rem;}
+.check-row p{margin-top:2px;font-size:.72rem;color:var(--t2);line-height:1.5;}
+.note-line{margin-top:14px;font-size:.72rem;color:var(--t2);background:var(--sf2);
+  border-radius:6px;padding:8px 10px;line-height:1.5;}
+.note-line.warn{color:var(--warn);background:rgba(217,119,6,.08);}
+.verdict-fields{margin-top:18px;padding-top:16px;border-top:1px solid var(--border);}
+.verdict-fields label{margin-top:12px;}
+.fld-row{display:flex;gap:12px;}
+.fld-row>div{flex:1;min-width:0;}
+.hint-inline{font-weight:400;color:var(--t2);text-transform:none;letter-spacing:0;}
+
 /* USERS */
 .lookup-row{display:flex;gap:8px;margin-bottom:16px;}
 .lookup-row input{flex:1;font-family:'IBM Plex Mono',monospace;}
@@ -211,15 +229,42 @@ textarea:focus,input:focus,select:focus{border-color:var(--blue);}
   </header>
   <main>
     <div class="tabs">
-      <button class="tab active" data-tab="upload">Upload Dataset</button>
+      <button class="tab active" data-tab="addlink">Add by Link</button>
+      <button class="tab" data-tab="upload">Upload Dataset</button>
       <button class="tab" data-tab="examples">Examples</button>
       <button class="tab" data-tab="rules">Scoring Rules</button>
       <button class="tab" data-tab="users">Users</button>
       <button class="tab" data-tab="analytics">Analytics</button>
     </div>
 
+    <!-- ADD BY LINK -->
+    <div class="panel active" id="panel-addlink">
+      <div class="card">
+        <h2>Add an event by link</h2>
+        <p class="hint">Paste the event's own page. It gets fetched, read, and checked against
+          the catalog rules - London or genuinely online, upcoming, a real event page, not an
+          aggregator card, not already listed. If every check passes it goes straight in.</p>
+        <label>Event URL</label>
+        <input type="text" id="link-url" placeholder="https://…" autocomplete="off">
+        <div class="row-btns">
+          <button class="btn" id="link-check-btn">Check it</button>
+          <button class="btn secondary" id="link-add-btn" style="display:none;">Add to catalog</button>
+          <button class="btn secondary" id="link-force-btn" style="display:none;">Add anyway</button>
+        </div>
+        <div class="msg" id="link-msg"></div>
+        <div id="link-verdict"></div>
+      </div>
+
+      <div class="card">
+        <h2>Events added by link</h2>
+        <p class="hint">These are re-emitted into the catalog on every scrape, and drop off on
+          their own once the date passes.</p>
+        <div id="links-list"></div>
+      </div>
+    </div>
+
     <!-- UPLOAD -->
-    <div class="panel active" id="panel-upload">
+    <div class="panel" id="panel-upload">
       <div class="card">
         <h2>Upload a dataset document</h2>
         <p class="hint">A PDF, DOCX, or TXT of CV-to-event judgments (even messy notes) - Claude structures it into examples automatically.</p>
@@ -464,6 +509,7 @@ async function tryUnlock(secret) {
   loadExamples();
   loadRules();
   loadUsers();
+  loadLinks();
 }
 
 document.getElementById("unlock-btn").onclick = async () => {
@@ -650,6 +696,155 @@ document.getElementById("reset-rules-btn").onclick = async () => {
     msg.textContent = e.message;
   }
 };
+
+// ── ADD BY LINK ──────────────────────────────────────────────────────────
+// Two-step by design: "Check it" never writes anything, so a link can be
+// inspected before it lands in the catalog. The Add button only appears once
+// a verdict exists, and "Add anyway" only when something actually failed.
+let LAST_VERDICT = null;
+
+function renderVerdict(v) {
+  const box = document.getElementById("link-verdict");
+  if (!v) { box.innerHTML = ""; return; }
+  const rows = (v.checks || []).map(c => `
+    <div class="check-row">
+      <span class="check-mark ${c.ok ? "pass" : "fail"}">${c.ok ? "PASS" : "FAIL"}</span>
+      <div><b>${escapeHtml(c.check)}</b><p>${escapeHtml(c.detail || "")}</p></div>
+    </div>`).join("");
+
+  const ev = v.event;
+  const cats = ["Defence & Geopolitics","Intelligence & Security","Tech & AI","Cyber & Infosec",
+                "Education & Research","Builder & Tech Community","Business & Networking","Hackathons"];
+  const fields = ev ? `
+    <div class="verdict-fields">
+      <label>Title</label><input type="text" id="ov-title" value="${escapeHtml(ev.title || "")}">
+      <div class="fld-row">
+        <div><label>Date (YYYY-MM-DD)</label><input type="text" id="ov-date" value="${escapeHtml(ev.date || "")}" placeholder="not stated on the page"></div>
+        <div><label>Time</label><input type="text" id="ov-time" value="${escapeHtml(ev.time || "")}" placeholder="optional"></div>
+      </div>
+      <label>Location</label><input type="text" id="ov-location" value="${escapeHtml(ev.location || "")}">
+      <label>Category${v.category_reason ? ` <span class="hint-inline">${escapeHtml(v.category_reason)}</span>` : ""}</label>
+      <select id="ov-category">
+        ${cats.map(c => `<option value="${escapeHtml(c)}"${c === ev.category ? " selected" : ""}>${escapeHtml(c)}</option>`).join("")}
+      </select>
+    </div>` : "";
+
+  box.innerHTML = `
+    ${v.resolved_from ? `<div class="note-line">Resolved through an aggregator to <b>${escapeHtml(v.url)}</b></div>` : ""}
+    ${v.suggest_source ? `<div class="note-line warn">${escapeHtml(v.suggest_source)}</div>` : ""}
+    <div class="checks">${rows}</div>
+    ${fields}`;
+}
+
+async function checkLink() {
+  const url = document.getElementById("link-url").value.trim();
+  const msg = document.getElementById("link-msg");
+  const addBtn = document.getElementById("link-add-btn");
+  const forceBtn = document.getElementById("link-force-btn");
+  addBtn.style.display = forceBtn.style.display = "none";
+  renderVerdict(null);
+  if (!url) { msg.className = "msg err"; msg.textContent = "Paste a link first."; return; }
+  msg.className = "msg"; msg.textContent = "Fetching and reading that page…";
+  try {
+    const v = await api("/api/admin/links/check", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url })
+    });
+    LAST_VERDICT = v;
+    renderVerdict(v);
+    if (v.ok) {
+      msg.className = "msg ok";
+      msg.textContent = "Passes every check — ready to add.";
+      addBtn.style.display = "";
+    } else {
+      const failed = (v.checks || []).filter(c => !c.ok).map(c => c.check);
+      msg.className = "msg err";
+      msg.textContent = "Did not pass: " + failed.join(", ") +
+        (v.event ? " — correct it below, or add anyway." : "");
+      if (v.event) { addBtn.style.display = ""; forceBtn.style.display = ""; }
+    }
+  } catch (e) {
+    msg.className = "msg err"; msg.textContent = e.message;
+  }
+}
+
+async function addLink(force) {
+  const msg = document.getElementById("link-msg");
+  const url = document.getElementById("link-url").value.trim();
+  const g = id => { const el = document.getElementById(id); return el ? el.value.trim() : ""; };
+  msg.className = "msg"; msg.textContent = force ? "Adding despite the failures…" : "Adding…";
+  try {
+    const res = await api("/api/admin/links", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url, force: !!force,
+        overrides: { title: g("ov-title"), date: g("ov-date"), time: g("ov-time"),
+                     location: g("ov-location"), category: g("ov-category") }
+      })
+    });
+    msg.className = "msg ok";
+    msg.textContent = (res.forced ? "Added (forced past failed checks): " : "Added: ")
+      + (res.event ? res.event.title : url);
+    document.getElementById("link-url").value = "";
+    renderVerdict(null);
+    document.getElementById("link-add-btn").style.display = "none";
+    document.getElementById("link-force-btn").style.display = "none";
+    loadLinks();
+  } catch (e) {
+    msg.className = "msg err"; msg.textContent = e.message;
+  }
+}
+
+async function loadLinks() {
+  const list = document.getElementById("links-list");
+  try {
+    const { events } = await api("/api/admin/links");
+    if (!events.length) { list.innerHTML = `<div class="empty">Nothing added by link yet.</div>`; return; }
+    // The URL goes in a data attribute and the handler is bound afterwards,
+    // rather than being interpolated into an inline onclick. escapeHtml turns
+    // an apostrophe into &#39;, which the HTML parser decodes back to a real
+    // quote BEFORE the onclick body is parsed as JavaScript - so a URL
+    // containing one would break straight out of the string literal.
+    list.innerHTML = events.map(e => `
+      <div class="ex-item">
+        <div class="ex-head">
+          <span class="ex-src">${escapeHtml(e.category || "")}</span>
+          <button class="btn danger js-remove-link" style="font-size:.62rem;padding:4px 10px;"
+                  data-url="${escapeHtml(e.url)}">Remove</button>
+        </div>
+        <p><b>${escapeHtml(e.title || "")}</b></p>
+        <p>${escapeHtml(e.event_date || "no date")}${e.event_time ? " · " + escapeHtml(e.event_time) : ""}
+           · ${escapeHtml(e.location || (e.is_online ? "Online" : "London"))}</p>
+        <p><a href="${escapeHtml(e.url)}" target="_blank" rel="noopener">${escapeHtml(e.url)}</a></p>
+        <div class="ex-meta">${e.added_by ? "Added by " + escapeHtml(e.added_by) + " · " : ""}${fmtDate(e.created_at)}</div>
+      </div>`).join("");
+    list.querySelectorAll(".js-remove-link").forEach(btn => {
+      btn.onclick = () => removeLink(btn.dataset.url);
+    });
+  } catch (e) {
+    list.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function removeLink(url) {
+  try {
+    await api("/api/admin/links/remove", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url })
+    });
+    loadLinks();
+  } catch (e) {
+    const msg = document.getElementById("link-msg");
+    msg.className = "msg err"; msg.textContent = e.message;
+  }
+}
+
+document.getElementById("link-check-btn").onclick = checkLink;
+document.getElementById("link-add-btn").onclick = () => addLink(false);
+document.getElementById("link-force-btn").onclick = () => addLink(true);
+document.getElementById("link-url").addEventListener("keydown", e => {
+  if (e.key === "Enter") checkLink();
+});
 
 function escapeHtml(s) {
   return (s || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

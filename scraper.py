@@ -9,6 +9,12 @@ from datetime import date, datetime, timezone
 from bs4 import BeautifulSoup
 from pathlib import Path
 
+# Events added through the admin link portal live in the database and are
+# re-emitted into the catalog on every scrape (see _scrape_manual). db imports
+# nothing from here, so there is no cycle, and it degrades to no-ops when
+# DATABASE_URL is unset.
+import db
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("event-radar")
 
@@ -1465,6 +1471,54 @@ def _scrape_curated(category):
         if ev["category"] == category and _is_future(ev["date"])
     ]
 
+def _scrape_manual(category):
+    """Operator-added events for `category`, from the database.
+
+    The catalog is rebuilt from nothing on every refresh, so an event added
+    through the admin link portal only persists because this re-emits it each
+    time. Same _is_future() rule as the hardcoded list above, so a manual entry
+    also drops off on its own once its date passes - the row stays, for the
+    record of what was added, but it stops being served.
+
+    Deliberately tolerant: no database, or a database that errors, yields an
+    empty list rather than an exception. A source that raises costs only itself
+    (app.py catches per-source), but there is no reason to spend that."""
+    try:
+        rows = db.get_active_manual_events()
+    except Exception as exc:                     # db import/connection problems
+        log.warning(f"Manual events unavailable: {exc}")
+        return []
+    out = []
+    for row in rows:
+        if (row.get("category") or "") != category:
+            continue
+        if not _is_future(row.get("event_date")):
+            continue
+        out.append({
+            "title": row.get("title"),
+            "date": row.get("event_date"),
+            "time": row.get("event_time") or "",
+            "url": row.get("url"),
+            "description": row.get("description") or "",
+            "source": row.get("source_label") or f"Added — {category}",
+            "location": row.get("location") or ("Online" if row.get("is_online") else "London"),
+            "is_online": bool(row.get("is_online")),
+        })
+    return out
+
+
+# One source per category, for both the hardcoded list and the database-backed
+# one. Registration happens at import, so the set of categories has to be known
+# up front - it is the fixed eight, not whatever happens to be in the table
+# right now. That matters: a category with no rows today must still have a
+# source registered, or the first event added to it would not appear until the
+# next redeploy.
+_ALL_CATEGORIES = [
+    "Defence & Geopolitics", "Intelligence & Security", "Tech & AI",
+    "Cyber & Infosec", "Education & Research", "Builder & Tech Community",
+    "Business & Networking", "Hackathons",
+]
+
 for _cat in sorted({e["category"] for e in CURATED_LONDON_EVENTS}):
     def _make_curated_scraper(c):
         @source(f"Curated — {c}", _CURATED_EMOJI.get(c, "📌"), c)
@@ -1472,6 +1526,14 @@ for _cat in sorted({e["category"] for e in CURATED_LONDON_EVENTS}):
             return _scrape_curated(c)
         return _scraper
     _make_curated_scraper(_cat)
+
+for _cat in _ALL_CATEGORIES:
+    def _make_manual_scraper(c):
+        @source(f"Added — {c}", _CURATED_EMOJI.get(c, "📌"), c)
+        def _scraper():
+            return _scrape_manual(c)
+        return _scraper
+    _make_manual_scraper(_cat)
 
 # ─────────────────────────────────────────────
 # LUMA CALENDARS

@@ -1104,3 +1104,132 @@ def set_source_candidate_status(identifier: str, status: str) -> bool:
     except Exception as exc:
         log.warning(f"set_source_candidate_status failed: {exc}")
         return False
+
+
+# ─────────────────────────────────────────────
+# MANUAL EVENTS  (admin link portal)
+# ─────────────────────────────────────────────
+# Curated events used to live in CURATED_LONDON_EVENTS in scraper.py, so
+# adding one was a code change and a deploy. These rows are the same thing
+# held in the database, read back by the DB-backed curated sources on every
+# scrape - which is what makes an added event survive the next refresh
+# instead of vanishing when the catalog is rebuilt.
+
+
+def upsert_manual_event(event: dict, verdict: dict = None, added_by: str = None) -> bool:
+    """Add an operator-supplied event, or update it if the link is resubmitted.
+
+    Keyed on url, so the same event submitted twice is one row rather than two
+    near-identical catalog entries under slightly different titles. A row that
+    was previously removed comes back as active on resubmission - re-adding a
+    link is an explicit act."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                """
+                insert into manual_events
+                    (url, title, event_date, event_time, location, description,
+                     category, emoji, is_online, source_label, verdict, added_by,
+                     status, updated_at)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'active', now())
+                on conflict (url) do update set
+                    title        = excluded.title,
+                    event_date   = excluded.event_date,
+                    event_time   = excluded.event_time,
+                    location     = excluded.location,
+                    description  = excluded.description,
+                    category     = excluded.category,
+                    emoji        = excluded.emoji,
+                    is_online    = excluded.is_online,
+                    source_label = excluded.source_label,
+                    verdict      = excluded.verdict,
+                    added_by     = excluded.added_by,
+                    status       = 'active',
+                    updated_at   = now()
+                """,
+                (event.get("url"), event.get("title"), event.get("date") or None,
+                 event.get("time") or None, event.get("location") or None,
+                 event.get("description") or None, event.get("category"),
+                 event.get("emoji"), bool(event.get("is_online")),
+                 event.get("source_label") or None,
+                 json.dumps(verdict) if verdict else None, added_by),
+            )
+            return True
+    except Exception as exc:
+        log.warning(f"upsert_manual_event failed: {exc}")
+        return False
+
+
+def list_manual_events(include_removed: bool = False, limit: int = 300):
+    """Every operator-added event, newest first, for the admin list."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return []
+            sql = """
+                select url, title, event_date, event_time, location, description,
+                       category, emoji, is_online, source_label, added_by, status,
+                       created_at, updated_at
+                  from manual_events
+            """
+            params = []
+            if not include_removed:
+                sql += " where status = 'active'"
+            sql += " order by created_at desc limit %s"
+            params.append(limit)
+            cur.execute(sql, params)
+            cols = [d[0] for d in cur.description]
+            out = []
+            for row in cur.fetchall():
+                rec = dict(zip(cols, row))
+                rec["created_at"] = _iso(rec["created_at"])
+                rec["updated_at"] = _iso(rec["updated_at"])
+                out.append(rec)
+            return out
+    except Exception as exc:
+        log.warning(f"list_manual_events failed: {exc}")
+        return []
+
+
+def get_active_manual_events():
+    """The scrape-time read. Deliberately thin and exception-safe: this runs
+    inside a scraper source, and a database hiccup must cost the manual events
+    only - never the whole scrape."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return []
+            cur.execute(
+                """
+                select url, title, event_date, event_time, location,
+                       description, category, emoji, is_online, source_label
+                  from manual_events
+                 where status = 'active'
+                """
+            )
+            cols = [d[0] for d in cur.description]
+            return [dict(zip(cols, row)) for row in cur.fetchall()]
+    except Exception as exc:
+        log.warning(f"get_active_manual_events failed: {exc}")
+        return []
+
+
+def set_manual_event_status(url: str, status: str) -> bool:
+    """'removed' takes an event out of the catalog without losing the record of
+    it having been added, and by whom."""
+    if status not in ("active", "removed"):
+        return False
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                "update manual_events set status = %s, updated_at = now() where url = %s",
+                (status, url),
+            )
+            return cur.rowcount > 0
+    except Exception as exc:
+        log.warning(f"set_manual_event_status failed: {exc}")
+        return False

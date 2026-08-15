@@ -89,12 +89,17 @@ def load_events_cache():
 def load_last_run():
     return {"last_run": load_events_cache().get("last_run")}
 
-def save_events_cache(events, summary):
+def save_events_cache(events, summary, last_run=None):
     global _catalog
+    # last_run means "when the catalog was last SCRAPED". Editing the catalog
+    # in place - adding or removing a single event from the admin portal - is
+    # not a scrape, and stamping it as one would tell the dashboard the sources
+    # were checked when they weren't. Those callers pass the existing value
+    # through; a real scrape leaves it None and gets a fresh stamp.
     data = {
         "events":   events,
         "summary":  summary,
-        "last_run": datetime.now(timezone.utc).isoformat(),
+        "last_run": last_run or datetime.now(timezone.utc).isoformat(),
     }
     # Serve the new catalog immediately - a single assignment, so a request
     # arriving mid-write gets the old catalog or the new one, never a
@@ -571,6 +576,140 @@ def api_admin_set_source_candidate(identifier):
     if not db.set_source_candidate_status(identifier, status):
         return jsonify({"error": "Unknown candidate"}), 404
     return jsonify({"ok": True, "identifier": identifier, "status": status})
+
+
+@app.route("/api/admin/links/check", methods=["POST"])
+@limiter.limit("60 per hour")
+def api_admin_check_link():
+    """Dry run: what would happen if this link were added.
+
+    Fetches the page, resolves it through an aggregator if needed, extracts the
+    event, and runs every catalog rule - without writing anything. This is what
+    replaces asking a human to eyeball each link."""
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    url = ((request.get_json(silent=True) or {}).get("url") or "").strip()
+    if not url:
+        return jsonify({"error": "Paste an event link first."}), 400
+    import link_intake
+    try:
+        verdict = link_intake.verify_link(url, load_events_cache().get("events", []))
+    except Exception as e:
+        log.warning(f"Link check failed for {url}: {e}")
+        return jsonify({"error": f"Could not check that link: {e}"}), 500
+    return jsonify(verdict)
+
+
+@app.route("/api/admin/links", methods=["POST"])
+@limiter.limit("60 per hour")
+def api_admin_add_link():
+    """Verify a link and, if it passes, add it to the catalog.
+
+    `force` adds despite failed checks - deliberately explicit, and recorded in
+    the stored verdict, so a forced entry is distinguishable later from one
+    that genuinely passed. `overrides` lets the operator supply what the page
+    didn't state (usually a date) rather than the system inventing it."""
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or "").strip()
+    if not url:
+        return jsonify({"error": "Paste an event link first."}), 400
+    import link_intake
+    try:
+        verdict = link_intake.verify_link(url, load_events_cache().get("events", []))
+    except Exception as e:
+        log.warning(f"Link check failed for {url}: {e}")
+        return jsonify({"error": f"Could not check that link: {e}"}), 500
+
+    event = verdict.get("event")
+    if not event:
+        return jsonify({"ok": False, "added": False, "verdict": verdict,
+                         "error": "Nothing usable could be read from that page."}), 422
+
+    # Operator-supplied corrections are applied BEFORE the pass/fail decision is
+    # re-made, so filling in a missing date turns a failing link into a passing
+    # one rather than needing a force.
+    overrides = data.get("overrides") or {}
+    for field in ("title", "date", "time", "location", "category", "description"):
+        val = (overrides.get(field) or "").strip() if isinstance(overrides.get(field), str) else None
+        if val:
+            event[field] = val
+    if overrides.get("category") in link_intake.CATEGORIES:
+        event["emoji"] = link_intake.CATEGORY_EMOJI.get(overrides["category"], "📌")
+    if overrides.get("date"):
+        verdict = link_intake.reverify(verdict, event, load_events_cache().get("events", []))
+
+    forced = bool(data.get("force"))
+    if not verdict.get("ok") and not forced:
+        failed = [c["check"] for c in verdict.get("checks", []) if not c["ok"]]
+        return jsonify({"ok": False, "added": False, "verdict": verdict,
+                         "error": "Did not pass: " + ", ".join(failed)}), 422
+
+    verdict["forced"] = forced
+    verdict["added_at"] = datetime.now(timezone.utc).isoformat()
+    event["source_label"] = (data.get("source_label") or "").strip() or None
+    if not db.upsert_manual_event(event, verdict=verdict,
+                                   added_by=request.headers.get("X-Admin-User")):
+        return jsonify({"ok": False, "added": False, "verdict": verdict,
+                         "error": "Could not save it - is DATABASE_URL configured?"}), 503
+
+    # Serve it immediately rather than making the operator wait up to
+    # REFRESH_MINUTES to see whether it worked. The next scrape re-emits it
+    # from the database anyway; this only closes the gap until then.
+    _inject_manual_event(event)
+    return jsonify({"ok": True, "added": True, "forced": forced,
+                     "verdict": verdict, "event": event})
+
+
+def _inject_manual_event(event):
+    """Put a just-added event into the in-memory catalog straight away.
+
+    Mirrors what the scrape does: same id scheme, same category/emoji stamping,
+    and skipped if an event with that id is already present."""
+    try:
+        from scraper import event_id
+        cache = load_events_cache()
+        events = cache.get("events", [])
+        new = {**event,
+               "id": event_id(event.get("title", ""), event.get("url", "")),
+               "source": event.get("source_label") or f"Added — {event.get('category')}",
+               "emoji": event.get("emoji", "📌")}
+        if any(e.get("id") == new["id"] for e in events):
+            return
+        save_events_cache(events + [new], cache.get("summary", []),
+                          last_run=cache.get("last_run"))
+    except Exception as e:
+        log.warning(f"Could not inject manual event into live catalog: {e}")
+
+
+@app.route("/api/admin/links", methods=["GET"])
+@limiter.limit("120 per hour")
+def api_admin_list_links():
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    include_removed = request.args.get("include_removed") == "1"
+    return jsonify({"events": db.list_manual_events(include_removed=include_removed)})
+
+
+@app.route("/api/admin/links/remove", methods=["POST"])
+@limiter.limit("60 per hour")
+def api_admin_remove_link():
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    url = ((request.get_json(silent=True) or {}).get("url") or "").strip()
+    if not db.set_manual_event_status(url, "removed"):
+        return jsonify({"error": "Unknown event"}), 404
+    # Drop it from the in-memory catalog too, so it disappears immediately
+    # rather than lingering until the next scrape rebuilds without it.
+    try:
+        cache = load_events_cache()
+        remaining = [e for e in cache.get("events", []) if e.get("url") != url]
+        save_events_cache(remaining, cache.get("summary", []),
+                          last_run=cache.get("last_run"))
+    except Exception as e:
+        log.warning(f"Could not drop removed event from live catalog: {e}")
+    return jsonify({"ok": True, "url": url})
 
 
 @app.route("/api/admin/examples", methods=["GET"])
