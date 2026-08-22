@@ -216,7 +216,66 @@ def _check(name, ok, detail):
     return {"check": name, "ok": bool(ok), "detail": detail}
 
 
-def verify_link(url: str, catalog_events=None):
+def _geo_check(title, location, is_online=None):
+    """Rule 2 as one function, so the check is identical whether it runs on
+    what the page said or on what the operator corrected it to.
+
+    It used not to be. The London/online verdict was computed once, during the
+    first read, and reverify() carried it forward untouched - so an operator
+    who fixed a wrong location still had to force the event through on a check
+    that was judging the ORIGINAL value. Correcting the input has to be able to
+    change the answer, or the correction box is decorative."""
+    probe = {"title": title or "", "location": location or ""}
+    # The is_online hint only applies when there is no location to read. A
+    # location the operator typed is a statement about the format as well as
+    # the place: changing "Online" to "London" has to be able to turn the flag
+    # off, or a corrected event stays permanently marked virtual.
+    if is_online is not None and not (location or "").strip():
+        probe["is_online"] = bool(is_online)
+    online = scraper.is_online(probe)
+    if online:
+        return True, _check("London or online", True,
+                            "Online event - no city to be wrong about, so it qualifies.")
+    if scraper.is_london(probe):
+        return False, _check("London or online", True,
+                             location or "No city named; source is London-scoped.")
+    return False, _check(
+        "London or online", False,
+        f"Names a city that is not London ({location or 'see title'}). "
+        "This is a London-only catalog.")
+
+
+def _dupe_check(url, title, iso_date, catalog_events, manual_urls):
+    """Rule 5, with one distinction the original did not draw.
+
+    A link already in the catalog BECAUSE THE OPERATOR ADDED IT is not the same
+    thing as a link that clashes with a scraped event, and reporting them
+    identically is what produced the "it says not added when it IS added" bug:
+    add a link, then check the same link, and the portal failed it against its
+    own successful write. The row is keyed on the url and re-adding it updates
+    that row, so this is a pass with an explanation, not a refusal."""
+    if url and url in (manual_urls or set()):
+        return True, _check(
+            "not already listed", True,
+            "You already added this link - adding it again updates that entry "
+            "rather than creating a second one.")
+    for existing in (catalog_events or []):
+        if url and _norm_url(existing.get("url", "")) == url:
+            return False, _check(
+                "not already listed", False,
+                f"Already in the catalog from \"{existing.get('source')}\" as "
+                f"\"{existing.get('title')}\".")
+        if (iso_date and title
+                and scraper.norm_title(existing.get("title", "")) == scraper.norm_title(title)
+                and scraper.to_iso_date(existing.get("date")) == iso_date):
+            return False, _check(
+                "not already listed", False,
+                f"Already in the catalog from \"{existing.get('source')}\" as "
+                f"\"{existing.get('title')}\".")
+    return False, _check("not already listed", True, "Not in the catalog yet.")
+
+
+def verify_link(url: str, catalog_events=None, manual_urls=None):
     """Run a URL through the catalog rules.
 
     Returns a dict with `ok` (whether it may be added without an override),
@@ -225,7 +284,7 @@ def verify_link(url: str, catalog_events=None):
     norm = _norm_url(url)
     result = {"ok": False, "url": norm, "submitted_url": (url or "").strip(),
               "checks": [], "event": None, "resolved_from": None,
-              "suggest_source": None,
+              "suggest_source": None, "already_added": False,
               "checked_at": datetime.now(timezone.utc).isoformat()}
     if not norm or "." not in urlparse(norm).netloc:
         result["checks"].append(_check("valid url", False, "That is not a URL."))
@@ -311,39 +370,14 @@ def verify_link(url: str, catalog_events=None):
                 "upcoming", False, f"{ev['date']} has already passed."))
 
     # Rule 2 - London, or genuinely online.
-    online = scraper.is_online({"title": title, "location": location})
-    probe = {"title": title, "location": location}
-    if online:
-        result["checks"].append(_check(
-            "London or online", True,
-            "Online event - no city to be wrong about, so it qualifies."))
-    elif scraper.is_london(probe):
-        result["checks"].append(_check(
-            "London or online", True, location or "No city named; source is London-scoped."))
-    else:
-        result["checks"].append(_check(
-            "London or online", False,
-            f"Names a city that is not London ({location or 'see title'}). "
-            "This is a London-only catalog."))
+    online, geo = _geo_check(title, location)
+    result["checks"].append(geo)
     ev["is_online"] = bool(online)
 
     # Rule 5 - not already in the catalog.
-    dupe = None
-    for existing in (catalog_events or []):
-        if _norm_url(existing.get("url", "")) == fetch_url:
-            dupe = existing
-            break
-        if (ev["date"] and scraper.norm_title(existing.get("title", "")) == scraper.norm_title(title)
-                and scraper.to_iso_date(existing.get("date")) == ev["date"]):
-            dupe = existing
-            break
-    if dupe:
-        result["checks"].append(_check(
-            "not already listed", False,
-            f"Already in the catalog from \"{dupe.get('source')}\" as "
-            f"\"{dupe.get('title')}\"."))
-    else:
-        result["checks"].append(_check("not already listed", True, "Not in the catalog yet."))
+    already, dupe = _dupe_check(fetch_url, title, ev["date"], catalog_events, manual_urls)
+    result["already_added"] = already
+    result["checks"].append(dupe)
 
     category, why = _classify(title, ev["description"], location)
     ev["category"] = category
@@ -355,20 +389,23 @@ def verify_link(url: str, catalog_events=None):
     return result
 
 
-def reverify(verdict: dict, event: dict, catalog_events=None) -> dict:
-    """Re-run the date-dependent checks after an operator corrected something.
+def reverify(verdict: dict, event: dict, catalog_events=None,
+             manual_urls=None) -> dict:
+    """Re-run every check whose answer an operator correction can change.
 
-    Only the checks whose answer can actually change are recomputed - the page
-    was already fetched and read, and re-fetching it would say the same thing.
-    This is what lets "the page didn't state a date, but I know it's the 14th"
-    resolve to a genuine pass rather than forcing a failed link through."""
+    Only the page-reading checks are carried forward - the page was already
+    fetched and read, and re-fetching it would say the same thing. Everything
+    downstream of an editable field is recomputed, which now includes the
+    London/online verdict: correcting a wrong location used to leave the
+    original geography failure standing, forcing the operator to override a
+    check they had just fixed."""
     date_str = (event.get("date") or "").strip()
     iso = scraper.to_iso_date(date_str) or ""
     if iso:
         event["date"] = iso
 
-    keep = [c for c in verdict.get("checks", [])
-            if c["check"] not in ("has a date", "upcoming", "not already listed")]
+    recomputed = ("has a date", "upcoming", "not already listed", "London or online")
+    keep = [c for c in verdict.get("checks", []) if c["check"] not in recomputed]
 
     if iso:
         keep.append(_check("has a date", True, f"{iso} (supplied by operator)."))
@@ -380,15 +417,15 @@ def reverify(verdict: dict, event: dict, catalog_events=None) -> dict:
                            f"\"{date_str}\" is not a date OrbitCast can read - "
                            "use YYYY-MM-DD."))
 
-    dupe = None
-    for existing in (catalog_events or []):
-        if (iso and scraper.norm_title(existing.get("title", "")) == scraper.norm_title(event.get("title", ""))
-                and scraper.to_iso_date(existing.get("date")) == iso):
-            dupe = existing
-            break
-    keep.append(_check("not already listed", dupe is None,
-                       f"Already in the catalog from \"{dupe.get('source')}\"." if dupe
-                       else "Not in the catalog yet."))
+    online, geo = _geo_check(event.get("title"), event.get("location"),
+                             event.get("is_online"))
+    event["is_online"] = bool(online)
+    keep.append(geo)
+
+    already, dupe = _dupe_check(_norm_url(event.get("url") or ""),
+                                event.get("title"), iso, catalog_events, manual_urls)
+    verdict["already_added"] = already
+    keep.append(dupe)
 
     verdict["checks"] = keep
     verdict["ok"] = all(c["ok"] for c in keep)
@@ -416,12 +453,25 @@ def reverify(verdict: dict, event: dict, catalog_events=None) -> dict:
 
 
 def _known_luma_identifiers():
-    """Everything already tracked, hardcoded or approved, so nothing is added
-    twice under two names."""
-    known = set(scraper._HARDCODED_LUMA_IDS)
+    """Everything already tracked, hardcoded or approved, lowercased.
+
+    Two changes over the original, both aimed at the same failure - the same
+    organiser tracked twice under two names:
+
+      * scraper.tracked_luma_identifiers() resolves the username-keyed hardcoded
+        entries to their usr- ids, so "SuperteamUK" and the usr- id the
+        dashboard now canonicalises to are recognised as one organiser.
+      * the database side reads EVERY row rather than only the active ones. A
+        paused organiser is still tracked; re-adding it must reactivate that
+        row, not read as "not tracked yet"."""
+    try:
+        known = set(scraper.tracked_luma_identifiers())
+    except Exception as exc:
+        log.warning(f"Could not resolve hardcoded Luma ids: {exc}")
+        known = {i.lower() for i in scraper._HARDCODED_LUMA_IDS}
     try:
         import db
-        known |= {r["identifier"] for r in db.get_active_luma_sources()}
+        known |= db.get_luma_source_identifiers()
     except Exception as exc:
         log.warning(f"Could not read tracked Luma sources: {exc}")
     return known
@@ -476,12 +526,13 @@ def verify_organiser(identifier: str, name: str = "", kind: str = "calendar",
     identifier = (identifier or "").strip()
     result = {"ok": False, "identifier": identifier, "name": name, "kind": kind,
               "checks": [], "source": None, "sample_titles": [],
+              "geo_summary": None,
               "checked_at": datetime.now(timezone.utc).isoformat()}
     if not identifier:
         result["checks"].append(_check("valid identifier", False, "No calendar id given."))
         return result
 
-    if identifier in _known_luma_identifiers():
+    if identifier.lower() in _known_luma_identifiers():
         result["checks"].append(_check(
             "not already tracked", False,
             "Already a source - adding it again would scrape the same calendar twice."))
@@ -498,20 +549,36 @@ def verify_organiser(identifier: str, name: str = "", kind: str = "calendar",
         result["checks"].append(_check("reachable", False, f"Could not read that calendar: {exc}"))
         return result
 
+    # scrape_luma_* already applied luma_geo() and the upcoming filter, so this
+    # list IS the London-or-online, still-to-happen set. The _is_future pass is
+    # kept as a belt-and-braces guard rather than a second opinion.
     upcoming = [e for e in events if scraper._is_future(scraper.to_iso_date(e.get("date")))]
     titles = [e.get("title", "") for e in upcoming if e.get("title")]
     result["sample_titles"] = titles[:6]
+    # Counted with the same is_london() the catalog build uses, not by
+    # subtracting the online ones. The Luma guardrail admits UK venues, and the
+    # London filter downstream then drops the ones that are not London - so a
+    # naive "everything left is London" would promise events that never appear.
+    online_n = sum(1 for e in upcoming if e.get("is_online"))
+    london_n = sum(1 for e in upcoming
+                   if not e.get("is_online") and scraper.is_london(e))
+    elsewhere = len(upcoming) - online_n - london_n
+    result["geo_summary"] = (
+        f"{london_n} in London, {online_n} online"
+        + (f", {elsewhere} elsewhere in the UK (those are dropped too)" if elsewhere else "")
+        + ". Events this organiser runs outside London are refused at scrape "
+          "time, every refresh, with nothing for you to review.")
 
     if len(upcoming) < min_events:
         result["checks"].append(_check(
             "has upcoming London events", False,
-            f"{len(upcoming)} upcoming London events right now - nothing to verify it on. "
-            "A quiet organiser is not a dead one, so this is worth retrying later "
-            "rather than a permanent no."))
+            f"{len(upcoming)} upcoming London or online events right now - nothing to "
+            "verify it on. A quiet organiser is not a dead one, so this is worth "
+            "retrying later rather than a permanent no."))
         return result
     result["checks"].append(_check(
         "has upcoming London events", True,
-        f"{len(upcoming)} upcoming, already London-filtered by the scraper."))
+        f"{len(upcoming)} upcoming, already filtered to London or online by the scraper."))
 
     category, why = _classify_organiser(name or identifier, titles)
     if not category:

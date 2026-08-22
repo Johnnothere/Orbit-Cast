@@ -192,6 +192,29 @@ def run_scrape_background():
             seen_ids.add(ev["id"])
             deduped.append(ev)
 
+        # Co-hosted Luma events, before anything title-shaped is attempted.
+        #
+        # One Luma event listed by three co-hosts is one event with ONE api_id,
+        # however many organiser feeds surface it. That id is a far stronger
+        # key than title+date - it survives a host renaming their copy, and it
+        # does not need a resolvable date, so it also catches the co-hosted
+        # events that the title+date pass below has to skip. The richest copy
+        # wins for the same reason it does there: as_completed order is not
+        # stable between runs, so "first one seen" is not a decision.
+        def _luma_richness(ev):
+            return sum(1 for k in ("date", "time", "location", "url", "description")
+                       if ev.get(k))
+
+        by_luma, luma_free = {}, []
+        for ev in sorted(deduped, key=_luma_richness, reverse=True):
+            lid = ev.get("luma_id")
+            if not lid:
+                luma_free.append(ev)
+                continue
+            if lid not in by_luma:
+                by_luma[lid] = ev
+        deduped = list(by_luma.values()) + luma_free
+
         # That id only catches BYTE-identical listings, which is the easy half.
         # The hard half is the same hackathon on Devpost, Eventbrite, Hackathon
         # Atlas and a Luma calendar at once, under four different URLs - the
@@ -578,6 +601,22 @@ def api_admin_set_source_candidate(identifier):
     return jsonify({"ok": True, "identifier": identifier, "status": status})
 
 
+def _manual_event_urls():
+    """Normalised urls of every event the operator has already added by link.
+
+    The duplicate rule needs to tell "this clashes with a scraped event" apart
+    from "you added this yourself" - the second is an update, not a refusal.
+    Empty on any database problem, which degrades to the old behaviour rather
+    than blocking an add."""
+    import link_intake
+    try:
+        return {link_intake._norm_url(r.get("url") or "")
+                for r in db.get_active_manual_events() if r.get("url")}
+    except Exception as e:
+        log.warning(f"Could not read added-by-link urls: {e}")
+        return set()
+
+
 @app.route("/api/admin/links/check", methods=["POST"])
 @limiter.limit("60 per hour")
 def api_admin_check_link():
@@ -593,7 +632,8 @@ def api_admin_check_link():
         return jsonify({"error": "Paste an event link first."}), 400
     import link_intake
     try:
-        verdict = link_intake.verify_link(url, load_events_cache().get("events", []))
+        verdict = link_intake.verify_link(url, load_events_cache().get("events", []),
+                                          manual_urls=_manual_event_urls())
     except Exception as e:
         log.warning(f"Link check failed for {url}: {e}")
         return jsonify({"error": f"Could not check that link: {e}"}), 500
@@ -616,8 +656,10 @@ def api_admin_add_link():
     if not url:
         return jsonify({"error": "Paste an event link first."}), 400
     import link_intake
+    manual_urls = _manual_event_urls()
     try:
-        verdict = link_intake.verify_link(url, load_events_cache().get("events", []))
+        verdict = link_intake.verify_link(url, load_events_cache().get("events", []),
+                                          manual_urls=manual_urls)
     except Exception as e:
         log.warning(f"Link check failed for {url}: {e}")
         return jsonify({"error": f"Could not check that link: {e}"}), 500
@@ -637,8 +679,14 @@ def api_admin_add_link():
             event[field] = val
     if overrides.get("category") in link_intake.CATEGORIES:
         event["emoji"] = link_intake.CATEGORY_EMOJI.get(overrides["category"], "📌")
-    if overrides.get("date"):
-        verdict = link_intake.reverify(verdict, event, load_events_cache().get("events", []))
+    # Re-decide on ANY field a correction can move, not just the date. Fixing a
+    # wrong location used to leave the original "London or online" failure in
+    # place, so the operator had to force past a check they had just satisfied.
+    if any((overrides.get(f) or "").strip()
+           for f in ("date", "location", "title") if isinstance(overrides.get(f), str)):
+        verdict = link_intake.reverify(verdict, event,
+                                       load_events_cache().get("events", []),
+                                       manual_urls=manual_urls)
 
     forced = bool(data.get("force"))
     if not verdict.get("ok") and not forced:
@@ -658,25 +706,46 @@ def api_admin_add_link():
     # REFRESH_MINUTES to see whether it worked. The next scrape re-emits it
     # from the database anyway; this only closes the gap until then.
     _inject_manual_event(event)
+    # Forcing past the geography check adds the event, and the next scrape then
+    # drops it again: _scrape_manual re-emits every active row, and the catalog
+    # build runs is_london() over the lot. Saying so is the difference between
+    # a documented override and an event that quietly disappears in half an
+    # hour with no explanation.
+    warning = None
+    if forced and any(c["check"] == "London or online" and not c["ok"]
+                      for c in verdict.get("checks", [])):
+        warning = ("Added, but it is not London or online. The catalog rebuild "
+                   "applies that rule to every source, so this will drop back "
+                   "out at the next refresh. Correct the location instead if it "
+                   "really is a London event.")
     return jsonify({"ok": True, "added": True, "forced": forced,
+                     "updated": bool(verdict.get("already_added")),
+                     "warning": warning,
                      "verdict": verdict, "event": event})
 
 
 def _inject_manual_event(event):
     """Put a just-added event into the in-memory catalog straight away.
 
-    Mirrors what the scrape does: same id scheme, same category/emoji stamping,
-    and skipped if an event with that id is already present."""
+    Mirrors what the scrape does: same id scheme, same category/emoji stamping.
+
+    It REPLACES any existing entry for the same url rather than skipping when
+    the id already exists. The id is a hash of title+url, so resubmitting a
+    link with a corrected title produced a different id, sailed past the
+    "already present" guard, and left the catalog holding the event twice -
+    under the old title and the new one - until the next scrape rebuilt it.
+    The database row was always keyed on the url alone; this now matches it."""
     try:
+        import link_intake
         from scraper import event_id
         cache = load_events_cache()
-        events = cache.get("events", [])
+        url = link_intake._norm_url(event.get("url", ""))
+        events = [e for e in cache.get("events", [])
+                  if link_intake._norm_url(e.get("url") or "") != url]
         new = {**event,
                "id": event_id(event.get("title", ""), event.get("url", "")),
                "source": event.get("source_label") or f"Added — {event.get('category')}",
                "emoji": event.get("emoji", "📌")}
-        if any(e.get("id") == new["id"] for e in events):
-            return
         save_events_cache(events + [new], cache.get("summary", []),
                           last_run=cache.get("last_run"))
     except Exception as e:
@@ -743,9 +812,9 @@ def api_admin_verify_source():
     if not _admin_authorized():
         return jsonify({"error": "Unauthorized"}), 401
     data = request.get_json(silent=True) or {}
-    identifier, name, kind = _parse_organiser_input(data)
+    identifier, name, kind, parse_error = _parse_organiser_input(data)
     if not identifier:
-        return jsonify({"error": "Give a Luma calendar link or a cal- id."}), 400
+        return jsonify({"error": parse_error or "Give a Luma organiser link or id."}), 400
     import link_intake
     try:
         return jsonify(link_intake.verify_organiser(identifier, name, kind))
@@ -764,9 +833,9 @@ def api_admin_add_source():
     if not _admin_authorized():
         return jsonify({"error": "Unauthorized"}), 401
     data = request.get_json(silent=True) or {}
-    identifier, name, kind = _parse_organiser_input(data)
+    identifier, name, kind, parse_error = _parse_organiser_input(data)
     if not identifier:
-        return jsonify({"error": "Give a Luma calendar link or a cal- id."}), 400
+        return jsonify({"error": parse_error or "Give a Luma organiser link or id."}), 400
     import link_intake
     try:
         verdict = link_intake.verify_organiser(identifier, name, kind)
@@ -823,29 +892,31 @@ def api_admin_set_source_status():
 
 
 def _parse_organiser_input(data):
-    """Accept either a raw cal-/usr- id or a Luma URL pasted from the browser.
+    """Whatever the operator pasted -> (identifier, name, kind, error).
 
-    lu.ma and luma.com both appear in the wild, and a calendar URL can carry the
-    api id (/cal-XXXX) or a vanity handle (/londonai). A vanity handle is a user
-    profile as far as the scraper is concerned."""
-    import re as _re
+    This used to be a handful of regexes that between them covered cal- ids,
+    usr- ids and a /u/ URL pattern Luma does not actually emit. Everything else
+    fell through to a bare-token match that a full URL can never satisfy, so a
+    real profile link (luma.com/user/usr-XXXX) or a vanity calendar link
+    (luma.com/londonai) came back empty and was reported as "give me a cal-
+    id" - which is how organisers with no calendar id ended up simply not being
+    addable, and their events missing from the catalog.
+
+    scraper.resolve_luma_identifier does the real work, including reading the
+    page when the URL carries no id. It always returns a canonical cal-/usr-
+    id, which is also what makes the duplicate check meaningful: a vanity URL
+    and its calendar id are now one identifier rather than two."""
     raw = (data.get("identifier") or data.get("url") or "").strip()
     name = (data.get("name") or "").strip()
-    kind = (data.get("kind") or "").strip() or "calendar"
     if not raw:
-        return "", name, kind
-    m = _re.search(r"(cal-[A-Za-z0-9]+)", raw)
-    if m:
-        return m.group(1), name, "calendar"
-    m = _re.search(r"(usr-[A-Za-z0-9]+)", raw)
-    if m:
-        return m.group(1), name, "user"
-    m = _re.search(r"(?:lu\.ma|luma\.com)/u/([A-Za-z0-9_.-]+)", raw)
-    if m:
-        return m.group(1), name, "user"
-    if _re.match(r"^[A-Za-z0-9_.-]+$", raw):
-        return raw, name, kind
-    return "", name, kind
+        return "", name, "calendar", "Paste a Luma organiser link or id."
+    from scraper import resolve_luma_identifier
+    identifier, kind, resolved_name, error = resolve_luma_identifier(raw)
+    if not identifier:
+        return "", name, kind or "calendar", error
+    # Luma's own name for the calendar beats a blank box, and loses to anything
+    # the operator typed - they are naming the source, not the calendar.
+    return identifier, (name or resolved_name), kind, ""
 
 
 @app.route("/api/admin/examples", methods=["GET"])

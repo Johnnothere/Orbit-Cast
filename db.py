@@ -1301,6 +1301,24 @@ def get_active_luma_sources(category: str = None):
         return []
 
 
+def get_luma_source_identifiers():
+    """Every tracked organiser identifier, lowercased, regardless of status.
+
+    The duplicate check deliberately ignores status. A PAUSED organiser is
+    still tracked - re-adding it should reactivate the existing row, not read
+    as "not tracked yet" and invite a second one under a different name.
+    get_active_luma_sources() is the scrape-time read and is not that."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return set()
+            cur.execute("select identifier from luma_sources")
+            return {(r[0] or "").lower() for r in cur.fetchall() if r[0]}
+    except Exception as exc:
+        log.warning(f"get_luma_source_identifiers failed: {exc}")
+        return set()
+
+
 def list_luma_sources(limit: int = 500):
     """Every tracked organiser, for the admin list."""
     try:

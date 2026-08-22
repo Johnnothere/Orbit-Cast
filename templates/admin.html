@@ -269,11 +269,16 @@ textarea:focus,input:focus,select:focus{border-color:var(--blue);}
     <div class="panel" id="panel-sources">
       <div class="card">
         <h2>Add a recurring organiser</h2>
-        <p class="hint">Paste a Luma calendar link or a <code>cal-</code> id. It gets checked against the
-          organiser's real upcoming events: already tracked, actually London, and a category OrbitCast
-          hosts. Approving one starts it feeding on the next refresh - no deploy.</p>
-        <label>Luma calendar link or id</label>
-        <input type="text" id="src-id" placeholder="https://lu.ma/cal-… or cal-…" autocomplete="off">
+        <p class="hint">Paste any Luma organiser link — a calendar (<code>lu.ma/cal-…</code>), a vanity
+          calendar URL (<code>luma.com/londonai</code>), or a person's host profile
+          (<code>luma.com/user/…</code>). No <code>cal-</code> id needed: the link is resolved to one,
+          which is also what stops the same organiser being tracked twice under two URLs.</p>
+        <p class="hint">It gets checked against their real upcoming events: already tracked, genuinely
+          London or online, and a category OrbitCast hosts. From then on every refresh takes only their
+          London and virtual events — anything in San Francisco, Singapore or anywhere else is dropped
+          automatically, with nothing for you to review.</p>
+        <label>Luma organiser link or id</label>
+        <input type="text" id="src-id" placeholder="luma.com/user/… · lu.ma/cal-… · luma.com/londonai" autocomplete="off">
         <label>Organiser name (optional)</label>
         <input type="text" id="src-name" placeholder="shown as the source name">
         <div class="row-btns">
@@ -531,7 +536,16 @@ function api(path, opts = {}) {
   opts.headers = Object.assign({ "X-Admin-Secret": SECRET }, opts.headers || {});
   return fetch(path, opts).then(async r => {
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.error || `Request failed (${r.status})`);
+    if (!r.ok) {
+      // Carry the body on the error, not just its message. A refused add
+      // returns the full re-run verdict, and throwing that away is why the
+      // panel kept showing the checks from the earlier "Check it" run while
+      // the message above it described a different set of failures.
+      const err = new Error(data.error || `Request failed (${r.status})`);
+      err.payload = data;
+      err.status = r.status;
+      throw err;
+    }
     return data;
   });
 }
@@ -749,7 +763,10 @@ function renderSrcVerdict(v) {
     </div>`).join("");
   const sample = (v.sample_titles || []).length
     ? `<div class="note-line"><b>Its upcoming events:</b><br>${v.sample_titles.map(t => escapeHtml(t)).join("<br>")}</div>` : "";
-  box.innerHTML = `<div class="checks">${rows}</div>${sample}`;
+  const geo = v.geo_summary ? `<div class="note-line">${escapeHtml(v.geo_summary)}</div>` : "";
+  const ident = v.identifier
+    ? `<div class="note-line">Resolved to <b>${escapeHtml(v.identifier)}</b> (${escapeHtml(v.kind || "")}).</div>` : "";
+  box.innerHTML = `${ident}<div class="checks">${rows}</div>${geo}${sample}`;
 }
 
 async function checkSource() {
@@ -936,14 +953,27 @@ async function checkLink() {
     renderVerdict(v);
     if (v.ok) {
       msg.className = "msg ok";
-      msg.textContent = "Passes every check — ready to add.";
+      msg.textContent = v.already_added
+        ? "You already added this one — adding again updates it in place."
+        : "Passes every check — ready to add.";
+      addBtn.textContent = v.already_added ? "Update it" : "Add to catalog";
       addBtn.style.display = "";
     } else {
       const failed = (v.checks || []).filter(c => !c.ok).map(c => c.check);
       msg.className = "msg err";
       msg.textContent = "Did not pass: " + failed.join(", ") +
-        (v.event ? " — correct it below, or add anyway." : "");
-      if (v.event) { addBtn.style.display = ""; forceBtn.style.display = ""; }
+        (v.event ? " — correct the fields below and re-submit, or add anyway." : "");
+      // Both buttons, but the plain one is RELABELLED. It re-runs every check
+      // server-side against the corrected fields and writes only if they now
+      // pass - so it is the right action after an edit, and the wrong promise
+      // before one. Saying "Add to catalog" on a verdict that just failed is
+      // what made the portal look like it was contradicting itself: click it
+      // unchanged, get "did not pass", conclude nothing works.
+      if (v.event) {
+        addBtn.textContent = "Apply corrections & add";
+        addBtn.style.display = "";
+        forceBtn.style.display = "";
+      }
     }
   } catch (e) {
     msg.className = "msg err"; msg.textContent = e.message;
@@ -965,15 +995,30 @@ async function addLink(force) {
       })
     });
     msg.className = "msg ok";
-    msg.textContent = (res.forced ? "Added (forced past failed checks): " : "Added: ")
-      + (res.event ? res.event.title : url);
+    const verb = res.forced ? "Added (forced past failed checks)"
+               : res.updated ? "Updated" : "Added";
+    msg.textContent = `${verb}: ${res.event ? res.event.title : url}`;
+    if (res.warning) { msg.className = "msg err"; msg.textContent += " — " + res.warning; }
     document.getElementById("link-url").value = "";
     renderVerdict(null);
+    LAST_VERDICT = null;
     document.getElementById("link-add-btn").style.display = "none";
     document.getElementById("link-force-btn").style.display = "none";
     loadLinks();
   } catch (e) {
     msg.className = "msg err"; msg.textContent = e.message;
+    // Show the verdict the SERVER just produced, including any correction that
+    // was applied, so the panel and the message describe the same run.
+    if (e.payload && e.payload.verdict) {
+      LAST_VERDICT = e.payload.verdict;
+      renderVerdict(e.payload.verdict);
+      if (e.payload.verdict.event) {
+        const a = document.getElementById("link-add-btn");
+        a.textContent = "Apply corrections & add";
+        a.style.display = "";
+        document.getElementById("link-force-btn").style.display = "";
+      }
+    }
   }
 }
 

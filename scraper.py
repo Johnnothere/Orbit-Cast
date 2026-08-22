@@ -1591,51 +1591,181 @@ LUMA_CALENDARS = {
 _LUMA_DEEP_CALENDARS = {"The Hack Collective": 50}
 
 
+# ─────────────────────────────────────────────
+# LUMA GEOGRAPHY GUARDRAIL
+# ─────────────────────────────────────────────
+#
+# The rule used to be "drop it only if the timezone names somewhere else",
+# followed by `location = city or "London"`. Both halves leaked, in opposite
+# directions:
+#
+#   * An event with NO timezone was KEPT and then STAMPED "London". So a San
+#     Francisco meetup with a missing tz did not merely survive the scraper -
+#     it arrived carrying a London label, which is_london() then waved through
+#     as an explicit London claim. That is the whole mechanism behind "why is a
+#     Singapore event in my catalog".
+#   * A genuinely ONLINE event in America/Los_Angeles was dropped, even though
+#     virtual events are explicitly in scope.
+#
+# Geography is decided positively now: keep it when Luma says it is online, or
+# when it names a city we recognise as UK, or when it names no city at all but
+# sits in Europe/London. Everything else - a named foreign city, or no signal
+# whatsoever - is refused. And a city is never invented: "London" is written
+# only when Luma actually said London, or gave nothing but a UK timezone.
+
+# The country field settles it whenever Luma supplies one, which is on every
+# geocoded event. Matching city names against a UK list is only the fallback,
+# and it is a fallback for a reason: on the first run "New York" was accepted
+# as a London event, because "York" is an English city and \byork\b matches
+# inside it. A stated country cannot be talked around that way.
+_UK_COUNTRY_RE = re.compile(
+    r"^\s*(uk|u\.k\.|gb|gbr|united kingdom|great britain|england|scotland|wales"
+    r"|northern ireland|britain)\s*$", re.IGNORECASE)
+
+# Used only when there is no country at all. "york" carries a negative
+# lookbehind so it cannot be reached through "New York"; the rest are
+# unambiguous enough as a city value.
+_UK_PLACE_RE = re.compile(
+    r"\b(london|uk|u\.k\.|gb|gbr|united kingdom|great britain|england|scotland"
+    r"|wales|northern ireland"
+    r"|manchester|birmingham|leeds|glasgow|edinburgh|bristol|liverpool|cardiff"
+    r"|belfast|newcastle|sheffield|nottingham|oxford|cambridge|brighton|reading"
+    r"|milton keynes|coventry|leicester|southampton|portsmouth|bath"
+    r"|aberdeen|dundee|norwich|exeter|swansea|derby|hull|stoke|luton|slough"
+    r"|croydon|watford|guildford|cheltenham|kingston upon thames"
+    r"|(?<!new )york)\b",
+    re.IGNORECASE,
+)
+
+
+def luma_geo(ev):
+    """(keep, location, is_online) for one Luma API event object.
+
+    `keep` is the strict guardrail: London or genuinely virtual, per the
+    catalog rule. `location` is what Luma actually said - never a guess - so
+    the catalog-level is_london() check downstream has a true value to judge,
+    and a UK-but-not-London city stays visible to it rather than disguised."""
+    # Online is a positive claim from Luma itself, never inferred from a title.
+    #
+    # location_type is the field that actually answers this - "offline" for a
+    # venue, "online"/"virtual" for a stream. The presence of virtual_info is
+    # NOT the answer, however much it looks like one: Luma attaches
+    # {"has_access": false} to every event it returns, physical ones included,
+    # so treating it as a signal marks the entire catalog online. It is only
+    # worth consulting when location_type is missing AND there is no address.
+    geo = ev.get("geo_address_info") or {}
+    loc_type = (ev.get("location_type") or "").strip().lower()
+    if loc_type in ("online", "virtual", "zoom", "remote"):
+        return True, "Online", True
+    if not loc_type and not geo:
+        virtual = ev.get("virtual_info") or {}
+        if ev.get("zoom_meeting_url") or ev.get("meeting_url") or virtual.get("url"):
+            return True, "Online", True
+
+    city = (geo.get("city") or geo.get("city_state") or "").strip()
+    country = (geo.get("country") or "").strip()
+    code = (geo.get("country_code") or "").strip()
+    region = (geo.get("region") or "").strip()
+    tz = (ev.get("timezone") or "").strip()
+
+    # A stated country is the strongest signal there is - believe it, in both
+    # directions. This is what refuses San Francisco and Singapore even on an
+    # otherwise London-scoped calendar, and it is also what keeps a UK town
+    # nobody thought to list ("Slough, United Kingdom") instead of discarding
+    # it for being unrecognised.
+    if country or code:
+        uk = bool(_UK_COUNTRY_RE.match(country) or _UK_COUNTRY_RE.match(code))
+        return uk, (city or region or country or "United Kingdom"), False
+
+    if city or region:
+        return bool(_UK_PLACE_RE.search(f"{city} {region}")), (city or region), False
+
+    # No address at all. A Europe/London timezone is a UK claim and the only
+    # thing left to go on; anything else - including no timezone whatsoever -
+    # is refused rather than assumed, because "assume London" is exactly how
+    # the strays got in.
+    if tz == "Europe/London":
+        return True, "London", False
+    return False, tz or "", False
+
+
+def _luma_event_url(ev):
+    """One canonical URL per Luma event, so co-hosted listings collide.
+
+    The same event reached through a calendar and through a host profile used
+    to come back as lu.ma/<slug> from one and luma.com/<slug> from the other.
+    event_id() is a hash of title+url, so those two hashed differently and both
+    survived the id dedupe - the very duplicate the id pass exists to kill.
+    One host, always."""
+    slug = ev.get("url") or ev.get("api_id") or ""
+    if not slug:
+        return "https://lu.ma"
+    if slug.startswith("http"):
+        return re.sub(r"^https?://(?:www\.)?luma\.com/", "https://lu.ma/", slug)
+    return f"https://lu.ma/{slug}"
+
+
+def _luma_event_record(ev, source_name):
+    """Shared Luma entry -> catalog event, or None when the guardrail refuses.
+
+    Both the calendar scraper and the profile scraper funnel through here, so
+    the London/virtual rule, the upcoming rule and the dedupe key cannot drift
+    apart between them - which they had."""
+    title = ev.get("title") or ev.get("name")
+    if not title:
+        return None
+    iso = (ev.get("start_at") or "")[:10]
+    if not _is_future(iso):
+        return None                       # past events are never a recommendation
+    keep, location, online = luma_geo(ev)
+    if not keep:
+        return None
+    start = ev.get("start_at", "")
+    return {
+        "title": title,
+        "date": iso,
+        "time": start[11:16] if len(start) >= 16 else None,
+        "url": _luma_event_url(ev),
+        "source": source_name,
+        "location": location or "London",
+        "is_online": online,
+        # Luma's own id for the event. One co-hosted event has exactly one of
+        # these however many organisers list it, which makes it a stronger
+        # dedupe key than title+date will ever be.
+        "luma_id": ev.get("api_id") or None,
+    }
+
+
 def scrape_luma_calendar(name, cal_id, limit=20):
-    """One Luma calendar -> its upcoming LONDON events.
+    """One Luma calendar -> its upcoming London-or-online events.
 
-    Geography matters here because most of these calendars are global.
-    Luma gives two usable signals and both are checked:
+    Geography and recency are both handled by _luma_event_record, which the
+    profile scraper below shares, so the two cannot drift apart. Two things
+    that were wrong here specifically:
 
-      timezone          - "Europe/London" vs "Europe/Lisbon", "Asia/Kolkata",
-                          "America/New_York"...  This is the reliable one:
-                          it caught "SEV0 - The reliability conference (SF)",
-                          which a city-name denylist misses entirely because
-                          the title only says "(SF)".
-      geo_address_info  - the city, passed through as `location` so the
-                          catalog-level is_london() check has something to
-                          work with. Previously no location was set at all,
-                          so that filter was judging on the title alone.
+      * There was no upcoming filter at all. get-items answers with whatever
+        the calendar holds, so past events were being ingested and only fell
+        out later, if at all - the profile scraper had an _is_future() guard
+        and this one simply did not.
+      * `location = city or "London"` invented a city for every event Luma had
+        no geo for. See the guardrail note above luma_geo() for why that was
+        the leak rather than a convenience.
 
-    Events with no timezone at all are kept rather than dropped - same
-    conservative principle as is_london(): silently losing a real London
-    event is worse than letting an occasional stray through."""
+    `period=future` is asked for as well as filtered: if Luma honours it the
+    page budget is spent entirely on events that can still be attended, and if
+    it ignores the parameter the local filter is what actually decides."""
     events = []
     try:
         url = (f"https://api.lu.ma/calendar/get-items"
-               f"?calendar_api_id={cal_id}&pagination_limit={limit}")
+               f"?calendar_api_id={cal_id}&period=future&pagination_limit={limit}")
         r   = requests.get(url, headers={"User-Agent":"Mozilla/5.0","Accept":"application/json"}, timeout=12)
         if r.status_code != 200:
             log.warning(f"Luma {name}: HTTP {r.status_code}")
             return events
         for entry in r.json().get("entries",[]):
-            ev    = entry.get("event",{})
-            title = ev.get("name")
-            if not title:
-                continue
-            tz = (ev.get("timezone") or "").strip()
-            if tz and tz != "Europe/London":
-                continue
-            geo  = ev.get("geo_address_info") or {}
-            city = (geo.get("city") or geo.get("city_state") or "").strip()
-            slug  = ev.get("url") or ev.get("api_id","")
-            event_url = f"https://lu.ma/{slug}" if slug and not slug.startswith("http") else slug
-            start = ev.get("start_at","")
-            date  = start[:10] if start else None
-            time_str = start[11:16] if len(start) >= 16 else None
-            events.append({"title": title, "date": date, "time": time_str,
-                           "url": event_url or "https://lu.ma", "source": name,
-                           "location": city or "London"})
+            rec = _luma_event_record(entry.get("event") or {}, name)
+            if rec:
+                events.append(rec)
     except Exception as e:
         log.warning(f"Luma {name} failed: {e}")
     return events
@@ -1694,12 +1824,156 @@ def _luma_user_api_id(username):
         return None
 
 
-def scrape_luma_user(name, username, limit=20):
-    """One Luma user profile -> their upcoming LONDON events.
+# ─────────────────────────────────────────────
+# RESOLVING WHATEVER THE OPERATOR PASTED
+# ─────────────────────────────────────────────
+#
+# The dashboard used to accept a cal- id, a usr- id, or a /u/ URL, and nothing
+# else. That is not what Luma links look like in the wild, and it is why real
+# organisers were being missed rather than refused:
+#
+#   luma.com/user/usr-XXXX      the actual profile URL format - the /u/ pattern
+#                               the old parser looked for is not what Luma
+#                               emits, so every profile link failed to parse
+#   luma.com/user/some-handle   vanity profile
+#   luma.com/londonai           vanity CALENDAR url, no cal- id anywhere in it
+#   lu.ma/cal-XXXX              already fine
+#
+# Everything is resolved to a canonical cal-/usr- api id here, which is also
+# what stops the same organiser being tracked twice under two different names:
+# a vanity URL and its cal- id are one identifier after this, not two.
 
-    Same geography rules as scrape_luma_calendar: the event timezone is the
-    reliable signal, geo_address_info supplies the city for the catalog-level
-    is_london() check, and events with no timezone at all are kept."""
+_LUMA_EVENT_HINT = ("that is a link to a single EVENT, not to an organiser. "
+                    "Add it from the Add-by-Link tab instead.")
+
+
+def _luma_next_data(url):
+    """The __NEXT_DATA__ blob off a Luma page, parsed, or None."""
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=12)
+        if r.status_code != 200:
+            log.warning(f"Luma page {url}: HTTP {r.status_code}")
+            return None
+        m = re.search(r'id="__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, re.S)
+        return json.loads(m.group(1)) if m else None
+    except Exception as exc:
+        log.warning(f"Luma page {url} lookup failed: {exc}")
+        return None
+
+
+def _luma_entity_from_page(url):
+    """(identifier, kind, name, error) for a Luma page that carries no id.
+
+    Walks the page's own data for the calendar or user it describes. An event
+    page is recognised and refused explicitly rather than being mistaken for an
+    organiser - pasting an event link into the organiser box is an easy slip
+    and deserves a real answer."""
+    data = _luma_next_data(url)
+    if not data:
+        return "", "", "", "Could not read that Luma page."
+    initial = (data.get("props", {}).get("pageProps", {}).get("initialData", {}) or {})
+    inner = initial.get("data") or initial
+
+    if isinstance(inner, dict) and isinstance(inner.get("event"), dict):
+        # An event page also carries the calendar hosting it, which is the
+        # thing the operator almost certainly wanted. Naming it turns a dead
+        # end into one copy-paste - that is the whole point of tracking the
+        # organiser rather than the single event they happened to send.
+        ev_name = (inner["event"].get("name") or "").strip()
+        host = inner.get("calendar") if isinstance(inner.get("calendar"), dict) else {}
+        host_id = host.get("api_id") or ""
+        hint = _LUMA_EVENT_HINT
+        if ev_name:
+            hint = f"\"{ev_name}\" is a single EVENT, not an organiser. " + hint.split("not to an organiser. ")[-1]
+        if host_id:
+            hint += (f" To track the organiser instead, paste {host_id}"
+                     + (f" ({host.get('name')})" if host.get("name") else "") + ".")
+        return "", "", "", hint
+
+    for key, kind in (("calendar", "calendar"), ("user", "user")):
+        node = inner.get(key) if isinstance(inner, dict) else None
+        if isinstance(node, dict) and node.get("api_id"):
+            return (node["api_id"], kind,
+                    (node.get("name") or "").strip(), "")
+
+    # Fall back to a walk: Luma has moved this blob around more than once, and
+    # a shifted key should not read as "no such organiser".
+    found = {}
+
+    def walk(node):
+        if isinstance(node, dict):
+            api_id = node.get("api_id")
+            if isinstance(api_id, str):
+                if api_id.startswith("cal-") and "calendar" not in found:
+                    found["calendar"] = (api_id, (node.get("name") or "").strip())
+                elif api_id.startswith("usr-") and "user" not in found:
+                    found["user"] = (api_id, (node.get("name") or "").strip())
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(data)
+    for kind in ("calendar", "user"):
+        if kind in found:
+            ident, nm = found[kind]
+            return ident, kind, nm, ""
+    return "", "", "", "That Luma page names no calendar or profile we can track."
+
+
+def resolve_luma_identifier(raw):
+    """Anything an operator can paste -> (identifier, kind, name, error).
+
+    Never guesses: a slug that cannot be resolved comes back with an error
+    string rather than being stored as-is, because storing an unresolvable
+    handle creates a source that silently returns nothing forever."""
+    raw = (raw or "").strip()
+    if not raw:
+        return "", "", "", "Paste a Luma organiser link or id."
+
+    m = re.search(r"\b(cal-[A-Za-z0-9]+)", raw)
+    if m:
+        return m.group(1), "calendar", "", ""
+    m = re.search(r"\b(usr-[A-Za-z0-9]+)", raw)
+    if m:
+        return m.group(1), "user", "", ""
+
+    m = re.search(r"(?:lu\.ma|luma\.com)/(?:user|u)/([A-Za-z0-9_.\-]+)", raw, re.IGNORECASE)
+    if m:
+        handle = m.group(1)
+        uid = _luma_user_api_id(handle)
+        if uid:
+            return uid, "user", "", ""
+        return "", "", "", f"No Luma profile found at /user/{handle}."
+
+    m = re.search(r"(?:lu\.ma|luma\.com)/([A-Za-z0-9_.\-]+)", raw, re.IGNORECASE)
+    if m:
+        return _luma_entity_from_page(f"https://luma.com/{m.group(1)}")
+
+    if re.match(r"^[A-Za-z0-9_.\-]+$", raw):
+        # A bare handle. It is far more often a calendar vanity slug than a
+        # username, so the page is asked rather than assumed either way.
+        ident, kind, nm, err = _luma_entity_from_page(f"https://luma.com/{raw}")
+        if ident:
+            return ident, kind, nm, err
+        uid = _luma_user_api_id(raw)
+        if uid:
+            return uid, "user", "", ""
+        return "", "", "", err or f"Could not resolve \"{raw}\" to a Luma calendar or profile."
+
+    return "", "", "", "That is not a Luma link or id."
+
+
+def scrape_luma_user(name, username, limit=20):
+    """One Luma user profile -> their upcoming London-or-online events.
+
+    This is the path that matters most in practice: plenty of real London
+    organisers never create a calendar at all, so the only handle that exists
+    for them is their profile URL. Same guardrail and the same canonical event
+    URL as the calendar scraper, both via _luma_event_record - which is also
+    what makes an event co-hosted by three of these profiles collapse to one
+    row instead of three."""
     events = []
     uid = _luma_user_api_id(username)
     if not uid:
@@ -1715,25 +1989,9 @@ def scrape_luma_user(name, username, limit=20):
             log.warning(f"Luma user {name}: HTTP {r.status_code}")
             return events
         for entry in r.json().get("entries", []):
-            ev    = entry.get("event", entry)
-            title = ev.get("name")
-            if not title:
-                continue
-            tz = (ev.get("timezone") or "").strip()
-            if tz and tz != "Europe/London":
-                continue
-            iso = (ev.get("start_at") or "")[:10]
-            if not _is_future(iso):
-                continue
-            geo  = ev.get("geo_address_info") or {}
-            city = (geo.get("city") or geo.get("city_state") or "").strip()
-            slug = ev.get("url") or ev.get("api_id", "")
-            event_url = f"https://luma.com/{slug}" if slug and not slug.startswith("http") else slug
-            start = ev.get("start_at", "")
-            events.append({"title": title, "date": iso,
-                           "time": start[11:16] if len(start) >= 16 else None,
-                           "url": event_url or "https://luma.com", "source": name,
-                           "location": city or "London"})
+            rec = _luma_event_record(entry.get("event") or entry, name)
+            if rec:
+                events.append(rec)
     except Exception as e:
         log.warning(f"Luma user {name} failed: {e}")
     return events
@@ -1790,6 +2048,39 @@ for _username, (_name, _emoji, _cat) in LUMA_USERS.items():
 _HARDCODED_LUMA_IDS = ({cid for cid, _, _ in LUMA_CALENDARS.values()}
                        | set(LUMA_USERS.keys()))
 
+# LUMA_USERS is keyed by whatever handle was convenient when the entry was
+# written - "SuperteamUK" for one, "usr-netxIsUXILxiHEt" for another. The
+# dashboard now canonicalises everything an operator pastes to a usr- id, so a
+# comparison against the raw keys alone would answer "not tracked yet" for
+# Superteam UK and happily start a SECOND feed for a calendar we already
+# scrape. Resolving the username keys once, and caching, closes that.
+_RESOLVED_LUMA_IDS = None
+
+
+def tracked_luma_identifiers():
+    """Every identifier already covered by the hardcoded dicts, lowercased,
+    in both the form it is written in and its canonical usr- form.
+
+    The resolution costs one HTTP call per username-keyed entry, on first use
+    only. A lookup that fails is not retried in this process and is not fatal -
+    the raw key is still in the set, so the worst case is the pre-existing
+    behaviour rather than a crash."""
+    global _RESOLVED_LUMA_IDS
+    if _RESOLVED_LUMA_IDS is None:
+        resolved = {i.lower() for i in _HARDCODED_LUMA_IDS}
+        for handle in LUMA_USERS:
+            if handle.startswith("usr-"):
+                continue
+            try:
+                uid = _luma_user_api_id(handle)
+            except Exception as exc:
+                log.warning(f"Could not canonicalise Luma user {handle}: {exc}")
+                uid = None
+            if uid:
+                resolved.add(uid.lower())
+        _RESOLVED_LUMA_IDS = resolved
+    return _RESOLVED_LUMA_IDS
+
 
 def _scrape_luma_db(category):
     """Every dashboard-approved Luma organiser feeding `category`.
@@ -1804,7 +2095,7 @@ def _scrape_luma_db(category):
     out = []
     for src in sources:
         ident = src.get("identifier") or ""
-        if ident in _HARDCODED_LUMA_IDS:
+        if ident.lower() in tracked_luma_identifiers():
             continue
         name = src.get("name") or ident
         try:
@@ -2488,8 +2779,24 @@ def add_source_titles(events, max_lookups=150):
 
 
 def known_luma_identifiers():
-    """Calendar ids we already scrape, so harvesting only reports the gaps."""
-    return {cal_id for cal_id, _, _ in LUMA_CALENDARS.values()}
+    """Everything we already scrape, lowercased, so harvesting reports only gaps.
+
+    This used to answer with the hardcoded LUMA_CALENDARS ids alone. Organisers
+    approved from the dashboard were invisible to it, so every scrape
+    rediscovered them and re-proposed them as untracked leads - the candidates
+    list kept re-offering organisers that were already feeding the catalog.
+    Delegating to tracked_luma_identifiers() covers the hardcoded calendars,
+    the hardcoded profiles, and the database-approved rows in one answer."""
+    try:
+        known = set(tracked_luma_identifiers())
+    except Exception as exc:
+        log.warning(f"Could not resolve tracked Luma ids: {exc}")
+        known = {i.lower() for i in _HARDCODED_LUMA_IDS}
+    try:
+        known |= db.get_luma_source_identifiers()
+    except Exception as exc:
+        log.warning(f"Could not read approved Luma sources: {exc}")
+    return known
 
 
 def known_luma_slugs():
@@ -2513,7 +2820,8 @@ def harvest_luma_hosts(events, known_ids=None, max_lookups=40):
     Shares _luma_event_cache with add_source_titles(), so whichever of the two
     runs first pays for the lookup and the other gets it free - the same
     request carries both the host and the canonical title."""
-    known = set(known_ids if known_ids is not None else known_luma_identifiers())
+    known = {str(i).lower() for i in
+             (known_ids if known_ids is not None else known_luma_identifiers())}
     known_slugs = known_luma_slugs()
     candidates, budget = {}, max_lookups
 
@@ -2528,7 +2836,7 @@ def harvest_luma_hosts(events, known_ids=None, max_lookups=40):
             resolve_luma_event(slug)
             time.sleep(0.15)                  # be a polite client
         host = (_luma_event_cache.get(slug) or {}).get("host")
-        if not host or host["identifier"] in known:
+        if not host or (host["identifier"] or "").lower() in known:
             continue
         if (host["slug"] or "").lower() in known_slugs:
             continue
@@ -2663,13 +2971,14 @@ def discover_luma_sources(known_ids=None, pages=3, host_lookups=8):
     Returns candidates in the same shape as harvest_luma_hosts(). Both budgets
     are deliberately small: this runs on every scrape, and the point is to
     widen coverage steadily rather than to crawl Luma."""
-    known = set(known_ids if known_ids is not None else known_luma_identifiers())
+    known = {str(i).lower() for i in
+             (known_ids if known_ids is not None else known_luma_identifiers())}
     known_slugs = known_luma_slugs()
     found, titles_by_cal, hosts = {}, {}, {}
 
     def consider(cal, title, via):
         cid = cal.get("api_id")
-        if not cid or cid in known:
+        if not cid or cid.lower() in known:
             return
         if (cal.get("slug") or "").lower() in known_slugs or not cal.get("slug"):
             return                                  # personal calendars have no slug
