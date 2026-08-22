@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse, urlunparse
 
 import scraper
+from scraper import luma_calendar_status as luma_status
 
 log = logging.getLogger("orbitcast.link_intake")
 
@@ -570,11 +571,23 @@ def verify_organiser(identifier: str, name: str = "", kind: str = "calendar",
           "time, every refresh, with nothing for you to review.")
 
     if len(upcoming) < min_events:
-        result["checks"].append(_check(
-            "has upcoming London events", False,
-            f"{len(upcoming)} upcoming London or online events right now - nothing to "
-            "verify it on. A quiet organiser is not a dead one, so this is worth "
-            "retrying later rather than a permanent no."))
+        # Zero events has two very different causes and they were reported
+        # identically. A calendar answering 401/404 is private or deleted and
+        # will never fill up; telling the operator to "retry later" sends them
+        # back to something that cannot work.
+        status = luma_status(identifier) if kind == "calendar" else None
+        if status in (401, 403):
+            detail = ("That calendar is private - Luma answers "
+                      f"HTTP {status} for it, so its events cannot be read at all. "
+                      "This is not a quiet organiser; it will not start working later.")
+        elif status == 404:
+            detail = ("No such calendar - Luma answers HTTP 404. Check the link, "
+                      "or the calendar has been deleted.")
+        else:
+            detail = (f"{len(upcoming)} upcoming London or online events right now - "
+                      "nothing to verify it on. A quiet organiser is not a dead one, "
+                      "so this is worth retrying later rather than a permanent no.")
+        result["checks"].append(_check("has upcoming London events", False, detail))
         return result
     result["checks"].append(_check(
         "has upcoming London events", True,

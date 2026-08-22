@@ -364,8 +364,21 @@ def scrape_rusi():
         title = h.get_text(strip=True) if h else None
         url   = fix_url(a["href"] if a else "", "https://rusi.org")
         date  = d.get_text(strip=True) if d else None
+        # RUSI states both facts in the markup and we were reading neither, so
+        # every RUSI event reached the catalog with no location and survived
+        # only on is_london()'s "nothing disqualified it" default. .event-venue
+        # carries "Location: London"; when it is absent the type badge says
+        # "Members Event: Online" - which is the positive online claim
+        # is_online() wants, rather than an inference from the title.
+        v = art.select_one(".event-venue")
+        venue = re.sub(r"^\s*location\s*:\s*", "",
+                       v.get_text(" ", strip=True), flags=re.IGNORECASE) if v else ""
+        badge = art.select_one(".event-type-badge")
+        online = "online" in (badge.get_text(" ", strip=True).lower() if badge else "")
         if is_valid_event(title) and is_valid_url(url):
-            events.append({"title": title, "date": date, "url": url, "source": "RUSI"})
+            events.append({"title": title, "date": date, "url": url, "source": "RUSI",
+                           "location": "Online" if online else venue,
+                           "is_online": online})
     return events
 
 def _scrape_article_time_list(url, base, source_name, limit=20, keep=None):
@@ -524,12 +537,69 @@ def scrape_digital_gov():
 # EVENTBRITE
 # ─────────────────────────────────────────────
 
+def _eventbrite_venues(soup):
+    """{event url or id -> venue string} from whatever the page embeds.
+
+    The card markup gives a title, a link and a date line and nothing that can
+    be safely read as a venue - which is why every Eventbrite event has been
+    reaching the catalog with no location at all, surviving on is_london()'s
+    "nothing disqualified it" default and showing no venue on the card.
+
+    The structured data is where the venue actually lives, so it is read from
+    there and matched back to the card by URL. Two shapes are tried because
+    Eventbrite has shipped both; neither is guessed at from visible text -
+    a wrong venue is worse than none, so anything unrecognised yields nothing
+    and the event keeps today's behaviour exactly."""
+    venues = {}
+
+    def remember(url, venue):
+        if url and venue:
+            venues[url.split("?")[0]] = venue
+
+    # 1. schema.org, if present.
+    for node in _jsonld_events(soup):
+        remember(node.get("url"), _jsonld_location(node))
+
+    # 2. Eventbrite's own embedded search payload. The key has moved between
+    #    __SERVER_DATA__ and __NEXT_DATA__, so the blob is walked rather than
+    #    indexed by a path that will change again.
+    for script in soup.find_all("script"):
+        text = script.string or ""
+        if "primary_venue" not in text:
+            continue
+        m = re.search(r"\{.*\}", text, re.S)
+        if not m:
+            continue
+        try:
+            blob = json.loads(m.group(0))
+        except Exception:
+            continue
+
+        def walk(node):
+            if isinstance(node, dict):
+                venue = node.get("primary_venue")
+                if isinstance(venue, dict):
+                    addr = venue.get("address") or {}
+                    label = (addr.get("localized_address_display")
+                             or ", ".join(x for x in (venue.get("name"),
+                                                      addr.get("city")) if x))
+                    remember(node.get("url") or node.get("vanity_url"), label)
+                for v in node.values():
+                    walk(v)
+            elif isinstance(node, list):
+                for v in node:
+                    walk(v)
+
+        walk(blob)
+    return venues
+
+
 def _scrape_eventbrite(category_slug, source_name):
-    import re
     events = []
     soup = fetch(f"https://www.eventbrite.co.uk/d/united-kingdom--london/{category_slug}/")
     if not soup:
         return events
+    venues = _eventbrite_venues(soup)
     seen_titles = set()
     date_re = re.compile(r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun).+\d")
     for el in soup.select("a[data-event-id], [class*=search-event-card]"):
@@ -547,7 +617,12 @@ def _scrape_eventbrite(category_slug, source_name):
                 date = text; break
         if is_valid_event(title) and title not in seen_titles:
             seen_titles.add(title)
-            events.append({"title": title, "date": date, "url": href, "source": source_name})
+            events.append({"title": title, "date": date, "url": href,
+                           "source": source_name,
+                           "location": venues.get(href.split("?")[0], "")})
+    got = sum(1 for e in events if e.get("location"))
+    log.info(f"{source_name}: {len(events)} events, {got} with a venue "
+             f"({len(venues)} venues found on the page)")
     return events[:20]
 
 @source("Eventbrite Tech London",     "🎟️", "Tech & AI")
@@ -841,6 +916,16 @@ def scrape_luma_discover():
 # EDUCATION & RESEARCH
 # ─────────────────────────────────────────────
 
+# Imperial's London campuses, so a venue string can be turned into a positive
+# London claim rather than left to the "nothing disqualified it" default.
+# Deliberately an ALLOWLIST of campuses rather than a denylist of cities:
+# Silwood Park (Ascot) is the one that must not be labelled London, and naming
+# the London ones is the only way to be sure it is not.
+_IMPERIAL_LONDON_CAMPUS_RE = re.compile(
+    r"\b(south kensington|white city|hammersmith|charing cross|st mary'?s"
+    r"|chelsea and westminster|royal brompton)\b", re.IGNORECASE)
+
+
 @source("Imperial College", "🎓", "Education & Research")
 def scrape_imperial():
     events = []
@@ -854,8 +939,19 @@ def scrape_imperial():
         title = h.get_text(strip=True) if h else None
         url   = fix_url(a["href"] if a else "", "https://www.imperial.ac.uk")
         date  = d.get_text(strip=True) if d else None
+        # .venue holds the real building and campus ("Huxley Building, South
+        # Kensington Campus"). Worth reading for two reasons: it is what makes
+        # the map and the distance figure work at all, and Imperial is not
+        # entirely a London university - Silwood Park is in Ascot, and only a
+        # campus name distinguishes it.
+        v = el.select_one(".venue")
+        venue = v.get_text(" ", strip=True) if v else ""
+        if venue and _IMPERIAL_LONDON_CAMPUS_RE.search(venue) \
+                and not re.search(r"\blondon\b", venue, re.IGNORECASE):
+            venue = f"{venue}, London"
         if is_valid_event(title) and is_valid_url(url):
-            events.append({"title": title, "date": date, "url": url, "source": "Imperial College"})
+            events.append({"title": title, "date": date, "url": url,
+                           "source": "Imperial College", "location": venue})
     return events[:15]
 
 # BrainStation runs campuses in several cities and tags each event with a
@@ -941,7 +1037,20 @@ def scrape_brainstation():
         date  = d.get_text(strip=True) if d else None
         if not (title and len(title) > 5 and title not in seen and is_valid_url(url)):
             continue
-        if not _brainstation_is_london(title):
+        # The card states its venue outright - "482 Front St W, 2nd Floor,
+        # Toronto, ON", "BrainStation Toronto" - as the second highlights
+        # item, after the time range. Reading it replaces a guess with a fact:
+        # _brainstation_is_london() was inferring the city from a campus
+        # acronym at the end of the title, which is why four Toronto events
+        # once reached the catalog. The acronym check stays as the fallback
+        # for cards that carry no venue line.
+        items = [li.get_text(" ", strip=True) for li in art.select("[class*=list-item]")]
+        items = [i for i in items if i]
+        venue = items[1] if len(items) > 1 else ""
+        if venue:
+            if not is_london({"title": title, "location": venue}):
+                continue
+        elif not (_brainstation_is_london(title) and is_london({"title": title})):
             continue
         # This listing carries past events as well as upcoming ones ("Jul08",
         # "Aug05" were both live in a mid-August catalog). Drop the ones we can
@@ -952,7 +1061,8 @@ def scrape_brainstation():
         if iso and not _is_future(iso):
             continue
         seen.add(title)
-        events.append({"title": title, "date": date, "url": url, "source": "BrainStation London"})
+        events.append({"title": title, "date": date, "url": url,
+                       "source": "BrainStation London", "location": venue})
     return events[:15]
 
 # ─────────────────────────────────────────────
@@ -1747,6 +1857,26 @@ def _luma_event_record(ev, source_name):
     }
 
 
+def luma_calendar_status(cal_id):
+    """HTTP status for a calendar's items endpoint, or None if it could not be
+    asked. Used only to tell "nothing scheduled" apart from "we cannot see it".
+
+    A private or deleted calendar answers 401/404 and yields zero events, which
+    is indistinguishable at the catalog level from a real organiser having a
+    quiet fortnight - and the dashboard was reporting both as "a quiet
+    organiser is not a dead one, worth retrying later". One of those is worth
+    retrying and the other never will be."""
+    try:
+        r = requests.get("https://api.lu.ma/calendar/get-items",
+                         params={"calendar_api_id": cal_id, "pagination_limit": 1},
+                         headers={"User-Agent": HEADERS["User-Agent"],
+                                  "Accept": "application/json"}, timeout=10)
+        return r.status_code
+    except Exception as exc:
+        log.warning(f"Luma status probe failed for {cal_id}: {exc}")
+        return None
+
+
 def scrape_luma_calendar(name, cal_id, limit=20):
     """One Luma calendar -> its upcoming London-or-online events.
 
@@ -1820,11 +1950,10 @@ def _luma_user_api_id(username):
     if (username or "").startswith("usr-"):
         return username
     try:
-        r = requests.get(f"https://luma.com/user/{username}", headers=HEADERS, timeout=12)
-        if r.status_code != 200:
-            log.warning(f"Luma user {username}: HTTP {r.status_code}")
+        text = _luma_html(f"https://luma.com/user/{username}")
+        if not text:
             return None
-        m = re.search(r'id="__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, re.S)
+        m = re.search(r'id="__NEXT_DATA__"[^>]*>(.*?)</script>', text, re.S)
         if not m:
             return None
         data = json.loads(m.group(1))
@@ -1858,18 +1987,90 @@ _LUMA_EVENT_HINT = ("that is a link to a single EVENT, not to an organiser. "
                     "Add it from the Add-by-Link tab instead.")
 
 
-def _luma_next_data(url):
-    """The __NEXT_DATA__ blob off a Luma page, parsed, or None."""
-    try:
-        r = requests.get(url, headers=HEADERS, timeout=12)
-        if r.status_code != 200:
+def _luma_html(url, attempts=3):
+    """Fetch a Luma HTML page, backing off when Luma throttles us.
+
+    Luma rate-limits its own website far harder than its API, and it counts
+    per source IP - which on Railway means one shared address doing a full
+    scrape every REFRESH_MINUTES. Locally this path answered 200 every time;
+    in production the first vanity-URL lookup came back HTTP 429 and the
+    dashboard reported "Could not read that Luma page". Same code, different
+    IP reputation, which is exactly the class of bug that only shows up live.
+
+    The API resolver above is preferred for everything it can answer. This is
+    for user handles, which have no API equivalent."""
+    delay = 1.5
+    for attempt in range(attempts):
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=12)
+            if r.status_code == 200:
+                return r.text
+            if r.status_code in (429, 503) and attempt < attempts - 1:
+                wait = float(r.headers.get("Retry-After") or delay)
+                log.info(f"Luma throttled {url} ({r.status_code}); retrying in {wait:.1f}s")
+                time.sleep(min(wait, 8))
+                delay *= 2
+                continue
             log.warning(f"Luma page {url}: HTTP {r.status_code}")
             return None
-        m = re.search(r'id="__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, re.S)
+        except Exception as exc:
+            log.warning(f"Luma page {url} lookup failed: {exc}")
+            return None
+    return None
+
+
+def _luma_next_data(url):
+    """The __NEXT_DATA__ blob off a Luma page, parsed, or None."""
+    text = _luma_html(url)
+    if not text:
+        return None
+    m = re.search(r'id="__NEXT_DATA__"[^>]*>(.*?)</script>', text, re.S)
+    try:
         return json.loads(m.group(1)) if m else None
     except Exception as exc:
-        log.warning(f"Luma page {url} lookup failed: {exc}")
+        log.warning(f"Luma page {url}: __NEXT_DATA__ did not parse: {exc}")
         return None
+
+
+def _luma_resolve_slug(slug):
+    """(identifier, kind, name, error) for a Luma vanity slug, via the API.
+
+    api.lu.ma/url?url=<slug> answers {"kind": "calendar"|"event", "data": ...}
+    for any vanity path, without touching the website - so it is not subject to
+    the page throttling that broke the HTML route in production. It does NOT
+    resolve user handles (404), which is why the page fallback still exists."""
+    try:
+        r = requests.get("https://api.lu.ma/url", params={"url": slug},
+                         headers={"User-Agent": HEADERS["User-Agent"],
+                                  "Accept": "application/json"}, timeout=12)
+        if r.status_code != 200:
+            return "", "", "", ""          # empty error = "try the page instead"
+        payload = r.json()
+    except Exception as exc:
+        log.warning(f"Luma url resolver failed for {slug}: {exc}")
+        return "", "", "", ""
+
+    kind = (payload.get("kind") or "").strip()
+    data = payload.get("data") or {}
+    node = data.get(kind) if isinstance(data.get(kind), dict) else data
+
+    if kind == "event":
+        # An event page also carries the calendar hosting it, which is the
+        # thing the operator almost certainly wanted. Naming it turns a dead
+        # end into one copy-paste.
+        ev_name = ((node or {}).get("name") or "").strip()
+        host = data.get("calendar") if isinstance(data.get("calendar"), dict) else {}
+        hint = (f"\"{ev_name}\" is a single EVENT, not an organiser. " if ev_name
+                else "That is a link to a single EVENT, not an organiser. ")
+        hint += "Add it from the Add-by-Link tab instead."
+        if host.get("api_id"):
+            hint += (f" To track the organiser instead, paste {host['api_id']}"
+                     + (f" ({host.get('name')})" if host.get("name") else "") + ".")
+        return "", "", "", hint
+
+    if kind in ("calendar", "user") and isinstance(node, dict) and node.get("api_id"):
+        return node["api_id"], kind, (node.get("name") or "").strip(), ""
+    return "", "", "", ""
 
 
 def _luma_entity_from_page(url):
@@ -1881,7 +2082,7 @@ def _luma_entity_from_page(url):
     and deserves a real answer."""
     data = _luma_next_data(url)
     if not data:
-        return "", "", "", "Could not read that Luma page."
+        return "", "", "", ""      # empty: the caller still has routes to try
     initial = (data.get("props", {}).get("pageProps", {}).get("initialData", {}) or {})
     inner = initial.get("data") or initial
 
@@ -1959,21 +2160,32 @@ def resolve_luma_identifier(raw):
         return "", "", "", f"No Luma profile found at /user/{handle}."
 
     m = re.search(r"(?:lu\.ma|luma\.com)/([A-Za-z0-9_.\-]+)", raw, re.IGNORECASE)
-    if m:
-        return _luma_entity_from_page(f"https://luma.com/{m.group(1)}")
+    slug = m.group(1) if m else (raw if re.match(r"^[A-Za-z0-9_.\-]+$", raw) else "")
+    if not slug:
+        return "", "", "", "That is not a Luma link or id."
 
-    if re.match(r"^[A-Za-z0-9_.\-]+$", raw):
-        # A bare handle. It is far more often a calendar vanity slug than a
-        # username, so the page is asked rather than assumed either way.
-        ident, kind, nm, err = _luma_entity_from_page(f"https://luma.com/{raw}")
-        if ident:
-            return ident, kind, nm, err
-        uid = _luma_user_api_id(raw)
-        if uid:
-            return uid, "user", "", ""
-        return "", "", "", err or f"Could not resolve \"{raw}\" to a Luma calendar or profile."
+    # API first. It answers for every vanity calendar and event slug without
+    # touching the website, which is what Luma throttles.
+    ident, kind, nm, err = _luma_resolve_slug(slug)
+    if ident or err:
+        return ident, kind, nm, err
 
-    return "", "", "", "That is not a Luma link or id."
+    # Not something the resolver knows, so it is either a user handle (no API
+    # equivalent exists) or nothing at all. Both need the page.
+    #
+    # The user lookup is tried BEFORE the page error is surfaced, deliberately.
+    # A bare handle like "SuperteamUK" 404s at luma.com/SuperteamUK and
+    # resolves fine at luma.com/user/SuperteamUK; returning the first error
+    # would refuse a profile that is right there.
+    ident, kind, nm, page_err = _luma_entity_from_page(f"https://luma.com/{slug}")
+    if ident:
+        return ident, kind, nm, ""
+    uid = _luma_user_api_id(slug)
+    if uid:
+        return uid, "user", "", ""
+    return "", "", "", (page_err or
+                        f"Could not resolve \"{slug}\" to a Luma calendar or profile. "
+                        "Check the link opens in a browser.")
 
 
 def scrape_luma_user(name, username, limit=20):
