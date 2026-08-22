@@ -804,6 +804,18 @@ _BUILDER_TECH_TITLE_RE = re.compile(
 
 @source("Luma London Discover", "✨", "Builder & Tech Community")
 def scrape_luma_discover():
+    """Luma's own London city feed, narrowed to builder/tech titles.
+
+    Routed through _luma_event_record for the same reason the calendar and
+    profile scrapers are - this is the third Luma scraper, and it had drifted
+    furthest from the other two. It set no location at all (so every event
+    reached the catalog with a blank venue and nothing for is_london() to
+    judge), it never checked whether the date had passed, and it carried no
+    Luma id, so a Discover copy of an event a tracked organiser already
+    publishes could not be recognised as the same event.
+
+    The geo radius is centred on London but it is a RADIUS - it reaches past
+    the city - so the guardrail is doing real work here, not just tidying."""
     events = []
     try:
         url = "https://api.lu.ma/discover/get-paginated-events?geo_latitude=51.5074&geo_longitude=-0.1278&geo_type=circle"
@@ -816,12 +828,11 @@ def scrape_luma_discover():
             title = ev.get("name")
             if not title or not _BUILDER_TECH_TITLE_RE.search(title) or title in seen:
                 continue
-            slug  = ev.get("url") or ev.get("api_id","")
-            event_url = f"https://lu.ma/{slug}" if slug and not slug.startswith("http") else slug
-            start = ev.get("start_at","")
-            date  = start[:10] if start else None
+            rec = _luma_event_record(ev, "Luma London Discover")
+            if not rec:
+                continue
             seen.add(title)
-            events.append({"title": title, "date": date, "url": event_url or "https://lu.ma", "source": "Luma London Discover"})
+            events.append(rec)
     except Exception as e:
         log.warning(f"Luma Discover failed: {e}")
     return events[:30]
