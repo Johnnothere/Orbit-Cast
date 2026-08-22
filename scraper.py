@@ -85,6 +85,13 @@ _GLOBAL_SOURCES = {
 }
 
 
+# London, in the spellings that actually turn up in listings. The Cyrillic
+# form is not decoration: "Лондон" was the stated venue of a Ukrainian-language
+# hackathon sitting in the catalog, kept only because nothing disqualified it.
+# A real London event should be kept because it says London, not by default.
+_LONDON_NAME_RE = re.compile(r"\b(london)\b|Лондон|لندن", re.IGNORECASE)
+
+
 def is_london(ev, source_name: str = None) -> bool:
     """True when the event belongs in a London catalog.
 
@@ -106,7 +113,7 @@ def is_london(ev, source_name: str = None) -> bool:
             return bool(re.search(r"\blondon\b", m.group(1), re.IGNORECASE))
         # no prefix at all - fall through to the generic check
 
-    if re.search(r"\blondon\b", hay, re.IGNORECASE):
+    if _LONDON_NAME_RE.search(hay):
         return True                       # explicitly London - always keep
     if source_name in _GLOBAL_SOURCES:
         return False                      # global source, London not stated
@@ -945,13 +952,28 @@ def scrape_imperial():
         # entirely a London university - Silwood Park is in Ascot, and only a
         # campus name distinguishes it.
         v = el.select_one(".venue")
-        venue = v.get_text(" ", strip=True) if v else ""
-        if venue and _IMPERIAL_LONDON_CAMPUS_RE.search(venue) \
-                and not re.search(r"\blondon\b", venue, re.IGNORECASE):
-            venue = f"{venue}, London"
+        venue = (v.get_text(" ", strip=True) if v else "").strip()
+        online = bool(_ONLINE_RE.match(venue))
+        if venue and not online:
+            in_london = bool(_IMPERIAL_LONDON_CAMPUS_RE.search(venue)
+                             or re.search(r"\blondon\b", venue, re.IGNORECASE))
+            if not in_london:
+                # Imperial's listing carries conferences its people are running
+                # or attending abroad, and reading the venue is what finally
+                # made them visible: "Xi'an Qujiang International Convention
+                # Centre", "Science Congress Center, Walther-Von-Dyck" (Munich)
+                # and "Belmeloro University Complex" (Bologna) were all live in
+                # the catalog, kept because no location was set and the city
+                # denylist cannot know every venue name on earth. With a venue
+                # in hand the rule inverts safely for this source: a stated
+                # venue that is not London means not London.
+                continue
+            if not re.search(r"\blondon\b", venue, re.IGNORECASE):
+                venue = f"{venue}, London"
         if is_valid_event(title) and is_valid_url(url):
             events.append({"title": title, "date": date, "url": url,
-                           "source": "Imperial College", "location": venue})
+                           "source": "Imperial College", "location": venue,
+                           "is_online": online})
     return events[:15]
 
 # BrainStation runs campuses in several cities and tags each event with a
