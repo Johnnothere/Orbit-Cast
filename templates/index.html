@@ -1256,7 +1256,7 @@ footer.site{border-top:1px solid var(--hairline);}
           </select>
           <div class="ctrl-sep"></div>
           <select class="ctrl-sel" id="sortSel" onchange="render()">
-            <option value="date">Sort: soonest</option><option value="source">Sort: by source</option>
+            <option value="date">Sort: soonest</option>
             <option value="alpha">Sort: A–Z</option><option value="category">Sort: by category</option>
           </select>
           <div class="ctrl-right"><button class="btn-tog" onclick="exportAll()">↓ Export .ics</button></div>
@@ -1371,8 +1371,8 @@ function isLegit(e){
 
 // ── STATE ────────────────────────────────────────────────
 const NOW=new Date();
-let allEvents=[],sourceSummary=[];
-let activeCat='all',activeSrc=null;
+let allEvents=[];
+let activeCat='all';
 function loadSaved(){try{return new Set(JSON.parse(localStorage.getItem('oc_saved')||'[]'));}catch{return new Set();}}
 function persistSaved(){try{localStorage.setItem('oc_saved',JSON.stringify([...saved]));}catch{}}
 const saved=loadSaved();
@@ -1524,15 +1524,18 @@ function scrollToConsole(){
 async function fetchEvents(){
   setLoad(true); hideError();
   try{
-    const[evRes,sumRes]=await Promise.all([fetch('/api/events'),fetch('/api/summary')]);
+    // /api/summary is admin-only now: the per-source breakdown is a coverage
+    // view for the dashboard, not something the public app needs to read.
+    const evRes=await fetch('/api/events');
     if(!evRes.ok)throw new Error('Events API '+evRes.status);
     const evData=await evRes.json();
-    const sumData=await sumRes.json();
     allEvents=(evData.events||[]).filter(isLegit).map((e,i)=>{
       const d=parseDate(e.date);
       return {
-        id:e.id||('ev'+i),cat:e.category||'Tech & AI',src:e.source||'',
-        emoji:e.emoji||'',title:e.title||'',date:d,
+        // No src/emoji: /api/events no longer serves either, because the two
+        // of them together are the source list. Cards carry the category.
+        id:e.id||('ev'+i),cat:e.category||'Tech & AI',
+        title:e.title||'',date:d,
         // Other names the same event goes by. Aggregators retitle events -
         // Hackathon Atlas lists one Softr hackathon by its subtitle while the
         // organiser uses a completely different headline - so searching the
@@ -1548,7 +1551,6 @@ async function fetchEvents(){
         time:e.time||null,location:e.location||'',
       };
     });
-    sourceSummary=sumData.summary||[];
     lastRunTs=evData.last_run?new Date(evData.last_run):null;
     const newN=allEvents.filter(e=>e.date&&isToday(e)).length;
     if(newN){document.getElementById('newBadge').style.display='inline-block';document.getElementById('newCt').textContent=newN+' today';}
@@ -1653,10 +1655,9 @@ function getFiltered(){
   const dateRange=document.getElementById('dateRange').value;
   let list=allEvents.filter(e=>{
     if(activeCat!=='all'&&e.cat!==activeCat)return false;
-    if(activeSrc&&e.src!==activeSrc)return false;
     if(upcomingOnly&&!isUp(e))return false;
     if(savedOnly&&!saved.has(e.id))return false;
-    if(q&&![e.title,...(e.aliases||[]),e.src,e.cat].join(' ').toLowerCase().includes(q))return false;
+    if(q&&![e.title,...(e.aliases||[]),e.cat].join(' ').toLowerCase().includes(q))return false;
     if(dateRange!=='all'){
       // An undated event cannot satisfy a specific date range. Previously the
       // whole block was skipped when e.date was null, so every undated event
@@ -1676,8 +1677,7 @@ function getFiltered(){
     return true;
   });
   const s=document.getElementById('sortSel').value;
-  if(s==='source')list.sort((a,b)=>a.src.localeCompare(b.src)||(a.date&&b.date?a.date-b.date:0));
-  else if(s==='alpha')list.sort((a,b)=>a.title.localeCompare(b.title));
+  if(s==='alpha')list.sort((a,b)=>a.title.localeCompare(b.title));
   else if(s==='category')list.sort((a,b)=>a.cat.localeCompare(b.cat)||(a.date&&b.date?a.date-b.date:0));
   else list.sort((a,b)=>{if(!a.date&&!b.date)return 0;if(!a.date)return 1;if(!b.date)return -1;return a.date-b.date;});
   return list;
@@ -1687,7 +1687,6 @@ function render(){
   const list=getFiltered();
   document.getElementById('cntN').textContent=list.length;
   const meta=[];
-  if(activeSrc)meta.push(activeSrc);
   if(activeCat!=='all')meta.push(activeCat);
   document.getElementById('cntMeta').textContent=meta.length?'· '+meta.join(' · '):'';
   const area=document.getElementById('eventsArea');
@@ -1716,7 +1715,7 @@ function evRow(e){
   const tm=eventTime(e);
   return '<div class="ev'+(past?' past':'')+'" style="--cat:'+catCol+'">'
     +'<div class="ev-time"><span class="soon '+ta.cls+'">'+esc(ta.txt)+'</span>'+(dt?'<span class="dt">'+esc(dt)+'</span>':'')+'<span class="tm">'+esc(tm)+'</span></div>'
-    +'<div class="ev-body"><a class="ev-title" href="'+esc(e.url)+'" target="_blank" rel="noopener">'+esc(e.title)+'</a><div class="ev-src">'+esc(e.emoji)+' '+esc(e.src)+' · '+esc(e.cat)+(e.location&&e.location.toLowerCase()!=='london'?' · '+esc(e.location):'')+'</div></div>'
+    +'<div class="ev-body"><a class="ev-title" href="'+esc(e.url)+'" target="_blank" rel="noopener">'+esc(e.title)+'</a><div class="ev-src">'+esc(e.cat)+(e.location&&e.location.toLowerCase()!=='london'?' · '+esc(e.location):'')+'</div></div>'
     +'<div class="ev-right"><button class="ic-btn" onclick="dlICS(\''+e.id+'\')" title="Add to calendar">📅</button><button class="ic-btn '+(saved.has(e.id)?'saved':'')+'" onclick="toggleStar(\''+e.id+'\',this)" title="Save">☆</button><button class="ic-btn" onclick="openLink(\''+esc(e.url)+'\')" title="View">↗</button></div>'
     +'</div>';
 }
@@ -1725,7 +1724,7 @@ function evRow(e){
 function renderHackathons(){
   const upcomingOnly=document.getElementById('cbHackUpcoming').checked;
   const today=new Date(NOW.getFullYear(),NOW.getMonth(),NOW.getDate());
-  let hacks=allEvents.filter(e=>e.cat==='Hackathons').map(e=>({title:e.title,date:e.date,url:e.url,desc:e.src,time:eventTime(e)}));
+  let hacks=allEvents.filter(e=>e.cat==='Hackathons').map(e=>({title:e.title,date:e.date,url:e.url,desc:e.location||'',time:eventTime(e)}));
   hacks.sort((a,b)=>{if(!a.date&&!b.date)return 0;if(!a.date)return 1;if(!b.date)return -1;return a.date-b.date;});
   const upcoming=hacks.filter(h=>!h.date||h.date>=today);
   document.getElementById('hackCount').textContent=(upcomingOnly?upcoming.length:hacks.length)+' upcoming';
@@ -1756,7 +1755,7 @@ function addHackToCalendar(title,dateStr,url){
 
 // ── INTERACTIONS ─────────────────────────────────────────
 function setCat(cat,btn){
-  activeCat=cat;activeSrc=null;
+  activeCat=cat;
   document.querySelectorAll('.cat-btn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
   render();
@@ -1769,7 +1768,7 @@ function toggleStar(id,btn){
 }
 function filterNew(){
   document.getElementById('sortSel').value='date';document.getElementById('search').value='';
-  document.getElementById('dateRange').value='today';activeCat='all';activeSrc=null;
+  document.getElementById('dateRange').value='today';activeCat='all';
   renderSidebar();render();toast('Today\'s events');
 }
 function openLink(url){if(url&&url!=='#')window.open(url,'_blank','noopener');}
@@ -2348,7 +2347,7 @@ function showCalDay(dk){
   const mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const dayNames=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const dateObj=new Date(y,m-1,dy);
-  panel.innerHTML='<div class="cdp-header"><div style="display:flex;align-items:center;gap:.75rem;"><span class="cdp-title">'+dayNames[dateObj.getDay()]+', '+dy+' '+mn[m-1]+' '+y+'</span><span class="cdp-count">'+evs.length+' event'+(evs.length>1?'s':'')+'</span></div><button class="cdp-close" onclick="closeCalPanel()">×</button></div><div class="cdp-events">'+evs.map(e=>{const col=CAT_COLOR[e.cat]||'var(--hairline)';const tm=eventTime(e);return'<div class="cdp-ev" style="--cdp-c:'+col+'"><div><div class="cdp-ev-time">'+esc(tm)+'</div><div class="cdp-ev-title">'+esc(e.title)+'</div><div class="cdp-ev-meta"><span>'+esc(e.emoji)+' '+esc(e.src)+'</span><span>'+esc(e.cat)+'</span></div></div><div class="cdp-ev-actions"><a class="cdp-link" onclick="dlICS(\''+e.id+'\')">+ Calendar</a><a class="cdp-link" href="'+esc(e.url)+'" target="_blank" rel="noopener">View →</a></div></div>';}).join('')+'</div>';
+  panel.innerHTML='<div class="cdp-header"><div style="display:flex;align-items:center;gap:.75rem;"><span class="cdp-title">'+dayNames[dateObj.getDay()]+', '+dy+' '+mn[m-1]+' '+y+'</span><span class="cdp-count">'+evs.length+' event'+(evs.length>1?'s':'')+'</span></div><button class="cdp-close" onclick="closeCalPanel()">×</button></div><div class="cdp-events">'+evs.map(e=>{const col=CAT_COLOR[e.cat]||'var(--hairline)';const tm=eventTime(e);return'<div class="cdp-ev" style="--cdp-c:'+col+'"><div><div class="cdp-ev-time">'+esc(tm)+'</div><div class="cdp-ev-title">'+esc(e.title)+'</div><div class="cdp-ev-meta"><span>'+esc(e.cat)+'</span>'+(e.location?'<span>'+esc(e.location)+'</span>':'')+'</div></div><div class="cdp-ev-actions"><a class="cdp-link" onclick="dlICS(\''+e.id+'\')">+ Calendar</a><a class="cdp-link" href="'+esc(e.url)+'" target="_blank" rel="noopener">View →</a></div></div>';}).join('')+'</div>';
   panel.classList.add('open');
   setTimeout(()=>panel.scrollIntoView({behavior:'smooth',block:'nearest'}),50);
 }

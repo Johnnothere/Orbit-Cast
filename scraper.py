@@ -454,19 +454,41 @@ def scrape_intelligence_forums():
 # DEFENCE & GEOPOLITICS
 # ─────────────────────────────────────────────
 
+# The LDC site is a marketing homepage, not an events listing: its headings
+# include the site's own navigation and its sponsor tiers. Walking every
+# h2/h3 on it put "View our Linkedin Profile" into the Defence & Geopolitics
+# category as an event, alongside "LDC Washington Forum" - an event in
+# Washington, in a London catalog. Both are now filtered by name: a heading
+# has to look like a conference programme item and must not name another
+# city or a sponsor block.
+_LDC_KEEP_RE = re.compile(r"\b(conference|forum|summit|symposium)\b", re.IGNORECASE)
+_LDC_DROP_RE = re.compile(
+    r"\b(washington|brussels|past conferences?|linkedin|sponsor\w*|supporter\w*"
+    r"|partner\w*|network|committee|agency|media)\b", re.IGNORECASE)
+
+
 @source("London Defence Conference", "🎖️", "Defence & Geopolitics")
 def scrape_ldc():
-    events = []
+    """London Defence Conference - one annual flagship conference plus a
+    couple of satellite forums. Undated by design: the site announces the
+    programme long before it publishes a date, and a guessed date would be
+    worse than none."""
+    events, seen = [], set()
     soup = fetch("https://londondefenceconference.com/")
     if not soup:
         return events
-    for el in soup.select("article, [class*=card], section h2, section h3"):
-        h     = el if el.name in ["h2","h3"] else el.select_one("h2, h3, h4")
-        a     = el.select_one("a[href]") if el.name not in ["h2","h3"] else el.find_parent("a")
-        title = el.get_text(strip=True) if el.name in ["h2","h3"] else (h.get_text(strip=True) if h else None)
-        url   = fix_url(a["href"] if a else "", "https://londondefenceconference.com")
-        if is_valid_event(title) and is_valid_url(url):
-            events.append({"title": title, "date": None, "url": url, "source": "London Defence Conference"})
+    for h in soup.select("h2, h3"):
+        title = h.get_text(" ", strip=True)
+        if not title or not _LDC_KEEP_RE.search(title) or _LDC_DROP_RE.search(title):
+            continue
+        a = h.find_parent("a") or h.select_one("a[href]")
+        url = fix_url(a["href"] if a else "", "https://londondefenceconference.com") \
+              or "https://londondefenceconference.com/"
+        if not (is_valid_event(title) and is_valid_url(url)) or title.lower() in seen:
+            continue
+        seen.add(title.lower())
+        events.append({"title": title, "date": None, "url": url,
+                       "source": "London Defence Conference", "location": "London"})
     return events[:5]
 
 # ─────────────────────────────────────────────
@@ -855,6 +877,255 @@ def scrape_cyber_infosec():
             seen.add(title.lower())
             events.append(ev)
     return events[:25]
+
+
+# ─────────────────────────────────────────────
+# INTELLIGENCE & SECURITY / DEFENCE & GEOPOLITICS  (keyword-filtered aggregate)
+# ─────────────────────────────────────────────
+# The same problem as the cyber block above, one category over - and worse.
+# The dedicated intel and defence sources are few and genuinely quiet: BISI
+# and Intelligence Forums are both alive and parsing correctly but have
+# published nothing dated in the future for months (checked live - every
+# article on both pages carries a past date), and RUSI's events page is a
+# single un-paginated screen of ~10. That left Intelligence & Security on 13
+# events and Defence & Geopolitics on 14, against 128 for Business &
+# Networking - the wrong shape for this catalog's actual audience, and the
+# reason a security specialist could upload a strong CV and be matched
+# mostly against startup networking.
+#
+# The listing-site searches DO carry real intel and defence events, they are
+# just buried: "national-security" returns a Halloween party and a fashion
+# afterparty next to a genuine emergency-briefing panel, and "defence" is
+# overwhelmingly self-defence classes. So the cyber block's rule applies
+# here too - keep only titles that actually name the work, and drop the
+# martial-arts feed outright. Precision over volume.
+
+_INTEL_TITLE_RE = re.compile(
+    r"\b(osint|open.?source intelligence|socmint|humint|sigint|geoint|imint"
+    r"|counter.?terror\w*|counterterror\w*|terroris\w*|counter.?extremis\w*|radicalis\w*"
+    r"|espionage|spycraft|spymaster|tradecraft|covert action|clandestine"
+    r"|intelligence (analy\w*|studies|communit\w*|agenc\w*|service\w*|officer\w*"
+    r"|gathering|sharing|failure\w*|assessment\w*|cycle)"
+    r"|(strategic|competitive|criminal|military|financial|threat) intelligence"
+    r"|national security|homeland security|protective security|security clearance"
+    r"|due diligence|sanctions|anti.?money.?laundering|\baml\b|\bkyc\b"
+    r"|financial crime|illicit finance|money launder\w*|asset tracing"
+    r"|fraud (investigat\w*|risk|prevention|conference|summit)"
+    r"|investigative journalis\w*|open.?source investigat\w*"
+    r"|insider threat|hostile state\w*|foreign interference|state threat\w*"
+    r"|disinformation|misinformation|information operations|influence operations"
+    r"|hybrid (threat|warfare)|counter.?intelligence|surveillance state)\b",
+    re.IGNORECASE,
+)
+
+_GEOPOL_TITLE_RE = re.compile(
+    r"\b(geopolitic\w*|geostrateg\w*|geoeconomic\w*|grand strategy|statecraft"
+    r"|foreign polic\w*|international relations|international security"
+    r"|international affairs|world order|global security"
+    r"|defence (polic\w*|review|tech\w*|innovation|industr\w*|procurement"
+    r"|conference|summit|studies|secretary|spending)"
+    r"|defense (polic\w*|tech\w*|industr\w*|conference|summit|studies)"
+    r"|\bnato\b|european defence|transatlantic"
+    r"|arms control|arms race|nuclear (weapon\w*|deterren\w*|proliferation|posture)"
+    r"|deterrence|armed forces|military (strategy|power|balance|aid|doctrine|history)"
+    r"|warfare|war studies|warfight\w*|peacekeeping|insurgen\w*"
+    r"|drone warfare|unmanned|autonomous weapon\w*|maritime security|naval power"
+    r"|sanctions regime|export controls|economic statecraft"
+    r"|diplomac\w*|diplomatic|multilateralis\w*)\b",
+    re.IGNORECASE,
+)
+
+# A country name on its own is not a geopolitics signal - "China Mid-Autumn
+# Festival" and "Learn Russian in Shoreditch" are not defence events. It
+# counts only when the title also names a strategic frame, in either order,
+# within a short window. This is what rescues the real ones the keyword list
+# above misses by construction, e.g. "China's Global Strategy Under Xi
+# Jinping" and "The Battle for the Arctic and the New World Order".
+_GEO_COUNTRY_RE = (r"(ukraine|russia\w*|china|chinese|iran\w*|israel\w*|gaza|taiwan"
+                   r"|north korea|indo.?pacific|middle east|the sahel|arctic|nato|europe)")
+_GEO_FRAME_RE   = (r"(strateg\w*|polic\w*|security|militar\w*|\bwar\b|conflict|invasion"
+                   r"|relations|order|power|threat|sanctions|regime|alliance|deterren\w*"
+                   r"|geopolit\w*|foreign|defence|defense|intelligence|nuclear)")
+_COUNTRY_CONTEXT_RE = re.compile(
+    rf"\b{_GEO_COUNTRY_RE}\b.{{0,45}}\b{_GEO_FRAME_RE}\b"
+    rf"|\b{_GEO_FRAME_RE}\b.{{0,45}}\b{_GEO_COUNTRY_RE}\b",
+    re.IGNORECASE,
+)
+
+# "Defence" in a London listings feed is mostly self-defence classes, and no
+# title regex below should ever be the only thing standing between a karate
+# workshop and the Defence & Geopolitics category.
+_NOT_SECURITY_RE = re.compile(
+    r"\b(self.?defen[cs]e|krav maga|karate|kickbox\w*|jiu.?jitsu|taekwondo"
+    r"|martial art\w*|boxing|stick.?boxing|womens? defence|personal safety class)\b",
+    re.IGNORECASE,
+)
+
+
+def _keyword_aggregate(searches, title_re, source_name, extra_re=None, limit=25):
+    """Run listing-site searches and keep only the titles that name the work.
+
+    Generalised from scrape_cyber_infosec, which did exactly this inline for
+    one category. A search that fails is skipped, never fatal: these feeds
+    are third-party and a 403 on one slug must not empty the category."""
+    events, seen = [], set()
+    for kind, slug in searches:
+        try:
+            found = (_scrape_eventbrite(slug, source_name) if kind == "eventbrite"
+                     else _scrape_allevents(slug, source_name))
+        except Exception as e:
+            log.warning(f"{source_name}: search {kind}/{slug} failed: {e}")
+            continue
+        for ev in found:
+            title = (ev.get("title") or "").strip()
+            if not title or title.lower() in seen:
+                continue
+            if _NOT_SECURITY_RE.search(title):
+                continue
+            if not (title_re.search(title) or (extra_re and extra_re.search(title))):
+                continue
+            seen.add(title.lower())
+            events.append(ev)
+    return events[:limit]
+
+
+# AllEvents has no slug that maps to either category (its nearest is
+# "workshops"), so both of these are Eventbrite-only by design rather than
+# by omission.
+_INTEL_SEARCHES = [("eventbrite", "intelligence"), ("eventbrite", "national-security"),
+                   ("eventbrite", "counter-terrorism"), ("eventbrite", "security"),
+                   ("eventbrite", "investigation")]
+
+_GEOPOL_SEARCHES = [("eventbrite", "geopolitics"), ("eventbrite", "defence"),
+                    ("eventbrite", "foreign-policy"),
+                    ("eventbrite", "international-relations"), ("eventbrite", "war")]
+
+
+@source("Intelligence & Security Search", "🔎", "Intelligence & Security")
+def scrape_intel_search():
+    return _keyword_aggregate(_INTEL_SEARCHES, _INTEL_TITLE_RE,
+                              "Intelligence & Security Search")
+
+
+@source("Defence & Geopolitics Search", "🧭", "Defence & Geopolitics")
+def scrape_geopol_search():
+    return _keyword_aggregate(_GEOPOL_SEARCHES, _GEOPOL_TITLE_RE,
+                              "Defence & Geopolitics Search",
+                              extra_re=_COUNTRY_CONTEXT_RE)
+
+
+# ─────────────────────────────────────────────
+# FOREIGN AFFAIRS / DEFENCE INSTITUTIONS
+# ─────────────────────────────────────────────
+# Named organisations that actually publish a dated upcoming programme. Each
+# one below was checked live before being added; the ones that did not
+# survive that check are recorded here so nobody re-adds them on a hunch:
+#   IISS and Chatham House    - 403 to any scraping approach (curated only).
+#   LSE and King's College    - calendars render client-side; one page of
+#                               server-rendered HTML yields ~1 relevant event.
+#   Bellingcat workshops      - no dated upcoming workshops published.
+#   The Security Institute    - event links are not in the server HTML.
+
+# "September 9, 2026" - month-first, which _LOOSE_DATE_RE (day-first) misses.
+_MDY_DATE_RE = re.compile(
+    r"\b([A-Za-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b")
+
+
+def _iso_from_mdy(m):
+    try:
+        month = _MONTH_LOOKUP.get(m.group(1).lower()[:3])
+        if not month:
+            return None
+        return f"{int(m.group(3)):04d}-{month:02d}-{int(m.group(2)):02d}"
+    except (ValueError, AttributeError):
+        return None
+
+
+@source("Frontline Club", "🎥", "Defence & Geopolitics")
+def scrape_frontline_club():
+    """Frontline Club - the foreign-correspondents' club in Paddington.
+
+    Panel discussions, screenings and book talks on conflict, foreign policy
+    and investigative journalism, several a week and open to non-members.
+    Cards are .eaw-content-wrap: h3.eaw-title carries title and link, the
+    <time> next to it carries a month-first date the generic day-first
+    parser cannot read."""
+    events = []
+    soup = fetch("https://www.frontlineclub.com/events/")
+    if not soup:
+        return events
+    for wrap in soup.select(".eaw-content-wrap"):
+        a = wrap.select_one("h3.eaw-title a[href]")
+        if not a:
+            continue
+        title = a.get_text(" ", strip=True)
+        url   = fix_url(a.get("href", ""), "https://www.frontlineclub.com")
+        t     = wrap.select_one("time")
+        m     = _MDY_DATE_RE.search(t.get_text(" ", strip=True)) if t else None
+        iso   = _iso_from_mdy(m) if m else None
+        if not (is_valid_event(title) and is_valid_url(url)):
+            continue
+        if not _is_future(iso):
+            continue
+        events.append({"title": title, "date": iso, "url": url,
+                       "source": "Frontline Club", "location": "London"})
+    return events[:15]
+
+
+@source("Council on Geostrategy", "🗺️", "Defence & Geopolitics")
+def scrape_geostrategy():
+    """Council on Geostrategy - Geostrategy Forums, Whitehall Briefings and
+    strategic-forum sessions, all in London. Event blocks are <article>s with
+    the title in an h3 and a day-first date in the block text."""
+    events, seen = [], set()
+    soup = fetch("https://www.geostrategy.org.uk/events/")
+    if not soup:
+        return events
+    for art in soup.select("article"):
+        h = art.select_one("h3, h2")
+        a = art.select_one('a[href*="/event/"]')
+        if not (h and a):
+            continue
+        title = h.get_text(" ", strip=True)
+        url   = fix_url(a.get("href", ""), "https://www.geostrategy.org.uk")
+        m     = _LOOSE_DATE_RE.search(art.get_text(" ", strip=True))
+        iso   = _iso_from_match(m) if m else None
+        if not (is_valid_event(title) and is_valid_url(url)):
+            continue
+        if not _is_future(iso) or title.lower() in seen:
+            continue
+        seen.add(title.lower())
+        events.append({"title": title, "date": iso, "url": url,
+                       "source": "Council on Geostrategy", "location": "London"})
+    return events[:15]
+
+
+@source("SASIG", "🤝", "Cyber & Infosec")
+def scrape_sasig():
+    """SASIG - free security briefings and webinars for security leaders,
+    several a week. No date parsing needed at all: every event link is
+    /calendar/event/YYYY-MM-DD-slug/, so the date is in the URL and cannot
+    drift out of sync with the title the way a scraped date string can."""
+    events, seen = [], set()
+    soup = fetch("https://www.thesasig.com/events/")
+    if not soup:
+        return events
+    href_date = re.compile(r"/calendar/event/(\d{4})-(\d{2})-(\d{2})-")
+    for a in soup.select('a[href*="/calendar/event/"]'):
+        href = a.get("href", "")
+        m = href_date.search(href)
+        if not m:
+            continue
+        iso   = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+        title = a.get_text(" ", strip=True)
+        url   = fix_url(href, "https://www.thesasig.com")
+        if not (is_valid_event(title) and is_valid_url(url)):
+            continue
+        if not _is_future(iso) or url in seen:
+            continue
+        seen.add(url)
+        events.append({"title": title, "date": iso, "url": url, "source": "SASIG"})
+    return events[:20]
 
 # ─────────────────────────────────────────────
 # LUMA DISCOVER
@@ -1592,6 +1863,72 @@ CURATED_LONDON_EVENTS = [
     {"title": "Chatham House Berlin conference 2026: Securing Europe's strategic autonomy",
      "date": "2026-11-25", "location": "Online (venue is Berlin)",
      "url": "https://www.chathamhouse.org/events/all/standard-event/chatham-house-berlin-conference-2026",
+     "category": "Defence & Geopolitics"},
+
+    # ── Refreshed from the live Chatham House programme ────────────────────
+    # chathamhouse.org 403s every scraping approach, which is why this list
+    # exists at all - but a hand-kept list is only as good as its last read,
+    # and the entries above it had already aged out. Each of the following
+    # was taken from the current programme with its own format label, so
+    # "Online" here means the event has no venue to travel to, not that the
+    # format was unknown. Nothing needs deleting when these pass:
+    # _scrape_curated() serves only future dates.
+    {"title": "BRICS and the future of global power",
+     "date": "2026-09-16", "location": "London (hybrid)",
+     "url": "https://www.chathamhouse.org/events/all/standard-event/brics-and-future-global-power",
+     "category": "Defence & Geopolitics"},
+    {"title": "Botswana's future: Vice President Gaolathe on economic resilience amid global uncertainty",
+     "date": "2026-09-17", "location": "London (hybrid)",
+     "url": "https://www.chathamhouse.org/events/all/standard-event/botswanas-future-vice-president-gaolathe-economic-resilience-amid-global",
+     "category": "Defence & Geopolitics"},
+    {"title": "Is the Middle East entering a new era of regional security with the Mecca Pact?",
+     "date": "2026-09-21", "location": "Online",
+     "url": "https://www.chathamhouse.org/events/all/standard-event/middle-east-entering-new-era-regional-security-mecca-pact",
+     "category": "Defence & Geopolitics"},
+    {"title": "Zambia's 2026 election: A test of democratic resilience",
+     "date": "2026-09-22", "location": "Online",
+     "url": "https://www.chathamhouse.org/events/all/standard-event/zambias-2026-election-test-democratic-resilience",
+     "category": "Defence & Geopolitics"},
+    {"title": "How will young voters shape Morocco's political future?",
+     "date": "2026-09-22", "location": "Online",
+     "url": "https://www.chathamhouse.org/events/all/standard-event/how-will-young-voters-shape-moroccos-political-future",
+     "category": "Defence & Geopolitics"},
+    {"title": "What to learn from Russia's State Duma elections",
+     "date": "2026-09-22", "location": "London (hybrid)",
+     "url": "https://www.chathamhouse.org/events/all/standard-event/what-learn-russias-state-duma-elections",
+     "category": "Defence & Geopolitics"},
+    {"title": "The Lake Chad Basin: Restoring regional security cooperation",
+     "date": "2026-09-28", "location": "Online",
+     "url": "https://www.chathamhouse.org/events/all/standard-event/lake-chad-basin-restoring-regional-security-cooperation",
+     "category": "Defence & Geopolitics"},
+    {"title": "After the revolutions: The outlook for South Asia's Gen Z-inspired governments",
+     "date": "2026-09-29", "location": "Online",
+     "url": "https://www.chathamhouse.org/events/all/standard-event/after-revolutions-outlook-south-asias-gen-z-inspired-governments",
+     "category": "Defence & Geopolitics"},
+    {"title": "Reckoning or rhetoric: Is now the time for reparative justice on the global stage? (members only)",
+     "date": "2026-10-15", "location": "London (hybrid)",
+     "url": "https://www.chathamhouse.org/events/all/members-event/reckoning-or-rhetoric-now-time-reparative-justice-global-stage",
+     "category": "Defence & Geopolitics"},
+    {"title": "US midterm elections 2026: what happens next?",
+     "date": "2026-11-03", "location": "London (hybrid)",
+     "url": "https://www.chathamhouse.org/events/all/standard-event/us-midterm-elections-2026-what-happens-next",
+     "category": "Defence & Geopolitics"},
+    {"title": "Iraq Initiative Conference 2026",
+     "date": "2026-11-11", "location": "London (hybrid)",
+     "url": "https://www.chathamhouse.org/events/all/standard-event/iraq-initiative-conference-2026",
+     "category": "Defence & Geopolitics"},
+    # The one genuinely intelligence-side event in the current programme -
+    # a former National Security Advisor on future security challenges.
+    # Everything else above is international affairs, and filing it under
+    # Intelligence & Security to pad that category would be exactly the
+    # inflation this product exists to refuse.
+    {"title": "H.R. McMaster, President Trump's former National Security Advisor, discusses America's future security challenges",
+     "date": "2026-12-10", "location": "London (hybrid)",
+     "url": "https://www.chathamhouse.org/events/all/standard-event/hr-mcmaster-president-trumps-former-national-security-advisor-discusses",
+     "category": "Intelligence & Security"},
+    {"title": "Chatham House Security and defence conference 2027",
+     "date": "2027-03-03", "location": "London (hybrid)",
+     "url": "https://www.chathamhouse.org/events/all/conference/security-and-defence-conference-2027",
      "category": "Defence & Geopolitics"},
 ]
 

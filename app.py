@@ -288,21 +288,61 @@ def run_scrape_background():
 # ROUTES
 # ─────────────────────────────────────────────
 
+# ─────────────────────────────────────────────
+# PUBLIC PAYLOAD HYGIENE
+# ─────────────────────────────────────────────
+# Which ~45 places this catalog is assembled from is the one part of it that
+# took real work and that nobody can re-derive by reading the app. Events
+# keep their `source` everywhere inside the process - the scraper dedups on
+# it, the AI scorer reads it, the admin dashboard reports on it, the DB
+# stores it - but nothing served to an anonymous browser carries it, and the
+# per-source breakdown is an admin view now, not a public endpoint.
+#
+# Note what this does NOT do: every event card still links to the event's own
+# page, so the destination domain is visible on click. This closes the front
+# door - it hands nobody a ready-made source list - it does not make the
+# catalog unscrapeable, and it should not be mistaken for that.
+# emoji goes with it: emoji is assigned per source, not per category, so a
+# card showing 🛡️ against one event and 🎥 against another hands back a
+# stable per-source token - a source list with the names filed off.
+_PRIVATE_EVENT_FIELDS = ("source", "emoji")
+
+
+def _public_event(ev):
+    return {k: v for k, v in ev.items() if k not in _PRIVATE_EVENT_FIELDS}
+
+
+def _public_result(result):
+    """An /api/analyze result with the source stripped off each match.
+
+    Copies rather than mutates: the caller still persists the full rows, and
+    save_recommendations() writes the source the admin analytics reads."""
+    recs = result.get("recommendations")
+    if not isinstance(recs, list):
+        return result
+    return {**result, "recommendations": [_public_event(r) for r in recs]}
+
+
 @app.route("/api/events")
 def api_events():
     cache    = load_events_cache()
     category = request.args.get("category", "").strip()
-    source   = request.args.get("source",   "").strip()
     events   = cache.get("events", [])
     if category:
         events = [e for e in events if e.get("category","").lower() == category.lower()]
-    if source:
-        events = [e for e in events if e.get("source","").lower() == source.lower()]
-    return jsonify({"events": events, "total": len(events),
+    # The ?source= filter is gone on purpose: a public filter on a hidden
+    # field is an oracle - you can enumerate the source list by guessing at
+    # it, which defeats stripping the field in the first place.
+    return jsonify({"events": [_public_event(e) for e in events], "total": len(events),
                     "last_run": cache.get("last_run"), "scraping": _scraping})
 
 @app.route("/api/summary")
 def api_summary():
+    """Per-source counts - the coverage view. Admin-only, same X-Admin-Secret
+    as every other /api/admin route, and fails closed the same way: with no
+    ADMIN_SECRET set on the server, nobody gets this, including you."""
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
     cache = load_events_cache()
     return jsonify({"summary": cache.get("summary",[]),
                     "last_run": cache.get("last_run"), "scraping": _scraping})
@@ -383,7 +423,7 @@ def api_analyze():
 
     result = ai_engine.analyze_upload(file_text, events, user_location=user_location)
 
-    resp = jsonify(result)
+    resp = jsonify(_public_result(result))
     oc_uid = ensure_oc_uid(resp)
     # Consent is the hinge: no recorded "yes" for this browser means nothing
     # gets written, and the response the user sees is identical either way.
@@ -400,7 +440,7 @@ def api_analyze():
             rec_ids = db.save_recommendations(analysis_id, recs)
             for rec, rec_id in zip(recs, rec_ids):
                 rec["recommendation_id"] = rec_id
-            resp = jsonify(result)  # rebuild - recs now carry recommendation_id for tracking
+            resp = jsonify(_public_result(result))  # rebuild - recs now carry recommendation_id for tracking
         except Exception as e:
             log.warning(f"Persisting analysis failed (non-fatal): {e}")
     return resp
@@ -457,7 +497,7 @@ def api_analyze_reuse():
     except Exception as e:
         log.warning(f"Persisting reused analysis failed (non-fatal): {e}")
 
-    return jsonify(result)
+    return jsonify(_public_result(result))
 
 
 # ─────────────────────────────────────────────

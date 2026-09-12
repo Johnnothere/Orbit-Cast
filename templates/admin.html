@@ -268,6 +268,17 @@ textarea:focus,input:focus,select:focus{border-color:var(--blue);}
     <!-- SOURCES -->
     <div class="panel" id="panel-sources">
       <div class="card">
+        <h2>Coverage</h2>
+        <p class="hint">Every source feeding the catalog and what it actually contributed on the last
+          scrape, by category. Counts are post-filter - what survived the London and junk rules, not what
+          the site listed. A source on 0 is either dormant or broken; the two look identical from here,
+          so check the site before assuming it needs fixing.</p>
+        <p class="hint">This view is the reason <code>/api/summary</code> needs the admin secret: it is
+          the whole source list on one screen, which is exactly what the public app no longer exposes.</p>
+        <div id="coverage-box"><div class="empty">Loading…</div></div>
+      </div>
+
+      <div class="card">
         <h2>Add a recurring organiser</h2>
         <p class="hint">Paste any Luma organiser link — a calendar (<code>lu.ma/cal-…</code>), a vanity
           calendar URL (<code>luma.com/londonai</code>), or a person's host profile
@@ -562,6 +573,7 @@ async function tryUnlock(secret) {
   loadLinks();
   loadSources();
   loadCandidates();
+  loadCoverage();
 }
 
 document.getElementById("unlock-btn").onclick = async () => {
@@ -596,6 +608,7 @@ document.querySelectorAll(".tab").forEach(btn => {
     document.getElementById("panel-" + btn.dataset.tab).classList.add("active");
     if (btn.dataset.tab === "users") loadUsers();
     if (btn.dataset.tab === "analytics") loadAnalytics();
+    if (btn.dataset.tab === "sources") loadCoverage();
   };
 });
 
@@ -812,6 +825,38 @@ async function addSource() {
     document.getElementById("src-add-btn").style.display = "none";
     loadSources(); loadCandidates();
   } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
+}
+
+async function loadCoverage() {
+  const box = document.getElementById("coverage-box");
+  try {
+    const { summary, last_run } = await api("/api/summary");
+    if (!summary || !summary.length) {
+      box.innerHTML = `<div class="empty">No scrape has run yet.</div>`; return;
+    }
+    const byCat = {};
+    summary.forEach(r => { (byCat[r.category] = byCat[r.category] || []).push(r); });
+    // Thinnest category first: the point of this view is to show where the
+    // catalog is starving, and sorting it alphabetically buries that.
+    const cats = Object.keys(byCat).sort((a, b) =>
+      byCat[a].reduce((n, r) => n + (r.count || 0), 0) -
+      byCat[b].reduce((n, r) => n + (r.count || 0), 0));
+    const total = summary.reduce((n, r) => n + (r.count || 0), 0);
+    box.innerHTML = `<p class="ex-meta">${total} events · ${summary.length} sources · last scrape ${fmtDate(last_run)}</p>` +
+      cats.map(cat => {
+        const rows = byCat[cat].slice().sort((a, b) => (b.count || 0) - (a.count || 0));
+        const sub = rows.reduce((n, r) => n + (r.count || 0), 0);
+        return `
+      <div class="ex-item">
+        <div class="ex-head">
+          <span class="ex-src">${escapeHtml(cat || "Uncategorised")}</span>
+          <span class="badge ${sub >= 25 ? "good" : ""}">${sub} event${sub === 1 ? "" : "s"}</span>
+        </div>
+        ${rows.map(r => `<p class="ex-meta">${escapeHtml(r.emoji || "")} ${escapeHtml(r.source)}
+           — <b>${r.count || 0}</b></p>`).join("")}
+      </div>`;
+      }).join("");
+  } catch (e) { box.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`; }
 }
 
 async function loadSources() {

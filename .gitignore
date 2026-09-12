@@ -7,3 +7,7 @@ __pycache__/
 events_cache.json
 last_run.json
 seen_events.json
+
+design-import/
+NexusAI.zip
+.env
