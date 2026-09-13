@@ -1,31 +1,57 @@
 """
 ORBITCAST — outbound email.
 
-Resend over plain HTTPS, no SDK: one POST with a JSON body is the whole
-integration, and a dependency that exists to build one request is a
-dependency that can break a deploy for no benefit.
+TWO WAYS TO SEND, because the right one depends on whether you own a domain
+yet, and that should not be a code change:
 
-DEGRADES, NEVER CRASHES. With no RESEND_API_KEY the app runs normally and
-every email is logged instead of sent - which is also how you develop login
-locally: the magic link appears in the console.
+  1. Resend (HTTPS API) - set RESEND_API_KEY. Needs a domain you control and
+     have verified. Best deliverability; what you want once you have one.
+  2. Any SMTP server - set SMTP_HOST/SMTP_USER/SMTP_PASS. Works with Gmail,
+     Brevo, Mailgun, SMTP2GO. No domain required if the provider lets you
+     verify a single address instead.
+
+Resend wins if both are set. With neither, the app still runs and every email
+is logged instead - which is also how you develop login locally: the magic
+link appears in the console.
 
 Env:
-  RESEND_API_KEY   enables real sending
-  MAIL_FROM        e.g. "OrbitCast <alerts@yourdomain.com>" - must be a
-                   domain verified in Resend, with SPF and DKIM published,
-                   or mail lands in spam whatever the code does
+  RESEND_API_KEY   enables the HTTPS path
+  SMTP_HOST        enables the SMTP path (e.g. smtp.gmail.com,
+                   smtp-relay.brevo.com)
+  SMTP_PORT        default 587 (STARTTLS). 465 switches to implicit TLS.
+  SMTP_USER        username - usually the full email address
+  SMTP_PASS        password or app-specific password. NEVER your normal
+                   account password on a shared host: Gmail and Brevo both
+                   issue a separate credential you can revoke on its own.
+  MAIL_FROM        e.g. "OrbitCast <alerts@yourdomain.com>". Whatever domain
+                   this names has to be one the provider will vouch for -
+                   verified in Resend, or a verified sender in Brevo, or the
+                   account's own address over Gmail SMTP. Naming a domain
+                   nobody authorised is how mail lands in spam no matter how
+                   correct the code is.
   PUBLIC_URL       absolute base for links in emails (no trailing slash)
 """
 
 import html
 import logging
 import os
+import smtplib
+import ssl
+from email.message import EmailMessage
+from email.utils import formataddr, parseaddr
 
 import requests
 
 log = logging.getLogger("orbitcast.mail")
 
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+SMTP_HOST = os.environ.get("SMTP_HOST", "")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587") or 587)
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASS = os.environ.get("SMTP_PASS", "")
+# resend.dev is Resend's testing sender: it only delivers to the address on
+# your own Resend account, so it proves the flow works and reaches nobody
+# else. Fine as a default, wrong the moment a second person signs up.
 MAIL_FROM = os.environ.get("MAIL_FROM", "OrbitCast <onboarding@resend.dev>")
 PUBLIC_URL = (os.environ.get("PUBLIC_URL", "https://orbitcast.up.railway.app")).rstrip("/")
 
@@ -37,7 +63,7 @@ BRAND_ACCENT = "#6ea8fe"
 
 
 def is_configured() -> bool:
-    return bool(RESEND_API_KEY)
+    return bool(RESEND_API_KEY or SMTP_HOST)
 
 
 def send(to: str, subject: str, html_body: str, text_body: str,
@@ -46,9 +72,12 @@ def send(to: str, subject: str, html_body: str, text_body: str,
     a failed digest must not take down the scheduler for everyone else."""
     if not to:
         return False
+    if not RESEND_API_KEY and SMTP_HOST:
+        return _send_smtp(to, subject, html_body, text_body, unsubscribe_url)
+
     if not RESEND_API_KEY:
-        log.warning("EMAIL NOT SENT (no RESEND_API_KEY). To: %s | Subject: %s\n%s",
-                    to, subject, text_body[:1500])
+        log.warning("EMAIL NOT SENT (no RESEND_API_KEY and no SMTP_HOST). "
+                    "To: %s | Subject: %s\n%s", to, subject, text_body[:1500])
         return False
 
     payload = {"from": MAIL_FROM, "to": [to], "subject": subject,
@@ -70,6 +99,48 @@ def send(to: str, subject: str, html_body: str, text_body: str,
         return True
     except Exception as exc:
         log.warning("Email send failed: %s", exc)
+        return False
+
+
+def _send_smtp(to: str, subject: str, html_body: str, text_body: str,
+               unsubscribe_url: str = None) -> bool:
+    """The same message over SMTP. Multipart alternative - plain text first,
+    HTML second - because a mail client picks the last part it understands,
+    and a message with no text part is itself a spam signal."""
+    msg = EmailMessage()
+    name, addr = parseaddr(MAIL_FROM)
+    msg["From"] = formataddr((name, addr)) if addr else MAIL_FROM
+    msg["To"] = to
+    msg["Subject"] = subject
+    if unsubscribe_url:
+        msg["List-Unsubscribe"] = f"<{unsubscribe_url}>"
+        msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+    msg.set_content(text_body)
+    msg.add_alternative(html_body, subtype="html")
+
+    try:
+        if SMTP_PORT == 465:
+            server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20,
+                                      context=ssl.create_default_context())
+        else:
+            server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20)
+        with server:
+            if SMTP_PORT != 465:
+                # Upgrade to TLS before authenticating. Without this the
+                # username and password cross the network in the clear.
+                try:
+                    server.starttls(context=ssl.create_default_context())
+                except smtplib.SMTPNotSupportedError:
+                    log.warning("SMTP server %s does not support STARTTLS", SMTP_HOST)
+            if SMTP_USER:
+                server.login(SMTP_USER, SMTP_PASS)
+            server.send_message(msg)
+        return True
+    except Exception as exc:
+        # Logged, never raised: a mail outage must not take the scheduler
+        # down for everyone else, and digest.py reads this False to avoid
+        # marking the events as delivered.
+        log.warning("SMTP send failed via %s: %s", SMTP_HOST, exc)
         return False
 
 
