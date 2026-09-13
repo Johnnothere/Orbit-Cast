@@ -13,10 +13,14 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from flask import Flask, jsonify, make_response, render_template, request
+from flask import Flask, jsonify, make_response, redirect, render_template, request
+from markupsafe import escape
 from security import init_security
 import ai_engine
+import auth
 import db
+import digest
+import mailer
 import rag
 
 log = logging.getLogger("orbitcast.web")
@@ -372,7 +376,197 @@ def privacy_policy():
 # ORBITCAST AI  — Claude-powered CV analysis
 # ─────────────────────────────────────────────
 
+# ─────────────────────────────────────────────
+# ACCOUNTS
+# ─────────────────────────────────────────────
+# The AI is behind a login from here on. The trade-off is real and worth
+# naming: every visitor now has to sign up before seeing what the engine
+# does, which costs conversions. What it buys is a durable profile per
+# person, an email address to send digests to, and one identity across
+# devices instead of a cookie that dies with the browser.
+
+
+@app.route("/api/auth/request", methods=["POST"])
+@limiter.limit("10 per hour")
+def api_auth_request():
+    """Emails a magic link. The response is deliberately identical whether or
+    not the address has an account - anything else turns this endpoint into a
+    way to test who has signed up."""
+    email = auth.normalise_email((request.get_json(silent=True) or {}).get("email"))
+    generic = {"ok": True, "message": "Check your email for a sign-in link."}
+    if not email:
+        return jsonify({"error": "That does not look like an email address."}), 400
+    if not db.is_configured():
+        return jsonify({"error": "Accounts are not available right now."}), 503
+
+    raw = auth.issue_login_token(email)
+    if raw:
+        mailer.send_login_link(email, raw)
+        if not mailer.is_configured():
+            # Local development: with no mail provider the link is logged, so
+            # say so rather than letting someone wait for mail that will
+            # never arrive.
+            log.warning("Mail is not configured - the sign-in link was logged, not sent.")
+    return jsonify(generic)
+
+
+@app.route("/auth/verify", methods=["GET", "POST"])
+@limiter.limit("30 per hour")
+def auth_verify():
+    """The magic-link target. GET confirms, POST signs in.
+
+    The interstitial is not ceremony. Enterprise mail security rewrites and
+    PRE-FETCHES every link in an incoming email (Outlook Safe Links, Proofpoint
+    URL Defense, Mimecast). The token here is single-use by design, so a
+    scanner that fetches it first BURNS it - and the person clicks their own
+    sign-in link and is told it has expired. That failure is silent, blames
+    the user, and is close to impossible to diagnose from support emails.
+
+    This matters more than usual for this audience: government, defence and
+    security organisations are exactly where aggressive link scanning is
+    standard. A scanner cannot submit the form, so the token survives until a
+    human clicks.
+
+    The token is never rendered into readable page text or a link - only into
+    the form action - so it does not leak by referrer or over someone's
+    shoulder in a screenshot."""
+    token = request.args.get("token", "") or (request.form.get("token", "") if request.form else "")
+    if not token:
+        return redirect("/?signin=expired")
+
+    if request.method == "GET":
+        return (f"<!doctype html><meta name='viewport' content='width=device-width,initial-scale=1'>"
+                f"<body style=\"background:#0b1220;color:#e8eefc;font-family:system-ui,sans-serif;"
+                f"padding:48px;line-height:1.6;\">"
+                f"<h1 style='font-size:20px;margin:0 0 .5rem;'>Sign in to OrbitCast</h1>"
+                f"<p style='color:#93a3c0;margin:0 0 1.25rem;'>One more click and you are in.</p>"
+                f"<form method='post' action='/auth/verify'>"
+                f"<input type='hidden' name='token' value='{escape(token)}'>"
+                f"<button style=\"background:#e8eefc;color:#06101f;border:none;border-radius:999px;"
+                f"padding:12px 26px;font-size:15px;font-weight:600;cursor:pointer;\">"
+                f"Sign in</button></form></body>", 200)
+
+    oc_uid = request.cookies.get("oc_uid") or uuid.uuid4().hex
+    account = auth.redeem_login_token(token, oc_uid)
+    if not account:
+        return redirect("/?signin=expired")
+    resp = make_response(redirect("/?signin=ok"))
+    auth.set_session_cookie(resp, account)
+    return resp
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def api_auth_logout():
+    resp = make_response(jsonify({"ok": True}))
+    auth.clear_session_cookie(resp)
+    return resp
+
+
+@app.route("/api/me")
+def api_me():
+    """One call for the whole signed-in state: who, and what alerts they get."""
+    account = auth.current_account()
+    if not account:
+        return jsonify({"signed_in": False})
+    prefs = db.get_digest_prefs(account["id"]) or {}
+    has_profile = bool(db.get_latest_analysis(account["oc_uid"]))
+    return jsonify({
+        "signed_in": True,
+        "email": account["email"],
+        "has_profile": has_profile,
+        "alerts": {
+            "configured": bool(prefs),
+            "frequency": prefs.get("frequency", "weekly"),
+            "interval_days": prefs.get("interval_days", 3),
+            "weekday": prefs.get("weekday", 0),
+            "send_hour": prefs.get("send_hour", 8),
+            "timezone": prefs.get("timezone", digest.DEFAULT_TZ),
+            "paused": prefs.get("paused", True),
+            "next_send_at": prefs["next_send_at"].isoformat() if prefs.get("next_send_at") else None,
+        },
+    })
+
+
+@app.route("/api/digest/prefs", methods=["POST"])
+@auth.login_required
+@limiter.limit("60 per hour")
+def api_digest_prefs():
+    """Saves the alert schedule and computes the next send.
+
+    Storing the profile is what makes matching possible, so enabling alerts
+    records consent for it - the UI says this in as many words next to the
+    control. Without that, a subscriber's digest would silently never have a
+    profile to match against."""
+    account = auth.current_account()
+    if not account:
+        return jsonify({"error": "Sign in first."}), 401
+
+    clean, err = digest.validate_prefs(request.get_json(silent=True) or {})
+    if err:
+        return jsonify({"error": err}), 400
+
+    existing = db.get_digest_prefs(account["id"])
+    unsub = existing["unsub_token"] if existing else uuid.uuid4().hex
+    next_at = None if clean["paused"] else digest.compute_next_send(clean)
+
+    if not clean["paused"] and db.get_consent(account["oc_uid"]) is not True:
+        db.set_consent(account["oc_uid"], True)
+
+    saved = db.upsert_digest_prefs(account["id"], clean["frequency"], clean["interval_days"],
+                                    clean["weekday"], clean["send_hour"], clean["timezone"],
+                                    clean["paused"], next_at, unsub)
+    if not saved:
+        return jsonify({"error": "Could not save that."}), 503
+    return jsonify({"ok": True,
+                     "next_send_at": next_at.isoformat() if next_at else None,
+                     "paused": clean["paused"]})
+
+
+def _plain_page(heading: str, sub: str = "", extra: str = "") -> str:
+    return (f"<!doctype html><meta name='viewport' content='width=device-width,initial-scale=1'>"
+            f"<body style=\"background:#0b1220;color:#e8eefc;font-family:system-ui,sans-serif;"
+            f"padding:48px;line-height:1.6;\"><h1 style='font-size:20px;margin:0 0 .5rem;'>{heading}</h1>"
+            f"<p style='color:#93a3c0;margin:0 0 1.25rem;'>{sub}</p>{extra}"
+            f"<p><a style='color:#6ea8fe;' href='/'>Back to OrbitCast</a></p></body>")
+
+
+@app.route("/unsubscribe", methods=["GET", "POST"])
+@limiter.limit("60 per hour")
+def unsubscribe():
+    """No login required - an unsubscribe that demands a sign-in is an
+    unsubscribe that does not work.
+
+    POST must be accepted, not just GET: the List-Unsubscribe-Post header this
+    app sends tells Gmail and Outlook to POST here when someone uses the mail
+    client's own unsubscribe button. A GET-only route answers that with 405,
+    and the native button silently fails.
+
+    And GET must NOT act on its own. Corporate mail security (Safe Links,
+    Proofpoint, Mimecast) fetches every URL in an incoming email to check it.
+    A GET that unsubscribes would be triggered by the scanner before the
+    person ever saw the message - so GET asks, POST acts."""
+    token = request.args.get("t", "") or (request.form.get("t", "") if request.form else "")
+    if request.method == "GET":
+        if not token:
+            return _plain_page("That unsubscribe link is not valid."), 200
+        form = (f"<form method='post' action='/unsubscribe?t={token}'>"
+                f"<button style=\"background:#e8eefc;color:#06101f;border:none;border-radius:999px;"
+                f"padding:12px 22px;font-size:15px;font-weight:600;cursor:pointer;\">"
+                f"Turn my alerts off</button></form>")
+        return _plain_page("Turn off OrbitCast alerts?",
+                           "One click and we stop emailing you. You can turn them back on "
+                           "any time from your account.", form), 200
+
+    email = db.pause_digest_by_token(token)
+    if not email:
+        return _plain_page("That unsubscribe link is not valid.",
+                           "It may already have been used."), 200
+    return _plain_page("Your OrbitCast alerts are off.",
+                       "Nothing else changes - your account and profile stay as they are."), 200
+
+
 @app.route("/api/analyze", methods=["POST"])
+@auth.login_required
 @limiter.limit("20 per hour")
 def api_analyze():
     file = request.files.get("file")
@@ -462,6 +656,7 @@ def api_my_history():
 
 
 @app.route("/api/analyze/reuse", methods=["POST"])
+@auth.login_required
 @limiter.limit("30 per hour")
 def api_analyze_reuse():
     """Re-scores the caller's own last stored profile against the current
@@ -570,11 +765,17 @@ def api_track():
 @app.route("/api/forget", methods=["POST"])
 @limiter.limit("10 per hour")
 def api_forget():
+    """GDPR delete. Now also removes the account, which cascades to the alert
+    schedule and the send log - otherwise someone who asked to be forgotten
+    would keep receiving email, which is the version of this bug that gets
+    reported to a regulator rather than to us."""
     oc_uid = request.cookies.get("oc_uid")
     if oc_uid:
+        db.delete_account(oc_uid)
         db.forget(oc_uid)
     resp = jsonify({"ok": True})
     resp.set_cookie("oc_uid", "", expires=0)
+    auth.clear_session_cookie(resp)
     return resp
 
 # ─────────────────────────────────────────────
@@ -1123,6 +1324,14 @@ def _refresh_loop():
 # so this fires exactly once.
 logging.basicConfig(level=logging.INFO)
 threading.Thread(target=_refresh_loop, daemon=True).start()
+
+# Email digests. Same single-worker reasoning as the refresh loop above, plus
+# a database claim per send so a restart mid-run cannot double-email anyone.
+digest.start_scheduler(
+    catalog_fn=lambda: load_events_cache().get("events", []),
+    score_fn=lambda profile, level, field, events: ai_engine.score_and_enrich(
+        profile, level, field, events),
+)
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))

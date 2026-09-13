@@ -623,6 +623,75 @@ def _eventbrite_venues(soup):
     return venues
 
 
+# ─────────────────────────────────────────────
+# OFF-TOPIC LISTING FILTER
+# ─────────────────────────────────────────────
+# The listing-site CATEGORY feeds (Eventbrite tech/business/science, AllEvents
+# tech/business/science/startup) are tag matches, not topic filters, and the
+# tags are supplied by whoever posted the event. That is how a house/techno
+# club night at Ministry Of Sound - "Audiowhore | Ministry Of Sound ... House /
+# Tech" - entered the catalog tagged Tech & AI: the word "Tech" in a music
+# genre. A singles night arrived the same way through the science feed.
+#
+# The keyword-aggregate sources (cyber, intel, defence) already defend against
+# this with a positive title filter. The category feeds had no filter at all,
+# which is why they are also the noisiest and largest part of the catalog.
+#
+# This is a NEGATIVE gate, deliberately: a positive one would also drop real
+# events with vague titles ("Founders Breakfast", "October Meetup").
+_OFFTOPIC_TITLE_RE = re.compile(
+    r"\b(club ?night|nightclub|ministry of sound|fabric london|printworks"
+    r"|\brave\b|dj ?set|\bdjs\b|house ?/ ?tech|techno|afrobeats?|amapiano"
+    r"|reggaeton|bashment|garage night|after ?party|launch party|birthday bash"
+    r"|bottomless brunch|boozy brunch|karaoke|open mic|comedy night|stand.?up comedy"
+    r"|pub quiz|speed dating|singles (social|night|party|event)|matchmaking"
+    r"|blind date|sound ?bath|breathwork|tantra|cacao ceremony|ecstatic dance"
+    r"|yoga|pilates|reiki|life drawing|paint ?and ?sip|bingo|silent disco)\b",
+    re.IGNORECASE,
+)
+
+# ...except when the same title also names professional substance. "FeelGood:
+# The Health and Wellness Summit" and "Sports, Fitness & Wellness: Founders,
+# Investment & Innovation" are real founder/investor events that a naive
+# wellness filter would have eaten - which is exactly the over-correction this
+# guard exists to prevent. Precision cuts both ways.
+_PROFESSIONAL_MARKER_RE = re.compile(
+    r"\b(summit|conference|symposium|founders?|investor\w*|investment|venture"
+    r"|startup\w*|\bvc\b|\bb2b\b|keynote|panel|briefing|workshop|hackathon"
+    r"|demo ?day|pitch|expo|forum|masterclass|bootcamp|seminar)\b",
+    re.IGNORECASE,
+)
+
+
+# The venue catches what the title cannot. The club night above was listed
+# twice: once with the full "House / Tech" title, and once as the bare artist
+# name "Audiowhore", which names nothing filterable at all. Its venue field
+# said "Ministry Of Sound" both times. Only dedicated nightclubs belong on
+# this list - Printworks and Village Underground host real conferences, so
+# they stay off it deliberately.
+_OFFTOPIC_VENUE_RE = re.compile(
+    r"\b(ministry of sound|fabric|egg london|corsica studios|xoyo|heaven"
+    r"|electric brixton|o2 academy|koko|ministry|phonox|e1 london"
+    r"|the cause|fold london|drumsheds)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_offtopic_listing(title, location=""):
+    """True for a nightlife/social listing that a category tag dragged in.
+
+    Checks the venue as well as the title: an event posted under the artist's
+    name alone has nothing in its title to match, and the venue is the only
+    field left that says what it actually is."""
+    if not title:
+        return False
+    if _PROFESSIONAL_MARKER_RE.search(title):
+        return False
+    if _OFFTOPIC_TITLE_RE.search(title):
+        return True
+    return bool(location and _OFFTOPIC_VENUE_RE.search(location))
+
+
 def _scrape_eventbrite(category_slug, source_name):
     events = []
     soup = fetch(f"https://www.eventbrite.co.uk/d/united-kingdom--london/{category_slug}/")
@@ -644,11 +713,13 @@ def _scrape_eventbrite(category_slug, source_name):
             text = p.get_text(strip=True)
             if date_re.search(text):
                 date = text; break
-        if is_valid_event(title) and title not in seen_titles:
+        venue = venues.get(href.split("?")[0], "")
+        if (is_valid_event(title) and title not in seen_titles
+                and not _is_offtopic_listing(title, venue)):
             seen_titles.add(title)
             events.append({"title": title, "date": date, "url": href,
                            "source": source_name,
-                           "location": venues.get(href.split("?")[0], "")})
+                           "location": venue})
     got = sum(1 for e in events if e.get("location"))
     log.info(f"{source_name}: {len(events)} events, {got} with a venue "
              f"({len(venues)} venues found on the page)")
@@ -688,7 +759,8 @@ def _scrape_allevents(category, source_name):
                 loc = item.get("location",{})
                 if isinstance(loc, dict):
                     location = loc.get("name","")
-                if is_valid_event(title) and event_url and is_valid_url(event_url):
+                if (is_valid_event(title) and event_url and is_valid_url(event_url)
+                        and not _is_offtopic_listing(title, location)):
                     events.append({"title": title, "date": date, "url": event_url,
                                    "source": source_name, "location": location})
         except (json.JSONDecodeError, TypeError):

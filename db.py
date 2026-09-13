@@ -1363,3 +1363,352 @@ def set_luma_source_status(identifier: str, status: str) -> bool:
     except Exception as exc:
         log.warning(f"set_luma_source_status failed: {exc}")
         return False
+
+
+# --------------------------------------------------------------------------
+# Accounts + passwordless login
+# --------------------------------------------------------------------------
+# An account OWNS an oc_uid rather than replacing it - see the design note at
+# the top of supabase/migrations/009_accounts_and_digests.sql. Everything in
+# this file already keys on oc_uid, so signing up keeps the person's existing
+# analyses instead of orphaning them.
+
+def create_auth_token(email: str, token_hash: str, expires_at) -> bool:
+    """Stores the SHA-256 of a magic-link token. The raw token exists only in
+    the email that was just sent."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                "insert into auth_tokens (token_hash, email, expires_at) values (%s, %s, %s)",
+                (token_hash, email.strip().lower(), expires_at),
+            )
+            return True
+    except Exception as exc:
+        log.warning(f"create_auth_token failed: {exc}")
+        return False
+
+
+def consume_auth_token(token_hash: str):
+    """Single use: marks the token used and returns its email, or None if it
+    is unknown, expired, or already spent. The update's own where-clause is
+    what makes it single-use - checking then updating would race."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute(
+                """
+                update auth_tokens set used_at = now()
+                where token_hash = %s and used_at is null and expires_at > now()
+                returning email
+                """,
+                (token_hash,),
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
+    except Exception as exc:
+        log.warning(f"consume_auth_token failed: {exc}")
+        return None
+
+
+def purge_expired_auth_tokens() -> int:
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return 0
+            cur.execute("delete from auth_tokens where expires_at < now() - interval '1 day'")
+            return cur.rowcount or 0
+    except Exception as exc:
+        log.warning(f"purge_expired_auth_tokens failed: {exc}")
+        return 0
+
+
+def get_or_create_account(email: str, oc_uid: str):
+    """Returns the account for `email`, creating it against the CALLER'S
+    current oc_uid if it does not exist.
+
+    That oc_uid argument is the whole point: a first-time signup adopts the
+    browser's existing anonymous id, so the analyses already sitting under it
+    become the account's history. A returning login ignores it and returns the
+    stored one, which the caller then re-issues as the cookie."""
+    email = (email or "").strip().lower()
+    if not email or not oc_uid:
+        return None
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute(
+                "select id, email, oc_uid, created_at from accounts where lower(email) = %s",
+                (email,),
+            )
+            row = cur.fetchone()
+            if row:
+                cur.execute("update accounts set last_login_at = now() where id = %s", (row[0],))
+                return {"id": row[0], "email": row[1], "oc_uid": row[2], "is_new": False}
+            cur.execute(
+                """
+                insert into accounts (email, oc_uid, last_login_at)
+                values (%s, %s, now())
+                on conflict (oc_uid) do update set email = excluded.email,
+                                                   last_login_at = now()
+                returning id, email, oc_uid
+                """,
+                (email, oc_uid),
+            )
+            new = cur.fetchone()
+            return {"id": new[0], "email": new[1], "oc_uid": new[2], "is_new": True}
+    except Exception as exc:
+        log.warning(f"get_or_create_account failed: {exc}")
+        return None
+
+
+def get_account(account_id):
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute(
+                "select id, email, oc_uid, created_at from accounts where id = %s",
+                (account_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            return {"id": row[0], "email": row[1], "oc_uid": row[2], "created_at": _iso(row[3])}
+    except Exception as exc:
+        log.warning(f"get_account failed: {exc}")
+        return None
+
+
+def delete_account(oc_uid: str) -> bool:
+    """Part of the GDPR delete. Cascades to digest_prefs and digest_sends."""
+    if not oc_uid:
+        return False
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute("delete from accounts where oc_uid = %s", (oc_uid,))
+            return True
+    except Exception as exc:
+        log.warning(f"delete_account failed: {exc}")
+        return False
+
+
+# --------------------------------------------------------------------------
+# Digest preferences + send log
+# --------------------------------------------------------------------------
+_DIGEST_COLS = ("account_id, frequency, interval_days, weekday, send_hour, "
+                "timezone, paused, next_send_at, unsub_token")
+
+
+def _digest_row(row):
+    if not row:
+        return None
+    return {"account_id": row[0], "frequency": row[1], "interval_days": row[2],
+            "weekday": row[3], "send_hour": row[4], "timezone": row[5],
+            "paused": row[6], "next_send_at": row[7], "unsub_token": row[8]}
+
+
+def get_digest_prefs(account_id):
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute(f"select {_DIGEST_COLS} from digest_prefs where account_id = %s",
+                        (account_id,))
+            return _digest_row(cur.fetchone())
+    except Exception as exc:
+        log.warning(f"get_digest_prefs failed: {exc}")
+        return None
+
+
+def upsert_digest_prefs(account_id, frequency, interval_days, weekday, send_hour,
+                         tz, paused, next_send_at, unsub_token):
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute(
+                f"""
+                insert into digest_prefs (account_id, frequency, interval_days, weekday,
+                                          send_hour, timezone, paused, next_send_at, unsub_token)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                on conflict (account_id) do update set
+                    frequency = excluded.frequency,
+                    interval_days = excluded.interval_days,
+                    weekday = excluded.weekday,
+                    send_hour = excluded.send_hour,
+                    timezone = excluded.timezone,
+                    paused = excluded.paused,
+                    next_send_at = excluded.next_send_at,
+                    updated_at = now()
+                returning {_DIGEST_COLS}
+                """,
+                (account_id, frequency, interval_days, weekday, send_hour, tz,
+                 paused, next_send_at, unsub_token),
+            )
+            return _digest_row(cur.fetchone())
+    except Exception as exc:
+        log.warning(f"upsert_digest_prefs failed: {exc}")
+        return None
+
+
+def set_next_send_at(account_id, next_send_at) -> bool:
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute("update digest_prefs set next_send_at = %s where account_id = %s",
+                        (next_send_at, account_id))
+            return True
+    except Exception as exc:
+        log.warning(f"set_next_send_at failed: {exc}")
+        return False
+
+
+def due_digests(limit: int = 200):
+    """Subscriptions whose send time has passed. Joined to the account so the
+    scheduler has the email and oc_uid without a second round trip."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return []
+            cur.execute(
+                f"""
+                select {_DIGEST_COLS}, a.email, a.oc_uid
+                from digest_prefs d join accounts a on a.id = d.account_id
+                where d.paused = false
+                  and d.next_send_at is not null
+                  and d.next_send_at <= now()
+                order by d.next_send_at asc
+                limit %s
+                """,
+                (limit,),
+            )
+            out = []
+            for row in cur.fetchall():
+                prefs = _digest_row(row[:9])
+                prefs["email"] = row[9]
+                prefs["oc_uid"] = row[10]
+                out.append(prefs)
+            return out
+    except Exception as exc:
+        log.warning(f"due_digests failed: {exc}")
+        return []
+
+
+def pause_digest_by_token(unsub_token: str):
+    """One-click unsubscribe. Returns the email it paused, or None."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute(
+                """
+                update digest_prefs d set paused = true, updated_at = now()
+                from accounts a
+                where a.id = d.account_id and d.unsub_token = %s
+                returning a.email
+                """,
+                (unsub_token,),
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
+    except Exception as exc:
+        log.warning(f"pause_digest_by_token failed: {exc}")
+        return None
+
+
+def claim_digest_period(account_id, period_key: str) -> bool:
+    """Reserves this account's slot for this period BEFORE the email is sent.
+
+    The unique index on (account_id, period_key) means the second caller loses
+    - which is exactly what stops a restart mid-run, or two workers, from
+    emailing the same person twice. Sending first and recording after would
+    invert that guarantee into a double-send."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                """
+                insert into digest_sends (account_id, period_key, status)
+                values (%s, %s, 'claimed')
+                on conflict (account_id, period_key) do nothing
+                returning id
+                """,
+                (account_id, period_key),
+            )
+            return cur.fetchone() is not None
+    except Exception as exc:
+        log.warning(f"claim_digest_period failed: {exc}")
+        return False
+
+
+def finish_digest_send(account_id, period_key: str, status: str,
+                        event_ids: list = None, match_count: int = 0) -> bool:
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                """
+                update digest_sends
+                set status = %s, event_ids = %s, match_count = %s, sent_at = now()
+                where account_id = %s and period_key = %s
+                """,
+                (status, list(event_ids or []), match_count, account_id, period_key),
+            )
+            return True
+    except Exception as exc:
+        log.warning(f"finish_digest_send failed: {exc}")
+        return False
+
+
+def recently_sent_event_ids(account_id, days: int = 45):
+    """Event ids already emailed to this account. The digest excludes these,
+    which is what stops every send being a re-run of the last one."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return set()
+            cur.execute(
+                """
+                select event_ids from digest_sends
+                where account_id = %s and sent_at > now() - (%s || ' days')::interval
+                """,
+                (account_id, int(days)),
+            )
+            out = set()
+            for (ids,) in cur.fetchall():
+                out.update(ids or [])
+            return out
+    except Exception as exc:
+        log.warning(f"recently_sent_event_ids failed: {exc}")
+        return set()
+
+
+def last_empty_digest_at(account_id):
+    """When this account was last told 'nothing worth your time'. Used to stop
+    a daily subscriber getting an empty email every single day."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute(
+                """
+                select sent_at from digest_sends
+                where account_id = %s and status = 'sent_empty'
+                order by sent_at desc limit 1
+                """,
+                (account_id,),
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
+    except Exception as exc:
+        log.warning(f"last_empty_digest_at failed: {exc}")
+        return None

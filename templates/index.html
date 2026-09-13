@@ -305,6 +305,37 @@ h1,h2,h3,h4{font-family:'Space Grotesk',sans-serif;letter-spacing:-.02em;}
    thick material (most blur, most tint, strongest specular edge); the
    scroll-driven .solid class now only deepens its cast shadow - the
    "scroll edge" effect - instead of switching a flat veil on and off. */
+/* ── account + alerts modal ─────────────────────────────────────────── */
+.acct-backdrop{position:fixed;inset:0;z-index:2600;display:none;align-items:center;justify-content:center;
+  padding:1.25rem;background:oklch(0.12 0.04 265/0.72);backdrop-filter:blur(6px);}
+.acct-backdrop.show{display:flex;}
+.acct-modal{width:100%;max-width:30rem;max-height:88vh;overflow-y:auto;border-radius:var(--radius);
+  background:var(--background);border:1px solid var(--hairline);padding:1.6rem;position:relative;}
+.acct-modal h3{margin:0 0 .35rem;font-family:'Space Grotesk',sans-serif;font-size:1.2rem;color:var(--foreground);}
+.acct-modal p.acct-sub{margin:0 0 1.1rem;color:var(--muted-foreground);font-size:.85rem;line-height:1.55;}
+.acct-close{position:absolute;top:.85rem;right:1rem;background:none;border:none;cursor:pointer;
+  color:var(--muted-foreground);font-size:1.35rem;line-height:1;}
+.acct-field{display:block;margin:0 0 .9rem;}
+.acct-field > span{display:block;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--muted-foreground);margin-bottom:.4rem;}
+.acct-input,.acct-select{width:100%;padding:.7rem .85rem;border-radius:var(--r-nested);
+  background:var(--surface);border:1px solid var(--hairline);color:var(--foreground);
+  font-family:inherit;font-size:.9rem;}
+.acct-input:focus,.acct-select:focus{outline:2px solid var(--ring);outline-offset:1px;}
+.acct-btn{width:100%;padding:.75rem 1rem;border-radius:999px;border:none;cursor:pointer;
+  background:var(--primary);color:var(--primary-foreground);font-weight:600;font-size:.9rem;}
+.acct-btn:disabled{opacity:.55;cursor:not-allowed;}
+.acct-btn.ghost{background:transparent;border:1px solid var(--hairline);color:var(--foreground);margin-top:.6rem;}
+.acct-msg{margin:.8rem 0 0;font-size:.85rem;line-height:1.5;min-height:1.1rem;}
+.acct-msg.ok{color:var(--ok);} .acct-msg.err{color:var(--destructive);}
+.acct-freqs{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.9rem;}
+.acct-freq{flex:1 1 6rem;padding:.6rem .5rem;border-radius:var(--r-nested);cursor:pointer;text-align:center;
+  background:var(--surface);border:1px solid var(--hairline);color:var(--muted-foreground);font-size:.82rem;}
+.acct-freq.active{background:var(--elevated);color:var(--foreground);border-color:var(--ring);}
+.acct-row{display:flex;gap:.6rem;}
+.acct-row > *{flex:1;}
+.acct-next{margin:.9rem 0 0;font-size:.8rem;color:var(--muted-foreground);}
+.acct-consent{margin:.75rem 0 0;font-size:.76rem;line-height:1.5;color:var(--muted-foreground);}
 header.nav{position:fixed;inset-inline:0;top:.75rem;z-index:50;display:flex;justify-content:center;
   padding-inline:1rem;pointer-events:none;}
 .nav-inner{pointer-events:auto;display:flex;width:100%;max-width:50rem;align-items:center;
@@ -963,6 +994,7 @@ footer.site{border-top:1px solid var(--hairline);}
       <button class="nav-link" id="tabEvents" onclick="switchView('events')">Events</button>
       <button class="nav-link" id="tabCalendar" onclick="switchView('calendar')">Calendar</button>
       <button class="nav-link" id="tabHackathons" onclick="switchView('hackathons')">Hackathons</button>
+      <button class="nav-link" id="navAccount" onclick="openAccount()">Sign in</button>
       <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" aria-label="Switch between day and night theme">&#9728;</button>
       <button class="nav-cta sheen" id="navCta" onclick="scrollToConsole()">BEGIN</button>
     </div>
@@ -1179,7 +1211,73 @@ footer.site{border-top:1px solid var(--hairline);}
       </div>
     </div>
 
-    <div id="aiSteps" style="display:none"></div>
+    <!-- ============ ACCOUNT + ALERTS ============ -->
+<div class="acct-backdrop" id="acctBackdrop" onclick="if(event.target===this)closeAccount()">
+  <div class="acct-modal card-lux" role="dialog" aria-modal="true" aria-labelledby="acctTitle">
+    <button class="acct-close" onclick="closeAccount()" aria-label="Close">&times;</button>
+
+    <!-- signed out -->
+    <div id="acctOut">
+      <h3 id="acctTitle">Sign in</h3>
+      <p class="acct-sub">No password. We email you a link that signs you in and expires in
+        20 minutes. An account is what lets the engine remember your profile and send you
+        events as they appear.</p>
+      <label class="acct-field"><span>Email</span>
+        <input class="acct-input" id="acctEmail" type="email" autocomplete="email"
+               placeholder="you@example.com" onkeydown="if(event.key==='Enter')requestLink()">
+      </label>
+      <button class="acct-btn" id="acctSendBtn" onclick="requestLink()">Email me a sign-in link</button>
+      <p class="acct-msg" id="acctMsg"></p>
+    </div>
+
+    <!-- signed in -->
+    <div id="acctIn" style="display:none">
+      <h3>Event alerts</h3>
+      <p class="acct-sub">Signed in as <b id="acctWho"></b>. Choose how often we check the
+        catalog against your profile and email you what fits.</p>
+
+      <div class="acct-freqs">
+        <div class="acct-freq" data-freq="daily"        onclick="setFreq('daily')">Daily</div>
+        <div class="acct-freq" data-freq="every_n_days" onclick="setFreq('every_n_days')">Every few days</div>
+        <div class="acct-freq" data-freq="weekly"       onclick="setFreq('weekly')">Weekly</div>
+      </div>
+
+      <label class="acct-field" id="acctIntervalWrap" style="display:none"><span>How many days apart</span>
+        <select class="acct-select" id="acctInterval"></select>
+      </label>
+
+      <label class="acct-field" id="acctWeekdayWrap" style="display:none"><span>Which day</span>
+        <select class="acct-select" id="acctWeekday">
+          <option value="0">Monday</option><option value="1">Tuesday</option>
+          <option value="2">Wednesday</option><option value="3">Thursday</option>
+          <option value="4">Friday</option><option value="5">Saturday</option>
+          <option value="6">Sunday</option>
+        </select>
+      </label>
+
+      <div class="acct-row">
+        <label class="acct-field"><span>Time</span>
+          <select class="acct-select" id="acctHour"></select>
+        </label>
+        <label class="acct-field"><span>Alerts</span>
+          <select class="acct-select" id="acctPaused">
+            <option value="off">On</option><option value="on">Paused</option>
+          </select>
+        </label>
+      </div>
+
+      <button class="acct-btn" id="acctSaveBtn" onclick="saveAlerts()">Save</button>
+      <button class="acct-btn ghost" onclick="signOut()">Sign out</button>
+      <p class="acct-next" id="acctNext"></p>
+      <p class="acct-msg" id="acctMsg2"></p>
+      <p class="acct-consent">Turning alerts on stores the profile from your last analysis so
+        events can be matched to it. You can pause any time, and &ldquo;forget me&rdquo; still
+        deletes everything, alerts included.</p>
+    </div>
+  </div>
+</div>
+
+<div id="aiSteps" style="display:none"></div>
     <div id="aiResults"></div>
   </section>
 
@@ -1940,6 +2038,11 @@ function refineAI(){
 async function submitAI(extra){
   const input=document.getElementById('aiInput').value.trim();
   if(!cvFileData&&input.length<10){toast('Upload a CV or tell us a bit about yourself');return;}
+  // Checked here as well as server-side: uploading a CV, waiting through the
+  // analysis and THEN being told to sign in wastes both the upload and the
+  // person's patience.
+  if(!ME.signed_in)await loadMe();
+  if(!ME.signed_in){toast('Sign in first — your profile is saved to your account');openAccount();return;}
   // `extra` arrives only from refineAI(). Guard the type — submitAI is also wired
   // straight to an onclick, which would otherwise hand us a MouseEvent.
   const answers=(typeof extra==='string')?extra.trim():'';
@@ -1963,7 +2066,11 @@ async function submitAI(extra){
     if(text)form.append('text',text);
     const res=await fetch('/api/analyze',{method:'POST',body:form});
     const data=await res.json();
-    if(!res.ok){toast(data.error||'Something went wrong');document.getElementById('aiResults').innerHTML='';return;}
+    if(!res.ok){
+      if(res.status===401||data.reason==='auth_required')handleAuthFailure();
+      else toast(data.error||'Something went wrong');
+      document.getElementById('aiResults').innerHTML='';return;
+    }
     renderAIResults(data);
   }catch(err){toast('Failed: '+err.message);document.getElementById('aiResults').innerHTML='';}
   finally{
@@ -2289,7 +2396,11 @@ async function reuseProfile(){
   try{
     const res=await fetch('/api/analyze/reuse',{method:'POST'});
     const data=await res.json();
-    if(!res.ok){toast(data.error||'Something went wrong');document.getElementById('aiResults').innerHTML='';return;}
+    if(!res.ok){
+      if(res.status===401||data.reason==='auth_required')handleAuthFailure();
+      else toast(data.error||'Something went wrong');
+      document.getElementById('aiResults').innerHTML='';return;
+    }
     renderAIResults(data);
   }catch(err){toast('Failed: '+err.message);document.getElementById('aiResults').innerHTML='';}
 }
@@ -2410,6 +2521,144 @@ window.addEventListener('scroll',()=>{
 },{passive:true});
 
 // ── BOOT ────────────────────────────────────────────────
+
+// ── ACCOUNT + ALERTS ────────────────────────────────────────────────────
+// One /api/me call answers "who is this" and "what alerts do they get", so
+// the modal never renders a half-known state.
+let ME={signed_in:false},acctFreq='weekly';
+
+async function loadMe(){
+  try{
+    const r=await fetch('/api/me');
+    ME=await r.json();
+  }catch(e){ME={signed_in:false};}
+  const btn=document.getElementById('navAccount');
+  if(btn)btn.textContent=ME.signed_in?'Account':'Sign in';
+  return ME;
+}
+
+function openAccount(){
+  const back=document.getElementById('acctBackdrop');
+  document.getElementById('acctOut').style.display=ME.signed_in?'none':'block';
+  document.getElementById('acctIn').style.display=ME.signed_in?'block':'none';
+  if(ME.signed_in)fillAlerts();
+  back.classList.add('show');
+  const focus=ME.signed_in?null:document.getElementById('acctEmail');
+  if(focus)setTimeout(()=>focus.focus(),50);
+}
+function closeAccount(){document.getElementById('acctBackdrop').classList.remove('show');}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeAccount();});
+
+async function requestLink(){
+  const email=document.getElementById('acctEmail').value.trim();
+  const msg=document.getElementById('acctMsg');
+  const btn=document.getElementById('acctSendBtn');
+  msg.className='acct-msg';msg.textContent='Sending…';btn.disabled=true;
+  try{
+    const r=await fetch('/api/auth/request',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+    const d=await r.json();
+    if(!r.ok){msg.className='acct-msg err';msg.textContent=d.error||'Could not send that.';}
+    else{msg.className='acct-msg ok';msg.textContent=d.message||'Check your email.';}
+  }catch(e){msg.className='acct-msg err';msg.textContent='Network error — try again.';}
+  btn.disabled=false;
+}
+
+function setFreq(f){
+  acctFreq=f;
+  document.querySelectorAll('.acct-freq').forEach(el=>
+    el.classList.toggle('active',el.dataset.freq===f));
+  document.getElementById('acctIntervalWrap').style.display=(f==='every_n_days')?'block':'none';
+  document.getElementById('acctWeekdayWrap').style.display=(f==='weekly')?'block':'none';
+}
+
+function fillAlerts(){
+  const a=ME.alerts||{};
+  document.getElementById('acctWho').textContent=ME.email||'';
+  const iv=document.getElementById('acctInterval');
+  if(!iv.options.length){
+    for(let i=2;i<=30;i++)iv.add(new Option(i+' days',i));
+    const hr=document.getElementById('acctHour');
+    for(let h=0;h<24;h++)hr.add(new Option(String(h).padStart(2,'0')+':00',h));
+  }
+  setFreq(a.frequency||'weekly');
+  iv.value=a.interval_days||3;
+  document.getElementById('acctWeekday').value=a.weekday||0;
+  document.getElementById('acctHour').value=(a.send_hour===0||a.send_hour)?a.send_hour:8;
+  // An account that has never saved settings starts paused, so nobody is
+  // opted into email they did not ask for.
+  document.getElementById('acctPaused').value=(a.configured&&!a.paused)?'off':'on';
+  renderNext(a.next_send_at);
+  const m=document.getElementById('acctMsg2');
+  if(!ME.has_profile){
+    m.className='acct-msg';
+    m.textContent='Run an analysis first — alerts match against your saved profile.';
+  }else{m.textContent='';}
+}
+
+function renderNext(iso){
+  const el=document.getElementById('acctNext');
+  if(!iso){el.textContent='';return;}
+  const d=new Date(iso);
+  el.textContent='Next alert: '+d.toLocaleString(undefined,
+    {weekday:'long',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+}
+
+async function saveAlerts(){
+  const msg=document.getElementById('acctMsg2');
+  const btn=document.getElementById('acctSaveBtn');
+  msg.className='acct-msg';msg.textContent='Saving…';btn.disabled=true;
+  const body={
+    frequency:acctFreq,
+    interval_days:parseInt(document.getElementById('acctInterval').value||'3',10),
+    weekday:parseInt(document.getElementById('acctWeekday').value||'0',10),
+    send_hour:parseInt(document.getElementById('acctHour').value||'8',10),
+    // The browser knows the timezone; asking the person to pick one from a
+    // list of 400 is a worse version of the same answer.
+    timezone:(Intl.DateTimeFormat().resolvedOptions().timeZone)||'Europe/London',
+    paused:document.getElementById('acctPaused').value==='on'
+  };
+  try{
+    const r=await fetch('/api/digest/prefs',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();
+    if(!r.ok){msg.className='acct-msg err';msg.textContent=d.error||'Could not save.';}
+    else{
+      msg.className='acct-msg ok';
+      msg.textContent=d.paused?'Alerts paused.':'Saved.';
+      renderNext(d.next_send_at);
+      await loadMe();
+    }
+  }catch(e){msg.className='acct-msg err';msg.textContent='Network error — try again.';}
+  btn.disabled=false;
+}
+
+async function signOut(){
+  try{await fetch('/api/auth/logout',{method:'POST'});}catch(e){}
+  ME={signed_in:false};
+  closeAccount();
+  await loadMe();
+  toast('Signed out');
+}
+
+function handleAuthFailure(){
+  ME={signed_in:false};
+  loadMe().then(openAccount);
+  toast('Sign in to run the analysis');
+}
+
+// Landing back from the emailed link.
+(function signinBanner(){
+  const p=new URLSearchParams(location.search);
+  const s=p.get('signin');
+  if(!s)return;
+  setTimeout(()=>{
+    if(s==='ok')toast('Signed in');
+    if(s==='expired')toast('That sign-in link has expired — request another');
+  },400);
+  history.replaceState({},'',location.pathname);
+})();
+
 (function boot(){
   renderTicker();
   startHeroClock();
@@ -2427,6 +2676,10 @@ window.addEventListener('scroll',()=>{
   fetchEvents();
   setInterval(fetchEvents,30*60*1000);
   initConsent();
+  // Resolve the signed-in state on every load, not just when something asks
+  // for it: without this the nav says "Sign in" to someone who already is,
+  // which is what a browser test caught here.
+  loadMe();
   // Establish the CV-vs-text lock from whatever state the page loads in
   // (a browser restoring a typed value on back/refresh, for instance).
   syncIntakeLock();
