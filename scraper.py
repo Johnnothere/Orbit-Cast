@@ -639,8 +639,20 @@ def _eventbrite_venues(soup):
 #
 # This is a NEGATIVE gate, deliberately: a positive one would also drop real
 # events with vague titles ("Founders Breakfast", "October Meetup").
+# Second pass, from the live catalog after the first version shipped. Three
+# survivors, all the same shape: a club night whose title names a genre, a
+# promoter or a party rather than anything filterable in the first list.
+#
+# Deliberately NOT adding a bare \bparty\b, tempting as it looks. The live
+# sweep that found these also flagged "Founder Nation: Christmas Party",
+# "The Pre Pitch Party" and "Trusted Third-Party AI Assurance Roadmap" - two
+# real founder events and an AI governance talk whose only crime is the
+# word "Third-Party". A filter that eats those to catch a street party is a
+# worse filter. Name the actual patterns instead.
 _OFFTOPIC_TITLE_RE = re.compile(
     r"\b(club ?night|nightclub|ministry of sound|fabric london|printworks"
+    r"|boiler ?room|bass ?face|\bukg\b|uk garage|drum ?(and|&) ?bass|\bdnb\b"
+    r"|street party|block party|freshers|all day long"
     r"|\brave\b|dj ?set|\bdjs\b|house ?/ ?tech|techno|afrobeats?|amapiano"
     r"|reggaeton|bashment|garage night|after ?party|launch party|birthday bash"
     r"|bottomless brunch|boozy brunch|karaoke|open mic|comedy night|stand.?up comedy"
@@ -672,7 +684,11 @@ _PROFESSIONAL_MARKER_RE = re.compile(
 _OFFTOPIC_VENUE_RE = re.compile(
     r"\b(ministry of sound|fabric|egg london|corsica studios|xoyo|heaven"
     r"|electric brixton|o2 academy|koko|ministry|phonox|e1 london"
-    r"|the cause|fold london|drumsheds)\b",
+    r"|the cause|fold london|drumsheds|studio 338|steel yard"
+    # Generic, and worth more than any name list: a venue that calls itself
+    # a nightclub is not hosting a security briefing. "The Steel Yard
+    # Nightclub" is how the third survivor identified itself.
+    r"|night ?club)\b",
     re.IGNORECASE,
 )
 
