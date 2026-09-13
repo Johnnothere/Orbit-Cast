@@ -1,21 +1,30 @@
 """
 ORBITCAST — outbound email.
 
-TWO WAYS TO SEND, because the right one depends on whether you own a domain
-yet, and that should not be a code change:
+THREE WAYS TO SEND, because the right one depends on what you own and where
+you host, and neither should be a code change:
 
   1. Resend (HTTPS API) - set RESEND_API_KEY. Needs a domain you control and
      have verified. Best deliverability; what you want once you have one.
-  2. Any SMTP server - set SMTP_HOST/SMTP_USER/SMTP_PASS. Works with Gmail,
-     Brevo, Mailgun, SMTP2GO. No domain required if the provider lets you
-     verify a single address instead.
+  2. Mailjet (HTTPS API) - set MAILJET_API_KEY/MAILJET_SECRET_KEY. Mailjet
+     validates a SINGLE SENDER ADDRESS by emailing it a link, so this one
+     works with no domain at all.
+  3. Any SMTP server - set SMTP_HOST/SMTP_USER/SMTP_PASS.
 
-Resend wins if both are set. With neither, the app still runs and every email
-is logged instead - which is also how you develop login locally: the magic
-link appears in the console.
+WHY TWO HTTPS OPTIONS AND NOT JUST SMTP: Railway disables outbound SMTP
+(ports 25/465/587/2525) on its Free, Trial and Hobby plans, deliberately, to
+stop spam. On those plans no SMTP credentials will ever work - the packets
+do not leave the box. An HTTPS API is port 443 like any other request, so it
+is unaffected. That is the whole reason path 2 exists.
+
+First configured wins, in the order above. With none, the app still runs and
+every email is logged instead - which is also how you develop login locally:
+the magic link appears in the console.
 
 Env:
-  RESEND_API_KEY   enables the HTTPS path
+  RESEND_API_KEY   enables the Resend path
+  MAILJET_API_KEY  } enables the Mailjet path - both are required, they are
+  MAILJET_SECRET_KEY } the public/private pair from the Mailjet dashboard
   SMTP_HOST        enables the SMTP path (e.g. smtp.gmail.com,
                    smtp-relay.brevo.com)
   SMTP_PORT        default 587 (STARTTLS). 465 switches to implicit TLS.
@@ -45,6 +54,8 @@ import requests
 log = logging.getLogger("orbitcast.mail")
 
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+MAILJET_API_KEY = os.environ.get("MAILJET_API_KEY", "")
+MAILJET_SECRET_KEY = os.environ.get("MAILJET_SECRET_KEY", "")
 SMTP_HOST = os.environ.get("SMTP_HOST", "")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587") or 587)
 SMTP_USER = os.environ.get("SMTP_USER", "")
@@ -63,7 +74,7 @@ BRAND_ACCENT = "#6ea8fe"
 
 
 def is_configured() -> bool:
-    return bool(RESEND_API_KEY or SMTP_HOST)
+    return bool(RESEND_API_KEY or (MAILJET_API_KEY and MAILJET_SECRET_KEY) or SMTP_HOST)
 
 
 def send(to: str, subject: str, html_body: str, text_body: str,
@@ -72,12 +83,15 @@ def send(to: str, subject: str, html_body: str, text_body: str,
     a failed digest must not take down the scheduler for everyone else."""
     if not to:
         return False
-    if not RESEND_API_KEY and SMTP_HOST:
-        return _send_smtp(to, subject, html_body, text_body, unsubscribe_url)
-
     if not RESEND_API_KEY:
-        log.warning("EMAIL NOT SENT (no RESEND_API_KEY and no SMTP_HOST). "
-                    "To: %s | Subject: %s\n%s", to, subject, text_body[:1500])
+        if MAILJET_API_KEY and MAILJET_SECRET_KEY:
+            return _send_mailjet(to, subject, html_body, text_body, unsubscribe_url)
+        if SMTP_HOST:
+            return _send_smtp(to, subject, html_body, text_body, unsubscribe_url)
+        log.warning("EMAIL NOT SENT (no mail provider configured: set "
+                    "RESEND_API_KEY, or MAILJET_API_KEY + MAILJET_SECRET_KEY, "
+                    "or SMTP_HOST). To: %s | Subject: %s\n%s",
+                    to, subject, text_body[:1500])
         return False
 
     payload = {"from": MAIL_FROM, "to": [to], "subject": subject,
@@ -99,6 +113,53 @@ def send(to: str, subject: str, html_body: str, text_body: str,
         return True
     except Exception as exc:
         log.warning("Email send failed: %s", exc)
+        return False
+
+
+def _send_mailjet(to: str, subject: str, html_body: str, text_body: str,
+                  unsubscribe_url: str = None) -> bool:
+    """Mailjet Send API v3.1. HTTPS on 443, so it works on hosts that block
+    SMTP - which is every Railway plan below Pro.
+
+    The sender address has to be one you have validated in Mailjet, but
+    validation there is per-ADDRESS: they email it a link, you click it. No
+    DNS, no domain. That is what makes this the option when you do not own a
+    domain yet."""
+    name, addr = parseaddr(MAIL_FROM)
+    message = {
+        "From": {"Email": addr or MAIL_FROM, "Name": name or "OrbitCast"},
+        "To": [{"Email": to}],
+        "Subject": subject,
+        "TextPart": text_body,
+        "HTMLPart": html_body,
+    }
+    if unsubscribe_url:
+        message["Headers"] = {
+            "List-Unsubscribe": f"<{unsubscribe_url}>",
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        }
+    try:
+        r = requests.post("https://api.mailjet.com/v3.1/send",
+                          json={"Messages": [message]}, timeout=20,
+                          auth=(MAILJET_API_KEY, MAILJET_SECRET_KEY))
+        if r.status_code >= 300:
+            log.warning("Mailjet refused (%s): %s", r.status_code, r.text[:300])
+            return False
+        # A 200 is not automatically a success here: Mailjet reports
+        # per-message status inside the body, so a single bad recipient comes
+        # back 200 with Status "error". Reading only the HTTP code would
+        # record a silent failure as a delivered digest.
+        try:
+            results = (r.json() or {}).get("Messages") or []
+            if results and results[0].get("Status") != "success":
+                log.warning("Mailjet did not accept the message: %s",
+                            str(results[0])[:300])
+                return False
+        except ValueError:
+            pass
+        return True
+    except Exception as exc:
+        log.warning("Mailjet send failed: %s", exc)
         return False
 
 
