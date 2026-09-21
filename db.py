@@ -316,6 +316,103 @@ def get_raw_file(analysis_id):
         return None
 
 
+def get_cv_status(oc_uid: str):
+    """What this person currently has on file, for the account modal.
+
+    Reports the two things separately because they are deleted separately and
+    have different retention meaning: the ORIGINAL uploaded file (bytes, in
+    raw_files) and the EXTRACTED TEXT (cv_text, on analyses). A text-only
+    submission - someone who typed a self-description instead of uploading -
+    has text and no file, and must not be reported as "no CV on file".
+
+    Counts rather than a boolean so the UI can say how many uploads are held,
+    which is the honest number: every analysis stores its own row, so someone
+    who ran five analyses has five stored files, not one."""
+    if not oc_uid:
+        return None
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute(
+                """
+                select
+                  count(rf.id)                                   as file_count,
+                  coalesce(sum(rf.size_bytes), 0)                as total_bytes,
+                  max(rf.created_at)                             as last_file_at,
+                  (select max(a2.created_at) from analyses a2
+                    where a2.oc_uid = %s and a2.cv_text is not null
+                      and a2.cv_text <> '')                      as last_text_at,
+                  (select rf2.filename from raw_files rf2
+                     join analyses a3 on a3.id = rf2.analysis_id
+                    where a3.oc_uid = %s
+                    order by rf2.created_at desc limit 1)        as last_filename
+                from raw_files rf
+                join analyses a on a.id = rf.analysis_id
+                where a.oc_uid = %s
+                """,
+                (oc_uid, oc_uid, oc_uid),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return {"file_count": 0, "total_bytes": 0, "last_file_at": None,
+                        "last_text_at": None, "last_filename": None}
+            return {"file_count": row[0] or 0,
+                    "total_bytes": int(row[1] or 0),
+                    "last_file_at": _iso(row[2]),
+                    "last_text_at": _iso(row[3]),
+                    "last_filename": row[4]}
+    except Exception as exc:
+        log.warning(f"get_cv_status failed: {exc}")
+        return None
+
+
+def delete_stored_cv(oc_uid: str):
+    """Deletes this person's stored CV material without touching their account.
+
+    Removes the raw uploaded files outright and blanks cv_text, but KEEPS the
+    derived `profile` jsonb. That split is deliberate: profile is what
+    /api/analyze/reuse and every scheduled digest match against, so deleting
+    it would silently stop someone's alerts as a side effect of a button that
+    said "delete my CV". /api/forget remains the delete-everything path, and
+    the UI says which is which.
+
+    Returns {"files_deleted", "texts_cleared"} so the route can report what
+    actually happened rather than a bare ok - "deleted" when there was nothing
+    to delete is the kind of reassurance that hides a bug."""
+    if not oc_uid:
+        return None
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            # Scoped by a join back to analyses.oc_uid, never by an id handed
+            # in by the caller - the same own-data-only rule as get_raw_file's
+            # callers, enforced here in SQL so a future route cannot get it
+            # wrong.
+            cur.execute(
+                """
+                delete from raw_files rf
+                using analyses a
+                where rf.analysis_id = a.id and a.oc_uid = %s
+                """,
+                (oc_uid,),
+            )
+            files_deleted = cur.rowcount or 0
+            cur.execute(
+                """
+                update analyses set cv_text = null
+                where oc_uid = %s and cv_text is not null and cv_text <> ''
+                """,
+                (oc_uid,),
+            )
+            texts_cleared = cur.rowcount or 0
+            return {"files_deleted": files_deleted, "texts_cleared": texts_cleared}
+    except Exception as exc:
+        log.warning(f"delete_stored_cv failed: {exc}")
+        return None
+
+
 def save_recommendations(analysis_id, recommendations: list):
     """Inserts each recommendation, returns a list of DB ids in the same
     order as the input list (None for any that failed to insert)."""

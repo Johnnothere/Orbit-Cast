@@ -535,6 +535,10 @@ def api_me():
         return jsonify({"signed_in": False, "google_enabled": auth.google_enabled()})
     prefs = db.get_digest_prefs(account["id"]) or {}
     has_profile = bool(db.get_latest_analysis(account["oc_uid"]))
+    # Keyed on the account's oc_uid, which set_session_cookie() has already
+    # re-issued as this browser's cookie - so this is the same stored CV on
+    # every device the person signs in on, without a second id to carry.
+    cv = db.get_cv_status(account["oc_uid"]) or {}
     return jsonify({
         "signed_in": True,
         "google_enabled": auth.google_enabled(),
@@ -542,6 +546,17 @@ def api_me():
         "name": account.get("name"),
         "avatar_url": account.get("avatar_url"),
         "has_profile": has_profile,
+        "cv": {
+            # Text-only submissions have no file, so "on file" must mean
+            # either - reporting only the upload would tell someone who typed
+            # their background that nothing of theirs is stored.
+            "on_file": bool(cv.get("file_count") or cv.get("last_text_at")),
+            "file_count": cv.get("file_count", 0),
+            "total_bytes": cv.get("total_bytes", 0),
+            "last_filename": cv.get("last_filename"),
+            "last_file_at": cv.get("last_file_at"),
+            "last_text_at": cv.get("last_text_at"),
+        },
         "alerts": {
             "configured": bool(prefs),
             "frequency": prefs.get("frequency", "weekly"),
@@ -553,6 +568,35 @@ def api_me():
             "next_send_at": prefs["next_send_at"].isoformat() if prefs.get("next_send_at") else None,
         },
     })
+
+
+@app.route("/api/me/cv", methods=["DELETE"])
+@auth.login_required
+@limiter.limit("20 per hour")
+def api_delete_my_cv():
+    """Deletes the caller's stored CV material without deleting their account.
+
+    Narrower than /api/forget on purpose: the uploaded files and the extracted
+    text go, the derived profile stays, so alerts and 'reuse my last profile'
+    keep working. Saying so is the route's job as much as deleting is - the
+    response reports the counts rather than a bare ok, because "deleted" when
+    there was nothing there looks identical to a silent failure.
+
+    oc_uid comes from the ACCOUNT, not from the request cookie. A signed-in
+    person on a browser whose cookie was cleared or overwritten would
+    otherwise delete nothing and be told it worked."""
+    account = auth.current_account()
+    if not account:
+        return jsonify({"error": "Sign in first."}), 401
+    if not db.is_configured():
+        return jsonify({"error": "Accounts are not available right now."}), 503
+
+    result = db.delete_stored_cv(account["oc_uid"])
+    if result is None:
+        return jsonify({"error": "Could not delete that — nothing was removed."}), 503
+    return jsonify({"ok": True,
+                     "files_deleted": result["files_deleted"],
+                     "texts_cleared": result["texts_cleared"]})
 
 
 @app.route("/api/digest/prefs", methods=["POST"])

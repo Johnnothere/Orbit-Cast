@@ -376,6 +376,22 @@ html[data-theme="day"] .acct-modal{
 .acct-id-name{font-family:'Space Grotesk',sans-serif;font-size:.9rem;font-weight:600;
   color:var(--foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .acct-id-email{font-size:.78rem;color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+/* ── stored CV panel ─────────────────────────────────────────────────── */
+.acct-cv{margin:0 0 1.1rem;padding:.8rem .85rem;border-radius:var(--r-nested);
+  background:var(--surface);border:1px solid var(--hairline);}
+.acct-cv-title{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--muted-foreground);display:block;margin-bottom:.3rem;}
+.acct-cv-state{font-size:.88rem;color:var(--foreground);line-height:1.5;}
+.acct-cv-meta{margin:.15rem 0 0;font-size:.78rem;color:var(--muted-foreground);line-height:1.5;word-break:break-word;}
+.acct-cv-actions{display:flex;gap:.5rem;margin-top:.7rem;}
+.acct-cv-actions button{flex:1;min-height:2.25rem;padding:.4rem .7rem;border-radius:999px;cursor:pointer;
+  font-family:inherit;font-size:.82rem;font-weight:600;
+  background:transparent;border:1px solid var(--hairline);color:var(--foreground);
+  transition:border-color .2s,color .2s;}
+.acct-cv-actions button:hover{border-color:color-mix(in oklab,var(--brand) 45%,transparent);}
+.acct-cv-actions button.danger{color:var(--destructive);}
+.acct-cv-actions button.danger:hover{border-color:color-mix(in oklab,var(--destructive) 55%,transparent);}
+.acct-cv-actions button:disabled{opacity:.55;cursor:not-allowed;}
 /* The nav capsule is width-constrained on mobile, so the signed-in tell is
    the avatar plus a first name only - never the full email. */
 .nav-avatar{width:1.375rem;height:1.375rem;border-radius:999px;object-fit:cover;
@@ -1297,6 +1313,17 @@ footer.site{border-top:1px solid var(--hairline);}
           <div class="acct-id-name" id="acctName"></div>
           <div class="acct-id-email" id="acctWho"></div>
         </div>
+      </div>
+
+      <div class="acct-cv" id="acctCv">
+        <span class="acct-cv-title">CV on file</span>
+        <div class="acct-cv-state" id="acctCvState"></div>
+        <p class="acct-cv-meta" id="acctCvMeta"></p>
+        <div class="acct-cv-actions" id="acctCvActions">
+          <button onclick="replaceCv()">Replace</button>
+          <button class="danger" id="acctCvDel" onclick="deleteCv()">Delete</button>
+        </div>
+        <p class="acct-msg" id="acctCvMsg"></p>
       </div>
 
       <p class="acct-sub">Choose how often we check the catalog against your profile and
@@ -2672,6 +2699,7 @@ function fillAlerts(){
   const av=document.getElementById('acctAvatar');
   if(ME.avatar_url){av.src=ME.avatar_url;av.style.display='';}
   else{av.removeAttribute('src');av.style.display='none';}
+  renderCv();
   const iv=document.getElementById('acctInterval');
   if(!iv.options.length){
     for(let i=2;i<=30;i++)iv.add(new Option(i+' days',i));
@@ -2725,6 +2753,84 @@ async function saveAlerts(){
       msg.textContent=d.paused?'Alerts paused.':'Saved.';
       renderNext(d.next_send_at);
       await loadMe();
+    }
+  }catch(e){msg.className='acct-msg err';msg.textContent='Network error — try again.';}
+  btn.disabled=false;
+}
+
+// ── STORED CV ───────────────────────────────────────────────────────────
+// The uploaded file and the extracted text are reported as the two separate
+// things they are: they are stored separately, and someone who typed a
+// description instead of uploading still has data on file and must not be
+// told otherwise.
+function fmtBytes(n){
+  if(!n)return '';
+  return n<1024?n+' B':n<1048576?(n/1024).toFixed(0)+' KB':(n/1048576).toFixed(1)+' MB';
+}
+function fmtWhen(iso){
+  if(!iso)return '';
+  const d=new Date(iso);
+  return isNaN(d)?'':d.toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'});
+}
+
+function renderCv(){
+  const cv=ME.cv||{},state=document.getElementById('acctCvState'),
+        meta=document.getElementById('acctCvMeta'),
+        acts=document.getElementById('acctCvActions'),
+        msg=document.getElementById('acctCvMsg');
+  if(!state)return;
+  msg.textContent='';msg.className='acct-msg';
+  if(!cv.on_file){
+    state.textContent='Nothing stored yet.';
+    meta.textContent='Run an analysis and your CV is kept here, so you do not have to upload it again.';
+    acts.style.display='none';
+    return;
+  }
+  acts.style.display='flex';
+  const parts=[];
+  if(cv.file_count)parts.push(cv.file_count===1?'1 uploaded file':cv.file_count+' uploaded files');
+  if(cv.last_text_at)parts.push('extracted text');
+  state.textContent=parts.join(' + ')+' stored.';
+  const bits=[];
+  if(cv.last_filename)bits.push(cv.last_filename);
+  if(cv.total_bytes)bits.push(fmtBytes(cv.total_bytes));
+  const when=fmtWhen(cv.last_file_at||cv.last_text_at);
+  if(when)bits.push('last updated '+when);
+  // textContent, not innerHTML - last_filename is a name the user chose, and
+  // it lands here unescaped otherwise.
+  meta.textContent=bits.join(' · ');
+}
+
+// "Replace" reuses the normal analysis flow rather than adding a second
+// uploader - a second CV parsing path is a second place for it to go wrong.
+function replaceCv(){
+  closeAccount();
+  switchView('ai');
+  const pane=document.getElementById('paneCv');
+  if(pane)pane.scrollIntoView({behavior:'smooth',block:'center'});
+  toast('Upload a new CV — it replaces what is on file when the analysis runs');
+}
+
+async function deleteCv(){
+  const msg=document.getElementById('acctCvMsg'),btn=document.getElementById('acctCvDel');
+  if(!confirm('Delete your stored CV?\n\nThe uploaded file and its extracted text are removed. '
+    +'The profile the engine built from it stays, so your alerts keep working. '
+    +'Use "forget me" to delete everything.'))return;
+  btn.disabled=true;msg.className='acct-msg';msg.textContent='Deleting…';
+  try{
+    const r=await fetch('/api/me/cv',{method:'DELETE'});
+    const d=await r.json();
+    if(!r.ok){msg.className='acct-msg err';msg.textContent=d.error||'Could not delete that.';}
+    else{
+      const n=d.files_deleted||0,t=d.texts_cleared||0;
+      await loadMe();renderCv();
+      // Report what actually happened - "deleted" when nothing was removed is
+      // indistinguishable from a silent failure. Set after renderCv(), which
+      // clears the message line.
+      const m2=document.getElementById('acctCvMsg');
+      m2.className='acct-msg ok';
+      m2.textContent=(n||t)?`Deleted ${n} file${n===1?'':'s'} and cleared ${t} stored text${t===1?'':'s'}.`
+                           :'There was nothing stored to delete.';
     }
   }catch(e){msg.className='acct-msg err';msg.textContent='Network error — try again.';}
   btn.disabled=false;
