@@ -1465,19 +1465,124 @@ def get_or_create_account(email: str, oc_uid: str):
         return None
 
 
+def get_or_create_account_by_google(google_sub: str, email: str, name: str,
+                                    avatar_url: str, oc_uid: str,
+                                    email_verified: bool = False):
+    """Resolves a Google identity to an account. Returns the account dict, or
+    None if the database is unavailable.
+
+    Three cases, in this order, and the order is the security-relevant part:
+
+    1. google_sub already known - the normal returning login. Refresh the
+       profile fields (people change their Google name and photo) and return
+       the STORED oc_uid, which the caller re-issues as the cookie so history
+       follows them onto this device.
+
+    2. google_sub unknown but the email matches an existing account - someone
+       who signed up by magic link and is now using the Google button. Link
+       the two rather than creating a second account, which the unique index
+       on lower(email) would reject anyway.
+
+       This is only safe when Google says the address is verified. Without
+       that check, anyone able to create a Google identity asserting an
+       address they do not own could claim the existing OrbitCast account for
+       it - a straightforward account takeover. Unverified addresses fall
+       through to case 3 and get their own separate account instead.
+
+    3. Neither matches - a genuinely new person. The account adopts the
+       browser's current oc_uid, exactly as a magic-link signup does, so the
+       analyses already stored anonymously become this account's history.
+    """
+    google_sub = (google_sub or "").strip()
+    email = (email or "").strip().lower()
+    if not google_sub or not email or not oc_uid:
+        return None
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+
+            # 1. known Google identity
+            cur.execute(
+                "select id, email, oc_uid from accounts where google_sub = %s",
+                (google_sub,),
+            )
+            row = cur.fetchone()
+            if row:
+                cur.execute(
+                    """
+                    update accounts
+                       set last_login_at = now(),
+                           email      = %s,
+                           name       = coalesce(%s, name),
+                           avatar_url = coalesce(%s, avatar_url)
+                     where id = %s
+                    """,
+                    (email, name or None, avatar_url or None, row[0]),
+                )
+                return {"id": row[0], "email": email, "oc_uid": row[2],
+                        "name": name, "avatar_url": avatar_url, "is_new": False}
+
+            # 2. existing magic-link account for a Google-verified address
+            if email_verified:
+                cur.execute(
+                    "select id, oc_uid from accounts where lower(email) = %s",
+                    (email,),
+                )
+                row = cur.fetchone()
+                if row:
+                    cur.execute(
+                        """
+                        update accounts
+                           set google_sub    = %s,
+                               name          = coalesce(%s, name),
+                               avatar_url    = coalesce(%s, avatar_url),
+                               last_login_at = now()
+                         where id = %s
+                        """,
+                        (google_sub, name or None, avatar_url or None, row[0]),
+                    )
+                    return {"id": row[0], "email": email, "oc_uid": row[1],
+                            "name": name, "avatar_url": avatar_url, "is_new": False}
+
+            # 3. new account, adopting this browser's anonymous id
+            cur.execute(
+                """
+                insert into accounts (email, oc_uid, google_sub, name, avatar_url, last_login_at)
+                values (%s, %s, %s, %s, %s, now())
+                on conflict (oc_uid) do update
+                        set email         = excluded.email,
+                            google_sub    = excluded.google_sub,
+                            name          = excluded.name,
+                            avatar_url    = excluded.avatar_url,
+                            last_login_at = now()
+                returning id, email, oc_uid
+                """,
+                (email, oc_uid, google_sub, name or None, avatar_url or None),
+            )
+            new = cur.fetchone()
+            return {"id": new[0], "email": new[1], "oc_uid": new[2],
+                    "name": name, "avatar_url": avatar_url, "is_new": True}
+    except Exception as exc:
+        log.warning(f"get_or_create_account_by_google failed: {exc}")
+        return None
+
+
 def get_account(account_id):
     try:
         with _cursor() as cur:
             if cur is None:
                 return None
             cur.execute(
-                "select id, email, oc_uid, created_at from accounts where id = %s",
+                "select id, email, oc_uid, created_at, name, avatar_url "
+                "from accounts where id = %s",
                 (account_id,),
             )
             row = cur.fetchone()
             if not row:
                 return None
-            return {"id": row[0], "email": row[1], "oc_uid": row[2], "created_at": _iso(row[3])}
+            return {"id": row[0], "email": row[1], "oc_uid": row[2], "created_at": _iso(row[3]),
+                    "name": row[4], "avatar_url": row[5]}
     except Exception as exc:
         log.warning(f"get_account failed: {exc}")
         return None

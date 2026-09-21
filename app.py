@@ -28,6 +28,12 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 12 * 1024 * 1024  # headroom for admin example-doc uploads
 limiter = init_security(app)
 
+# Registers the Google OIDC client and gives Flask a secret_key, which Authlib
+# needs to keep the OAuth state and nonce across the redirect. No-ops with a
+# warning when GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are unset, so a deploy
+# without them still serves the site and still signs people in by magic link.
+auth.init_google(app)
+
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
 OC_UID_MAX_AGE = 60 * 60 * 24 * 365 * 2  # 2 years
 
@@ -455,6 +461,62 @@ def auth_verify():
     return resp
 
 
+@app.route("/auth/login")
+@limiter.limit("30 per hour")
+def auth_google_login():
+    """Hands off to Google's consent screen.
+
+    A plain redirect, not JSON: OAuth is a browser navigation, and doing it
+    from fetch() would be blocked as a cross-origin redirect. So the button in
+    the UI is a real link to this path."""
+    if not auth.google_enabled():
+        # Honest about which thing is missing. Silently falling back to the
+        # email form would leave someone clicking a Google button that appears
+        # to do nothing.
+        return redirect("/?signin=google_off")
+    redirected = auth.google_redirect()
+    if redirected is None:
+        return redirect("/?signin=google_off")
+    return redirected
+
+
+@app.route("/auth/callback")
+@limiter.limit("30 per hour")
+def auth_google_callback():
+    """Where Google sends the browser back. Exchanges the code, resolves the
+    identity to an account, and sets the same signed session cookie the magic
+    link sets - from here on the two paths are indistinguishable.
+
+    Note it reads oc_uid from the cookie rather than calling ensure_oc_uid():
+    this response is a redirect whose cookies are about to be overwritten by
+    set_session_cookie() anyway, and a first-ever visitor who arrives straight
+    at a Google login has no oc_uid yet, so one is minted here for the new
+    account to adopt."""
+    if not auth.google_enabled():
+        return redirect("/?signin=google_off")
+
+    identity = auth.google_identity()
+    if not identity:
+        # Covers a cancelled consent screen, an expired state and a real token
+        # error alike. All of them mean "not signed in", and none of them are
+        # worth a different page.
+        return redirect("/?signin=failed")
+
+    if not db.is_configured():
+        return redirect("/?signin=unavailable")
+
+    oc_uid = request.cookies.get("oc_uid") or uuid.uuid4().hex
+    account = db.get_or_create_account_by_google(
+        identity["sub"], identity["email"], identity["name"],
+        identity["picture"], oc_uid, identity["email_verified"])
+    if not account:
+        return redirect("/?signin=unavailable")
+
+    resp = make_response(redirect("/?signin=ok"))
+    auth.set_session_cookie(resp, account)
+    return resp
+
+
 @app.route("/api/auth/logout", methods=["POST"])
 def api_auth_logout():
     resp = make_response(jsonify({"ok": True}))
@@ -467,12 +529,18 @@ def api_me():
     """One call for the whole signed-in state: who, and what alerts they get."""
     account = auth.current_account()
     if not account:
-        return jsonify({"signed_in": False})
+        # google_enabled is reported signed-out as well as signed-in: it is
+        # what decides whether the sign-in panel renders the Google button,
+        # and that decision is needed precisely when nobody is signed in.
+        return jsonify({"signed_in": False, "google_enabled": auth.google_enabled()})
     prefs = db.get_digest_prefs(account["id"]) or {}
     has_profile = bool(db.get_latest_analysis(account["oc_uid"]))
     return jsonify({
         "signed_in": True,
+        "google_enabled": auth.google_enabled(),
         "email": account["email"],
+        "name": account.get("name"),
+        "avatar_url": account.get("avatar_url"),
         "has_profile": has_profile,
         "alerts": {
             "configured": bool(prefs),

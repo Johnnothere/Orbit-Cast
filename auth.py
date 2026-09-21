@@ -16,6 +16,15 @@ The trade-off, stated honestly: a signed cookie cannot be revoked server-side
 before it expires. For a 30-day event-recommendation session that is an
 acceptable exchange for having no session store. If this ever guards anything
 worth stealing, add a session table and check it - don't stretch this.
+
+TWO FRONT DOORS, ONE SESSION
+Google Sign-In was added alongside the magic link, not instead of it. Both
+paths end at the same place - db account row, set_session_cookie() - so
+current_account(), login_required and the digest scheduler neither know nor
+care which door someone came through. Magic links stay because the audience
+includes defence, government and corporate addresses that are not Google
+accounts, and because removing them would lock out every account already
+created that way.
 """
 
 import base64
@@ -191,3 +200,139 @@ def normalise_email(raw: str):
     if any(c.isspace() for c in email):
         return None
     return email
+
+
+# ─────────────────────────────────────────────
+# Google Sign-In (OpenID Connect via Authlib)
+# ─────────────────────────────────────────────
+# Authlib is given the discovery document rather than hardcoded endpoint URLs,
+# so Google rotating its signing keys or moving an endpoint needs no change
+# here. It also means the id_token signature, issuer, audience, expiry and
+# nonce are all verified by the library instead of by hand - the parts of OIDC
+# that are easy to write and easier to write wrongly.
+
+GOOGLE_DISCOVERY = "https://accounts.google.com/.well-known/openid-configuration"
+NONCE_SESSION_KEY = "oc_oauth_nonce"
+
+# The redirect URI is configuration, not something to derive from the request.
+# url_for(_external=True) would be the obvious choice and is a trap here:
+# Railway terminates TLS at its proxy and forwards plain HTTP, so Flask - which
+# does not trust X-Forwarded-Proto unless told to - would build
+# "http://orbitcast.up.railway.app/auth/callback". Google compares the
+# redirect_uri byte-for-byte against the registered value and rejects it with
+# redirect_uri_mismatch, which reads like a credentials problem and is not one.
+GOOGLE_REDIRECT_URI = os.environ.get(
+    "GOOGLE_REDIRECT_URI", "https://orbitcast.up.railway.app/auth/callback")
+
+_GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+_GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+
+_google = None
+
+
+def google_enabled() -> bool:
+    """False when the credentials are absent, so the frontend can hide the
+    button instead of offering one that dead-ends in an error page."""
+    return _google is not None
+
+
+def init_google(app):
+    """Wires Authlib onto the app. Safe to call with no credentials set - it
+    logs and leaves Google disabled rather than raising at import time, which
+    would take the whole site down over an optional login method."""
+    global _google
+
+    # Authlib keeps the OAuth state and nonce in Flask's own session cookie
+    # between the redirect out and the callback back. Flask refuses to use
+    # `session` at all without a secret key, and nothing else in this app had
+    # ever needed one. Reusing SESSION_SECRET keeps it to a single secret to
+    # configure; it is the same trust boundary either way.
+    if not app.secret_key:
+        app.secret_key = _SECRET
+
+    if not _GOOGLE_CLIENT_ID or not _GOOGLE_CLIENT_SECRET:
+        log.warning("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are not set - "
+                    "Google Sign-In is disabled; magic links still work.")
+        return None
+
+    try:
+        from authlib.integrations.flask_client import OAuth
+    except ImportError:
+        log.warning("Authlib is not installed - Google Sign-In is disabled.")
+        return None
+
+    oauth = OAuth(app)
+    _google = oauth.register(
+        name="google",
+        client_id=_GOOGLE_CLIENT_ID,
+        client_secret=_GOOGLE_CLIENT_SECRET,
+        server_metadata_url=GOOGLE_DISCOVERY,
+        # `openid email profile` and nothing more. Scope creep on a consent
+        # screen costs conversions and, for this audience, trust - there is no
+        # reason to ask for a calendar to sign somebody in.
+        client_kwargs={"scope": "openid email profile"},
+    )
+    log.info("Google Sign-In enabled.")
+    return _google
+
+
+def google_redirect():
+    """Sends the browser to Google's consent screen. Returns None if Google
+    is not configured, so the caller can answer honestly rather than 500."""
+    if not _google:
+        return None
+    from flask import session
+    nonce = secrets.token_urlsafe(24)
+    # Kept for the fallback path below. Authlib binds the nonce into its own
+    # state record too and validates it on the way back; this copy exists only
+    # so parse_id_token() can be called explicitly if a version of Authlib
+    # does not hand back a pre-verified userinfo.
+    session[NONCE_SESSION_KEY] = nonce
+    return _google.authorize_redirect(GOOGLE_REDIRECT_URI, nonce=nonce)
+
+
+def google_identity():
+    """Completes the exchange and returns the verified claims as
+    {"sub", "email", "email_verified", "name", "picture"}, or None.
+
+    Every failure returns None rather than raising: a cancelled consent
+    screen, an expired state, a burnt code and a genuine token-endpoint error
+    all arrive here as exceptions, and all of them mean the same thing to the
+    person - they are not signed in."""
+    if not _google:
+        return None
+    from flask import session
+    nonce = session.pop(NONCE_SESSION_KEY, None)
+    try:
+        token = _google.authorize_access_token()
+    except Exception as exc:
+        log.warning(f"Google token exchange failed: {exc}")
+        return None
+
+    claims = token.get("userinfo")
+    if not claims:
+        try:
+            claims = _google.parse_id_token(token, nonce=nonce)
+        except Exception as exc:
+            log.warning(f"Google id_token could not be verified: {exc}")
+            return None
+    if not claims:
+        return None
+
+    sub = claims.get("sub")
+    email = (claims.get("email") or "").strip().lower()
+    if not sub or not email:
+        # Both are required. An id_token without them is not something to
+        # guess around - refuse the login.
+        log.warning("Google returned an identity with no sub or no email.")
+        return None
+
+    return {
+        "sub": sub,
+        "email": email,
+        # Passed through rather than assumed true. db.get_or_create_account_by_google
+        # will only merge into an existing magic-link account when this is set.
+        "email_verified": bool(claims.get("email_verified")),
+        "name": (claims.get("name") or "").strip() or None,
+        "picture": (claims.get("picture") or "").strip() or None,
+    }

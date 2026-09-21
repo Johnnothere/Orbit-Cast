@@ -336,6 +336,50 @@ h1,h2,h3,h4{font-family:'Space Grotesk',sans-serif;letter-spacing:-.02em;}
 .acct-row > *{flex:1;}
 .acct-next{margin:.9rem 0 0;font-size:.8rem;color:var(--muted-foreground);}
 .acct-consent{margin:.75rem 0 0;font-size:.76rem;line-height:1.5;color:var(--muted-foreground);}
+/* PRE-EXISTING DAY-THEME FIX, found while adding the Google button.
+   .acct-modal sets background:var(--background) at specificity (0,1,0), but
+   html[data-theme="day"] .card-lux is (0,2,0) and so won in day mode - the
+   panel kept the translucent glass gradient and rendered over .acct-backdrop,
+   which is a dark navy scrim in BOTH themes. Day-theme text is dark navy, so
+   the whole modal was dark-on-dark and effectively unreadable.
+   It is the only .card-lux that sets its own background and the only one over
+   a scrim rather than over the page, so this is the single instance, not a
+   class of bug. Matching the specificity restores the opaque surface. */
+html[data-theme="day"] .acct-modal{
+  background:var(--background);
+  border-color:var(--hairline);}
+
+/* ── google sign-in ───────────────────────────────────────────────────
+   Same glass material as the rest of the modal so it reads as ours, not as
+   a bolted-on third-party widget. The G mark keeps its four brand colours in
+   both themes because Google's brand terms require it; everything around it
+   follows the theme tokens. It is an <a>, not a <button>: OAuth is a
+   top-level browser navigation and cannot be done from fetch(). */
+.acct-google{width:100%;display:flex;align-items:center;justify-content:center;gap:.6rem;
+  min-height:2.875rem;padding:.75rem 1rem;border-radius:999px;cursor:pointer;box-sizing:border-box;
+  text-decoration:none;font-family:inherit;font-size:.9rem;font-weight:600;
+  color:var(--foreground);background:var(--elevated);border:1px solid var(--hairline);
+  transition:border-color .2s,transform .3s cubic-bezier(.34,1.56,.64,1);}
+.acct-google:hover{border-color:color-mix(in oklab,var(--brand) 45%,transparent);transform:translateY(-1px);}
+.acct-google:focus-visible{outline:2px solid var(--ring);outline-offset:2px;}
+.acct-google svg{width:1.125rem;height:1.125rem;flex-shrink:0;}
+.acct-or{display:flex;align-items:center;gap:.75rem;margin:1rem 0;
+  font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--muted-foreground);}
+.acct-or::before,.acct-or::after{content:"";flex:1;height:1px;background:var(--hairline);}
+/* signed-in identity chip */
+.acct-id{display:flex;align-items:center;gap:.7rem;margin:0 0 1.1rem;padding:.7rem .85rem;
+  border-radius:var(--r-nested);background:var(--surface);border:1px solid var(--hairline);}
+.acct-avatar{width:2.25rem;height:2.25rem;border-radius:999px;flex-shrink:0;object-fit:cover;
+  border:1px solid var(--hairline);background:var(--elevated);}
+.acct-id-text{min-width:0;}
+.acct-id-name{font-family:'Space Grotesk',sans-serif;font-size:.9rem;font-weight:600;
+  color:var(--foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.acct-id-email{font-size:.78rem;color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+/* The nav capsule is width-constrained on mobile, so the signed-in tell is
+   the avatar plus a first name only - never the full email. */
+.nav-avatar{width:1.375rem;height:1.375rem;border-radius:999px;object-fit:cover;
+  margin-right:.4rem;border:1px solid var(--hairline);vertical-align:middle;}
 header.nav{position:fixed;inset-inline:0;top:.75rem;z-index:50;display:flex;justify-content:center;
   padding-inline:1rem;pointer-events:none;}
 .nav-inner{pointer-events:auto;display:flex;width:100%;max-width:50rem;align-items:center;
@@ -1219,22 +1263,44 @@ footer.site{border-top:1px solid var(--hairline);}
     <!-- signed out -->
     <div id="acctOut">
       <h3 id="acctTitle">Sign in</h3>
-      <p class="acct-sub">No password. We email you a link that signs you in and expires in
-        20 minutes. An account is what lets the engine remember your profile and send you
-        events as they appear.</p>
+      <p class="acct-sub">An account is what lets the engine remember your profile and send you
+        events as they appear. No password either way.</p>
+
+      <a class="acct-google" id="acctGoogle" href="/auth/login" rel="nofollow">
+        <svg viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+        </svg>
+        Sign in with Google
+      </a>
+
+      <div class="acct-or" id="acctOr">or</div>
+
       <label class="acct-field"><span>Email</span>
         <input class="acct-input" id="acctEmail" type="email" autocomplete="email"
                placeholder="you@example.com" onkeydown="if(event.key==='Enter')requestLink()">
       </label>
-      <button class="acct-btn" id="acctSendBtn" onclick="requestLink()">Email me a sign-in link</button>
+      <button class="acct-btn ghost" id="acctSendBtn" onclick="requestLink()" style="margin-top:0">Email me a sign-in link</button>
       <p class="acct-msg" id="acctMsg"></p>
     </div>
 
     <!-- signed in -->
     <div id="acctIn" style="display:none">
       <h3>Event alerts</h3>
-      <p class="acct-sub">Signed in as <b id="acctWho"></b>. Choose how often we check the
-        catalog against your profile and email you what fits.</p>
+
+      <div class="acct-id" id="acctIdChip">
+        <img class="acct-avatar" id="acctAvatar" alt="" referrerpolicy="no-referrer"
+             onerror="this.style.display='none'">
+        <div class="acct-id-text">
+          <div class="acct-id-name" id="acctName"></div>
+          <div class="acct-id-email" id="acctWho"></div>
+        </div>
+      </div>
+
+      <p class="acct-sub">Choose how often we check the catalog against your profile and
+        email you what fits.</p>
 
       <div class="acct-freqs">
         <div class="acct-freq" data-freq="daily"        onclick="setFreq('daily')">Daily</div>
@@ -2532,15 +2598,39 @@ async function loadMe(){
     const r=await fetch('/api/me');
     ME=await r.json();
   }catch(e){ME={signed_in:false};}
-  const btn=document.getElementById('navAccount');
-  if(btn)btn.textContent=ME.signed_in?'Account':'Sign in';
+  renderNavAccount();
   return ME;
+}
+
+// The nav capsule is the only always-visible surface, so it carries the
+// signed-in tell: avatar plus first name. Never the email - the nav is
+// visible over someone's shoulder and on a shared screen, and an email
+// address is the one identifier here worth not broadcasting.
+function renderNavAccount(){
+  const btn=document.getElementById('navAccount');
+  if(!btn)return;
+  if(!ME.signed_in){btn.textContent='Sign in';return;}
+  const first=(ME.name||'').trim().split(/\s+/)[0]||'Account';
+  // esc() on both, and the avatar URL is rebuilt as an attribute rather than
+  // interpolated raw - it arrives from Google but is still third-party text
+  // landing in our DOM.
+  const img=ME.avatar_url
+    ? `<img class="nav-avatar" src="${esc(ME.avatar_url)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">`
+    : '';
+  btn.innerHTML=img+esc(first);
 }
 
 function openAccount(){
   const back=document.getElementById('acctBackdrop');
   document.getElementById('acctOut').style.display=ME.signed_in?'none':'block';
   document.getElementById('acctIn').style.display=ME.signed_in?'block':'none';
+  // A Google button that cannot work is worse than no Google button: it looks
+  // like the site is broken rather than like the option is unavailable. The
+  // divider goes with it, otherwise "or" sits above the email field alone.
+  const g=document.getElementById('acctGoogle'),gor=document.getElementById('acctOr');
+  const on=ME.google_enabled!==false;
+  if(g)g.style.display=on?'flex':'none';
+  if(gor)gor.style.display=on?'flex':'none';
   if(ME.signed_in)fillAlerts();
   back.classList.add('show');
   const focus=ME.signed_in?null:document.getElementById('acctEmail');
@@ -2575,6 +2665,13 @@ function setFreq(f){
 function fillAlerts(){
   const a=ME.alerts||{};
   document.getElementById('acctWho').textContent=ME.email||'';
+  // Falls back to the email when Google gave no name, or when the account was
+  // created by magic link and so has never had one - the chip must not render
+  // an empty line.
+  document.getElementById('acctName').textContent=ME.name||ME.email||'';
+  const av=document.getElementById('acctAvatar');
+  if(ME.avatar_url){av.src=ME.avatar_url;av.style.display='';}
+  else{av.removeAttribute('src');av.style.display='none';}
   const iv=document.getElementById('acctInterval');
   if(!iv.options.length){
     for(let i=2;i<=30;i++)iv.add(new Option(i+' days',i));
@@ -2647,15 +2744,23 @@ function handleAuthFailure(){
   toast('Sign in to run the analysis');
 }
 
-// Landing back from the emailed link.
+// Landing back from the emailed link, or from Google's consent screen.
+// Every outcome gets its own message: "it did not work" and "you cancelled"
+// and "accounts are down" are three different things to the person reading it,
+// and collapsing them into one toast is how a configuration problem gets
+// reported as a bug.
 (function signinBanner(){
   const p=new URLSearchParams(location.search);
   const s=p.get('signin');
   if(!s)return;
-  setTimeout(()=>{
-    if(s==='ok')toast('Signed in');
-    if(s==='expired')toast('That sign-in link has expired — request another');
-  },400);
+  const msg={
+    ok:'Signed in',
+    expired:'That sign-in link has expired — request another',
+    failed:'That sign-in did not complete — try again',
+    google_off:'Google sign-in is not set up yet — use the email link',
+    unavailable:'Accounts are unavailable right now — try again shortly',
+  }[s];
+  if(msg)setTimeout(()=>toast(msg),400);
   history.replaceState({},'',location.pathname);
 })();
 
