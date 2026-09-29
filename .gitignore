@@ -11,3 +11,6 @@ seen_events.json
 design-import/
 NexusAI.zip
 .env
+.mcp.json
+skills-lock.json
+.agents/
