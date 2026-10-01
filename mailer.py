@@ -73,6 +73,51 @@ BRAND_MUTED = "#93a3c0"
 BRAND_ACCENT = "#6ea8fe"
 
 
+# The last failure, kept so the admin dashboard can show WHY mail is not
+# arriving. Without this the only record is a Railway log line, which means
+# "check the logs" every time - and a silent mail failure is the one bug
+# where the user sees nothing at all, so it needs to be visible somewhere
+# you can actually look.
+_LAST_ERROR = ""
+
+
+def _fail(msg: str) -> bool:
+    global _LAST_ERROR
+    _LAST_ERROR = msg
+    log.warning("MAIL: %s", msg)
+    return False
+
+
+def last_error() -> str:
+    return _LAST_ERROR
+
+
+def active_provider() -> str:
+    if RESEND_API_KEY:
+        return "resend"
+    if MAILJET_API_KEY and MAILJET_SECRET_KEY:
+        return "mailjet"
+    if SMTP_HOST:
+        return "smtp"
+    return "none"
+
+
+def status() -> dict:
+    """Which provider is live and whether each credential is PRESENT - never
+    the values themselves. Presence is what diagnoses a misnamed env var,
+    and the value would be a secret in a dashboard."""
+    return {
+        "provider": active_provider(),
+        "resend_key": bool(RESEND_API_KEY),
+        "mailjet_key": bool(MAILJET_API_KEY),
+        "mailjet_secret": bool(MAILJET_SECRET_KEY),
+        "smtp_host": SMTP_HOST or "",
+        "mail_from": MAIL_FROM,
+        "public_url": PUBLIC_URL,
+        "last_error": _LAST_ERROR,
+    }
+
+
 def is_configured() -> bool:
     return bool(RESEND_API_KEY or (MAILJET_API_KEY and MAILJET_SECRET_KEY) or SMTP_HOST)
 
@@ -88,11 +133,10 @@ def send(to: str, subject: str, html_body: str, text_body: str,
             return _send_mailjet(to, subject, html_body, text_body, unsubscribe_url)
         if SMTP_HOST:
             return _send_smtp(to, subject, html_body, text_body, unsubscribe_url)
-        log.warning("EMAIL NOT SENT (no mail provider configured: set "
-                    "RESEND_API_KEY, or MAILJET_API_KEY + MAILJET_SECRET_KEY, "
-                    "or SMTP_HOST). To: %s | Subject: %s\n%s",
+        log.warning("EMAIL NOT SENT — no provider. To: %s | Subject: %s\n%s",
                     to, subject, text_body[:1500])
-        return False
+        return _fail("No mail provider configured. Set RESEND_API_KEY, or "
+                     "MAILJET_API_KEY + MAILJET_SECRET_KEY, or SMTP_HOST.")
 
     payload = {"from": MAIL_FROM, "to": [to], "subject": subject,
                "html": html_body, "text": text_body}
@@ -108,12 +152,10 @@ def send(to: str, subject: str, html_body: str, text_body: str,
         r = requests.post("https://api.resend.com/emails", json=payload, timeout=20,
                           headers={"Authorization": f"Bearer {RESEND_API_KEY}"})
         if r.status_code >= 300:
-            log.warning("Resend refused (%s): %s", r.status_code, r.text[:300])
-            return False
+            return _fail(f"Resend refused with HTTP {r.status_code}: {r.text[:200]}")
         return True
     except Exception as exc:
-        log.warning("Email send failed: %s", exc)
-        return False
+        return _fail(f"Resend request failed: {exc}")
 
 
 def _send_mailjet(to: str, subject: str, html_body: str, text_body: str,
@@ -143,8 +185,13 @@ def _send_mailjet(to: str, subject: str, html_body: str, text_body: str,
                           json={"Messages": [message]}, timeout=20,
                           auth=(MAILJET_API_KEY, MAILJET_SECRET_KEY))
         if r.status_code >= 300:
-            log.warning("Mailjet refused (%s): %s", r.status_code, r.text[:300])
-            return False
+            hint = ""
+            if r.status_code in (401, 403):
+                hint = (" — that is an authentication failure: check "
+                        "MAILJET_API_KEY and MAILJET_SECRET_KEY are the "
+                        "public/private pair, not swapped or truncated.")
+            return _fail(f"Mailjet refused with HTTP {r.status_code}: "
+                         f"{r.text[:200]}{hint}")
         # A 200 is not automatically a success here: Mailjet reports
         # per-message status inside the body, so a single bad recipient comes
         # back 200 with Status "error". Reading only the HTTP code would
@@ -152,15 +199,17 @@ def _send_mailjet(to: str, subject: str, html_body: str, text_body: str,
         try:
             results = (r.json() or {}).get("Messages") or []
             if results and results[0].get("Status") != "success":
-                log.warning("Mailjet did not accept the message: %s",
-                            str(results[0])[:300])
-                return False
+                errs = results[0].get("Errors") or []
+                detail = "; ".join(str(e.get("ErrorMessage") or e) for e in errs) or str(results[0])
+                return _fail(f"Mailjet accepted the request but rejected the "
+                             f"message: {detail[:250]} — the usual cause is "
+                             f"MAIL_FROM ({MAIL_FROM}) not matching a sender "
+                             f"address validated in Mailjet.")
         except ValueError:
             pass
         return True
     except Exception as exc:
-        log.warning("Mailjet send failed: %s", exc)
-        return False
+        return _fail(f"Mailjet request failed: {exc}")
 
 
 def _send_smtp(to: str, subject: str, html_body: str, text_body: str,
@@ -201,8 +250,7 @@ def _send_smtp(to: str, subject: str, html_body: str, text_body: str,
         # Logged, never raised: a mail outage must not take the scheduler
         # down for everyone else, and digest.py reads this False to avoid
         # marking the events as delivered.
-        log.warning("SMTP send failed via %s: %s", SMTP_HOST, exc)
-        return False
+        return _fail(f"SMTP send via {SMTP_HOST}:{SMTP_PORT} failed: {exc}")
 
 
 # ─────────────────────────────────────────────

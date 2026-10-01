@@ -406,13 +406,19 @@ def api_auth_request():
         return jsonify({"error": "Accounts are not available right now."}), 503
 
     raw = auth.issue_login_token(email)
-    if raw:
-        mailer.send_login_link(email, raw)
-        if not mailer.is_configured():
-            # Local development: with no mail provider the link is logged, so
-            # say so rather than letting someone wait for mail that will
-            # never arrive.
-            log.warning("Mail is not configured - the sign-in link was logged, not sent.")
+    if not raw:
+        # The token could not be stored - a database problem, not an unknown
+        # address. Saying "check your email" here would be a lie that looks
+        # identical to success, which is the exact failure mode that cost an
+        # afternoon of debugging. The generic response protects who HAS an
+        # account; it should never paper over the service being broken.
+        return jsonify({"error": "We could not start sign-in just now. "
+                                  "Try again in a moment."}), 503
+
+    sent = mailer.send_login_link(email, raw)
+    if not sent:
+        log.warning("Sign-in link for %s was not delivered: %s",
+                    email, mailer.last_error() or "no provider configured")
     return jsonify(generic)
 
 
@@ -1359,6 +1365,40 @@ def api_admin_download_raw(analysis_id):
     safe_name = (raw["filename"] or "resume").replace('"', "")
     resp.headers["Content-Disposition"] = f'attachment; filename="{safe_name}"'
     return resp
+
+
+@app.route("/api/admin/mail/status", methods=["GET"])
+@limiter.limit("120 per hour")
+def api_admin_mail_status():
+    """Which mail provider is live, which credentials are PRESENT (never their
+    values), and the last failure reason.
+
+    This exists because a mail misconfiguration is invisible from the outside:
+    the app says "check your email", the database row is written, and nothing
+    arrives. Before this, answering "why" meant reading Railway logs."""
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    return jsonify(mailer.status())
+
+
+@app.route("/api/admin/mail/test", methods=["POST"])
+@limiter.limit("20 per hour")
+def api_admin_mail_test():
+    """Sends a real test email and reports exactly what the provider said.
+
+    Deliberately not a dry run: the failures worth catching (unvalidated
+    sender, swapped API keys, a blocked port) only happen on a real send."""
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    to = ((request.get_json(silent=True) or {}).get("to") or "").strip()
+    if not to or "@" not in to:
+        return jsonify({"error": "Give an address to send the test to."}), 400
+    ok = mailer.send(
+        to, "OrbitCast test email",
+        "<p>If you are reading this, OrbitCast can send mail.</p>",
+        "If you are reading this, OrbitCast can send mail.")
+    return jsonify({"ok": ok, "provider": mailer.active_provider(),
+                     "error": None if ok else mailer.last_error()})
 
 
 @app.route("/api/admin/analytics", methods=["GET"])
