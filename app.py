@@ -378,6 +378,13 @@ def dashboard():
 def privacy_policy():
     return render_template("privacy.html")
 
+
+@app.errorhandler(404)
+def not_found(_e):
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "Not found"}), 404
+    return _page("That page isn't here", "The link may be old, or the address mistyped.", status=404)
+
 # ─────────────────────────────────────────────
 # ORBITCAST AI  — Claude-powered CV analysis
 # ─────────────────────────────────────────────
@@ -422,6 +429,44 @@ def api_auth_request():
     return jsonify(generic)
 
 
+
+# ─────────────────────────────────────────────
+# BRANDED UTILITY PAGES
+# ─────────────────────────────────────────────
+# The sign-in interstitial, the unsubscribe confirmation and the 404 share
+# one small inline stylesheet that follows the app's tokens (and the
+# viewer's light/dark preference), so leaving the app for one of them no
+# longer drops the person onto an unstyled dark box.
+_PAGE_CSS = (
+    ":root{color-scheme:dark;--bg:#161a2b;--s1:#1d2234;--line:rgba(255,255,255,.12);--tx:#f3f1ec;"
+    "--tx2:#c6c3bb;--ac:#85b4f2;--ink:#f3f1ec;--inkfg:#161a2b}"
+    "@media(prefers-color-scheme:light){:root{color-scheme:light;--bg:#fafafa;--s1:#fff;"
+    "--line:rgba(30,40,80,.12);--tx:#1e2a4a;--tx2:#4b5470;--ac:#2f62c7;--ink:#1e2a4a;--inkfg:#fff}}"
+    "*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;"
+    "background:var(--bg);color:var(--tx);font:15px/1.55 'DM Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif}"
+    ".card{width:min(440px,100%);padding:28px;border-radius:22px;background:var(--s1);border:1px solid var(--line);"
+    "box-shadow:0 30px 80px -28px rgba(0,0,0,.45)}"
+    ".brand{display:flex;align-items:center;gap:10px;margin-bottom:22px;font-weight:600;letter-spacing:-.02em}"
+    ".mark{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:var(--ink);color:var(--inkfg);font-weight:600}"
+    "h1{margin:0 0 8px;font-size:22px;line-height:1.25;letter-spacing:-.02em}p{margin:0 0 18px;color:var(--tx2)}"
+    ".btn{display:inline-flex;align-items:center;justify-content:center;height:46px;padding:0 22px;border:0;border-radius:999px;"
+    "background:var(--ink);color:var(--inkfg);font:500 15px inherit;font-family:inherit;cursor:pointer;text-decoration:none}"
+    "a{color:var(--ac)}.foot{margin-top:18px;font-size:13px;color:var(--tx2)}"
+)
+
+
+def _page(heading: str, sub: str = "", extra: str = "", back: bool = True, status: int = 200):
+    html = (
+        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        f"<title>{escape(heading)} — OrbitCast</title><style>{_PAGE_CSS}</style></head><body>"
+        "<main class='card'><div class='brand'><span class='mark'>O</span>OrbitCast<span style='color:var(--ac)'>AI</span></div>"
+        f"<h1>{heading}</h1>{('<p>' + sub + '</p>') if sub else ''}{extra}"
+        + ("<p class='foot'><a href='/'>Back to OrbitCast</a></p>" if back else "")
+        + "</main></body></html>"
+    )
+    return html, status
+
 @app.route("/auth/verify", methods=["GET", "POST"])
 @limiter.limit("30 per hour")
 def auth_verify():
@@ -447,16 +492,10 @@ def auth_verify():
         return redirect("/?signin=expired")
 
     if request.method == "GET":
-        return (f"<!doctype html><meta name='viewport' content='width=device-width,initial-scale=1'>"
-                f"<body style=\"background:#0b1220;color:#e8eefc;font-family:system-ui,sans-serif;"
-                f"padding:48px;line-height:1.6;\">"
-                f"<h1 style='font-size:20px;margin:0 0 .5rem;'>Sign in to OrbitCast</h1>"
-                f"<p style='color:#93a3c0;margin:0 0 1.25rem;'>One more click and you are in.</p>"
-                f"<form method='post' action='/auth/verify'>"
+        form = (f"<form method='post' action='/auth/verify'>"
                 f"<input type='hidden' name='token' value='{escape(token)}'>"
-                f"<button style=\"background:#e8eefc;color:#06101f;border:none;border-radius:999px;"
-                f"padding:12px 26px;font-size:15px;font-weight:600;cursor:pointer;\">"
-                f"Sign in</button></form></body>", 200)
+                f"<button class='btn' type='submit'>Sign in</button></form>")
+        return _page("Sign in to OrbitCast", "One more click and you are in.", form, back=False)
 
     oc_uid = request.cookies.get("oc_uid") or uuid.uuid4().hex
     account = auth.redeem_login_token(token, oc_uid)
@@ -527,6 +566,11 @@ def auth_google_callback():
 def api_auth_logout():
     resp = make_response(jsonify({"ok": True}))
     auth.clear_session_cookie(resp)
+    # The anonymous id goes too. It was re-issued as the ACCOUNT's oc_uid at
+    # sign-in, so leaving it behind let the next person on a shared browser
+    # read the previous user's profile summary and location. Signing back in
+    # restores it from the account; a fresh visitor gets a fresh id.
+    resp.set_cookie("oc_uid", "", expires=0)
     return resp
 
 
@@ -640,14 +684,6 @@ def api_digest_prefs():
                      "paused": clean["paused"]})
 
 
-def _plain_page(heading: str, sub: str = "", extra: str = "") -> str:
-    return (f"<!doctype html><meta name='viewport' content='width=device-width,initial-scale=1'>"
-            f"<body style=\"background:#0b1220;color:#e8eefc;font-family:system-ui,sans-serif;"
-            f"padding:48px;line-height:1.6;\"><h1 style='font-size:20px;margin:0 0 .5rem;'>{heading}</h1>"
-            f"<p style='color:#93a3c0;margin:0 0 1.25rem;'>{sub}</p>{extra}"
-            f"<p><a style='color:#6ea8fe;' href='/'>Back to OrbitCast</a></p></body>")
-
-
 @app.route("/unsubscribe", methods=["GET", "POST"])
 @limiter.limit("60 per hour")
 def unsubscribe():
@@ -666,21 +702,19 @@ def unsubscribe():
     token = request.args.get("t", "") or (request.form.get("t", "") if request.form else "")
     if request.method == "GET":
         if not token:
-            return _plain_page("That unsubscribe link is not valid."), 200
-        form = (f"<form method='post' action='/unsubscribe?t={token}'>"
-                f"<button style=\"background:#e8eefc;color:#06101f;border:none;border-radius:999px;"
-                f"padding:12px 22px;font-size:15px;font-weight:600;cursor:pointer;\">"
-                f"Turn my alerts off</button></form>")
-        return _plain_page("Turn off OrbitCast alerts?",
+            return _page("That unsubscribe link is not valid.")
+        form = (f"<form method='post' action='/unsubscribe?t={escape(token)}'>"
+                f"<button class='btn' type='submit'>Turn my alerts off</button></form>")
+        return _page("Turn off OrbitCast alerts?",
                            "One click and we stop emailing you. You can turn them back on "
-                           "any time from your account.", form), 200
+                           "any time from your account.", form)
 
     email = db.pause_digest_by_token(token)
     if not email:
-        return _plain_page("That unsubscribe link is not valid.",
-                           "It may already have been used."), 200
-    return _plain_page("Your OrbitCast alerts are off.",
-                       "Nothing else changes - your account and profile stay as they are."), 200
+        return _page("That unsubscribe link is not valid.",
+                           "It may already have been used.")
+    return _page("Your OrbitCast alerts are off.",
+                       "Nothing else changes - your account and profile stay as they are.")
 
 
 @app.route("/api/analyze", methods=["POST"])
@@ -759,12 +793,16 @@ def api_analyze():
 
 
 @app.route("/api/my-history", methods=["GET"])
+@auth.login_required
 def api_my_history():
-    """Powers the returning-visitor 'reuse my last profile' prompt. Reads
-    the oc_uid from THIS request's own cookie only - there is no way to
-    pass a different oc_uid in, so this can only ever return the calling
-    browser's own data, never anyone else's."""
-    oc_uid = request.cookies.get("oc_uid")
+    """Powers the returning-visitor 'reuse my last profile' prompt.
+
+    Signed-in only, keyed on the ACCOUNT's oc_uid rather than the request
+    cookie: the analysis is behind a login, so its history is too, and a
+    stale cookie on a shared browser can no longer surface someone else's
+    profile summary."""
+    account = auth.current_account()
+    oc_uid = account["oc_uid"] if account else None
     if not oc_uid or not db.get_consent(oc_uid):
         return jsonify({"has_history": False})
     last = db.get_latest_analysis(oc_uid)
@@ -780,8 +818,9 @@ def api_analyze_reuse():
     """Re-scores the caller's own last stored profile against the current
     catalog, without re-running extraction or asking them to resubmit
     anything - the 'don't make me upload my CV every time' feature. Same
-    consent gate and same own-cookie-only access as /api/my-history."""
-    oc_uid = request.cookies.get("oc_uid")
+    consent gate and same account-keyed access as /api/my-history."""
+    account = auth.current_account()
+    oc_uid = account["oc_uid"] if account else None
     if not oc_uid or not db.get_consent(oc_uid):
         return jsonify({"error": "No saved profile for this browser."}), 404
     last = db.get_latest_analysis(oc_uid)
