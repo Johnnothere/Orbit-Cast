@@ -58,7 +58,7 @@ MODEL = "claude-sonnet-5"             # current Sonnet model id
 # a one-line revert.
 MODEL_EXTRACT = "claude-haiku-4-5-20251001"
 FIT_THRESHOLD = 65                   # only surface events scoring this or higher
-MAX_RECOMMENDATIONS = 4              # honesty rule: 2-4 strong matches, not a list
+MAX_RECOMMENDATIONS = 5              # honesty rule: a few strong matches, never a padded list
 MAX_CATALOG_SIZE = 100                # cap events sent to scoring - the live catalog
                                        # has grown past 200; a huge input made responses
                                        # more likely to truncate before finishing valid
@@ -312,6 +312,11 @@ def build_compact_events(events: list) -> list:
     for e in events:
         if _is_past(e.get("date")) or _is_junk(e.get("title", "")):
             continue
+        # Listings the catalogue flagged as off-topic (nightlife, sport, job
+        # adverts, forms) never reach the scorer: a 70 for a padel social is
+        # not a match anyone wants, and it costs a slot a real one could use.
+        if e.get("offtopic"):
+            continue
         event_id = str(e.get("id") or e.get("url") or e.get("title", ""))
         if event_id in seen:
             continue
@@ -324,7 +329,7 @@ def build_compact_events(events: list) -> list:
             "source": e.get("source", ""),
             "url": e.get("url", ""),
             "emoji": e.get("emoji", ""),
-            "format": _infer_format(e.get("title", "")),
+            "format": e.get("format") or _infer_format(e.get("title", "")),
             "description": (e.get("description", "") or "")[:400],
             "location": e.get("location", ""),
         })
@@ -662,8 +667,9 @@ real events. Your ONE job: score honest fit and explain it.
 """
 
 DEFAULT_SCORING_RULES = """HONESTY RULES - this is the entire point of the product:
-- Be selective. Most events will NOT be a strong fit. Return AT MOST 4 \
-  recommendations - 2-4 strong ones is correct and expected, not 15. If nothing fits \
+- Be selective. Most events will NOT be a strong fit. Return AT MOST 5 \
+  recommendations - 2-5 strong ones is correct and expected, not 15. Never pad \
+  towards five: four strong and one weak is worse than four. If nothing fits \
   well, return an empty list.
 - Score fit honestly on 0-100. Do not inflate. 60 is a real "maybe", 90 means this \
   person should clearly go. Only include events scoring 65 or above.

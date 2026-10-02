@@ -3754,3 +3754,207 @@ if __name__ == "__main__":
     for s in summary:
         print(f"{s['emoji']} {s['source']}: {s['total']} total, {s['new']} new")
     print(f"\nTotal new events: {sum(s['new'] for s in summary)}")
+
+
+# ─────────────────────────────────────────────
+# CLASSIFICATION
+# ─────────────────────────────────────────────
+# Every event that reaches the catalogue passes through classify() in app.py,
+# whatever source found it. Three things come out of it:
+#
+#   category  - one of CATEGORIES, decided from the TITLE first and the source's
+#               category second. Sources are blunt: an Eventbrite "business"
+#               feed carries cyber briefings, a Luma builder calendar carries
+#               investor breakfasts, and a hackathon directory lists reading
+#               groups. Scoring the title against every category and letting
+#               the source break ties is what keeps "Cyber Griffin" out of
+#               Business and a pitch night out of Hackathons.
+#   format    - what KIND of thing it is (conference, workshop, talk, meetup,
+#               networking, hackathon, webinar, expo, course, pitch), so the
+#               list can say so on every row and people can filter by it.
+#   offtopic  - a short reason when the listing is not a professional event
+#               at all (nightlife, sport, leisure, a job advert, a form), so
+#               the browse list can hold it back and say how many it held.
+#
+# The scoring is deliberately simple: weighted phrase hits, no model. It has
+# to run on ~500 titles every 30 minutes, be explainable from one table, and
+# degrade to "the source's category" when a title says nothing - which is
+# exactly the old behaviour, so nothing that was right before gets worse.
+
+CATEGORIES = ("Intelligence & Security", "Defence & Geopolitics", "Cyber & Infosec",
+              "Tech & AI", "Education & Research", "Builder & Tech Community",
+              "Business & Networking", "Hackathons")
+
+FORMATS = ("Hackathon", "Conference", "Expo", "Workshop", "Course", "Talk",
+           "Pitch", "Meetup", "Networking", "Webinar")
+
+
+def _rx(pattern):
+    return re.compile(pattern, re.IGNORECASE)
+
+
+# (regex, weight). Phrases that nail the category outright score 3; strong
+# signals 2; words that lean but are shared with neighbours 1.
+_CAT_RULES = {
+    "Hackathons": [
+        (_rx(r"\b(hackathon|buildathon|datathon|ideathon|makeathon|codefest|hack ?day|hack ?night"
+             r"|hack ?week(end)?|hack(?:ers?)? ?house|game ?jam|ship ?a ?thon|speed ?build|build ?weekend)\b"), 6),
+        (_rx(r"хакатон|\b(ctf|capture the flag|ai wars|build 20\d\d)\b"), 4),
+        (_rx(r"\bhack(?!ney)\w*|\w+hack\b"), 4),
+        (_rx(r"\b(challenge|competition|bounty|prizes?|prize pool)\b"), 2),
+    ],
+    "Intelligence & Security": [
+        (_rx(r"\b(osint|socmint|humint|geoint|sigint|imint|open.?source intelligence|intelligence analys\w*"
+             r"|counter.?terror\w*|counter.?extrem\w*|terrorism|espionage|spy\w*|secret intelligence"
+             r"|national security|homeland security|security service|mi5|mi6|gchq|cia|fbi|interpol"
+             r"|investigat\w+ journalis\w*|due diligence|sanctions|financial crime|anti.?money|\baml\b|\bkyc\b"
+             r"|fraud|illicit finance|disinformation|influence operations?|organised crime|organized crime"
+             r"|intelligence (community|studies|history|officer|agenc\w+|service))\b"), 3),
+        (_rx(r"\b(intelligence|surveillance|covert|insider threat|protective security|hostile state)\b"), 2),
+    ],
+    "Defence & Geopolitics": [
+        (_rx(r"\b(defen[cs]e|military|armed forces|\barmy\b|\bnavy\b|\braf\b|royal navy|air force|nato"
+             r"|geopolitic\w*|foreign policy|foreign affairs|statecraft|diplomac\w*|rusi|chatham house|iiss"
+             r"|deterren\w+|warfare|missile\w*|nuclear|arms control|munitions|hypersonic|dstl|ministry of defence|\bmod\b"
+             r"|ukraine|russia|taiwan|indo.?pacific|middle east|gaza|israel|iran|china polic\w*|grand strategy)\b"), 3),
+        (_rx(r"\b(war|security policy|strategic studies|drone\w*|space domain|maritime|peacekeeping|conflict|sovereign\w*)\b"), 2),
+    ],
+    "Cyber & Infosec": [
+        (_rx(r"\b(cyber\w*|infosec|information security|ransomware|malware|phishing|penetration test\w*|pentest\w*"
+             r"|red team\w*|blue team\w*|purple team\w*|\bsoc\b|\bsiem\b|\bciso\w*|owasp|bsides|def ?con|appsec"
+             r"|threat (intel\w*|hunting|detection)|zero.?trust|incident response|vulnerabilit\w+|\bcve\b|exploit\w*"
+             r"|identity (and|&) access|\biam\b|cloud security|devsecops|security operations|ethical hack\w*|bug bounty)\b"), 3),
+        (_rx(r"\b(security|privacy|encryption|cryptograph\w*|resilience|data protection|gdpr)\b"), 1),
+    ],
+    "Tech & AI": [
+        (_rx(r"\b(artificial intelligence|machine learning|\bml\b|\bllms?\b|large language|generative ai|gen ?ai|agentic|ai agents?"
+             r"|deep learning|neural|computer vision|\bnlp\b|data science|data engineering|\bmlops\b|\brag\b|transformers?"
+             r"|robotics|quantum|blockchain|web3|crypto\w*|cloud native|kubernetes|devops|platform engineering"
+             r"|software engineering|open ?source|developer\w*|programming|python|javascript|typescript|rust|golang)\b"), 3),
+        (_rx(r"\b(ai|tech|technology|data|automation|digital|saas|api|product management|engineering)\b"), 1),
+    ],
+    "Education & Research": [
+        (_rx(r"\b(lecture|seminar|symposium|colloquium|research (seminar|talk|day|conference|forum|group)|reading group|journal club"
+             r"|phd|doctoral|postgraduate|academic|professor|inaugural|imperial college|ucl|king'?s college|\blse\b|oxford|cambridge"
+             r"|university of|\buniversity\b|royal institution|royal society|british academy|short course|study)\b"), 3),
+        (_rx(r"\b(research|science|scientist\w*|scholar\w*|paper|thesis|evals?|benchmark\w*|safety research)\b"), 1),
+    ],
+    "Builder & Tech Community": [
+        (_rx(r"\b(builders?|build (night|day|session|club|sprint)|co.?working|coworking|demo ?day|indie|makers?|ship(ping)? (it|day|night)"
+             r"|side.?projects?|hack(er)? ?club|dev ?club|study group|show ?(and|&) ?tell|office hours|community (meetup|night|day)"
+             r"|superteam|encode|lu\.ma|founders? (house|hub)|open build|project night|vibe ?cod\w*)\b"), 3),
+        (_rx(r"\b(meetup|community|builders?|hangout|jam|session|night)\b"), 1),
+    ],
+    "Business & Networking": [
+        (_rx(r"\b(founders?|investors?|investment|venture|\bvcs?\b|angel\w*|fundrais\w*|pitch(ing)? (night|event|competition|day)"
+             r"|startup\w*|scale.?up\w*|entrepreneur\w*|fintech|\bb2b\b|go.?to.?market|\bgtm\b|sales|marketing|growth|revenue"
+             r"|leadership|\bceo\b|\bcfo\b|\bcoo\b|\bcpo\b|chief \w+ officer|product leaders?|c.?suite|business (summit|school)"
+             r"|awards?|trade show|procurement|supply chain|exports?|private equity|m&a|mergers?)\b"), 3),
+        (_rx(r"\b(business|enterprise|industry|market\w*|finance|economy|economic|trade|commercial|partners?hip"
+             r"|networking|mixer|drinks|breakfast|brunch|lunch(eon)?|dinner|women in|expo)\b"), 1),
+    ],
+}
+
+_FORMAT_RULES = [
+    ("Hackathon",  _rx(r"\b(hackathon|buildathon|datathon|ideathon|makeathon|codefest|game ?jam|hack ?(day|night|week(end)?)|ctf|capture the flag|speed ?build)\b")),
+    ("Expo",       _rx(r"\b(expo|exhibition|trade ?show|showcase|fair)\b")),
+    ("Conference", _rx(r"\b(conference|summit|congress|symposium|convention|forum|festival|con\b|\bsummit\b)")),
+    ("Course",     _rx(r"\b(course|bootcamp|training|certification|programme|program|curriculum|cohort|fellowship|academy)\b")),
+    ("Workshop",   _rx(r"\b(workshop|masterclass|hands.?on|lab|clinic|tutorial|build (session|day|night)|practical)\b")),
+    ("Pitch",      _rx(r"\b(pitch\w*|demo ?day|investor day|showcase night|launch(pad)?|accelerator day)\b")),
+    ("Webinar",    _rx(r"\b(webinar|livestream|live stream|online (talk|session|briefing)|virtual (event|session|talk))\b")),
+    ("Talk",       _rx(r"\b(talk|lecture|keynote|fireside|panel|briefing|discussion|debate|q ?& ?a|in conversation|book launch|seminar|roundtable|round table)\b")),
+    ("Networking", _rx(r"\b(networking|mixer|drinks|breakfast|brunch|lunch(eon)?|dinner|social|reception|happy hour|coffee|walk)\b")),
+    ("Meetup",     _rx(r"\b(meetup|meet.?up|gathering|get.?together|hangout|community (night|day|meet)|co.?working|coworking|study group|reading group|journal club|office hours|show ?(and|&) ?tell)\b")),
+]
+
+# Off-topic reasons. A title that also carries professional substance (see
+# _PROFESSIONAL_MARKER_RE above) is never gated: "Sports, Fitness & Wellness:
+# Founders, Investment & Innovation" is a real investor event.
+_GATE_RULES = [
+    ("Nightlife",          _OFFTOPIC_TITLE_RE),
+    ("Sport and socials",  _rx(r"\b(padel|football|five.?a.?side|7.?a.?side|run ?club|running club|park ?run|netball|tennis|golf day"
+                               r"|boat club|rowing|cycling club|climbing|bouldering|track ?day|btcc|\bstroll\b|networking walk|walking club"
+                               r"|yoga|pilates|gym|crossfit|hiit|bootcamp class|dance class|salsa|bachata)\b")),
+    ("Arts and leisure",   _rx(r"\b(film (festival|screening|night|club)|screening\b|concert|gig\b|live music|storytelling night|dating"
+                               r"|sewing|knitting|cyanotype|pottery|ceramics|life drawing|paint(ing)? (class|night|and sip)|psychology of cats"
+                               r"|beauty brand|culture market|community garden|comedy night|quiz night|wine tasting|beer tasting|cocktail"
+                               r"|family science|mental[- ]health festival|philosophy course|sticker club|christmas party|halloween party"
+                               r"|wellbeing|wellness|mindfulness|meditation|sound bath|craft (night|club|fair)|book club|theatre|musical)\b")),
+    ("Not an event",       _rx(r"\b(interest form|sign.?up form|waitlist|volunteer days?|special issue|exclusive offer|discount code"
+                               r"|micro ?grants?|builder program(me)?|skit series|newsletter|survey|call for (papers|speakers|proposals)|application\w* (open|deadline))\b")),
+]
+_JOB_AD_RE = _rx(r"^(?:senior |junior |lead |principal |head of |staff |associate )?[\w &/\-\[\]().]*"
+                 r"\b(?:owner|engineer|manager|officer|director|analyst|developer|designer|scientist|consultant"
+                 r"|specialist|architect|associate|intern|administrator|coordinator|lead|recruiter)\b[\w &/\-\[\]().]*,\s+[A-Z][\w &\-]{2,60}$")
+_HOME_COUNTIES_RE = _rx(r"\b(towcester|silverstone|egham|royal holloway|waltham abbey|milton keynes|guildford|luton|chelmsford"
+                        r"|basingstoke|brighton|reading|slough|watford|st albans|oxford|cambridge|bedford|stevenage|crawley"
+                        r"|maidstone|southend|colchester|harlow|bracknell|woking|farnborough|aldershot|winchester|southampton"
+                        r"|portsmouth|canterbury|dartford|gravesend|sevenoaks|tunbridge wells|hemel hempstead|high wycombe)\b")
+
+
+def classify(title, source_category, location="", is_online=False):
+    """Returns {"category", "format", "offtopic", "recat"} for one event.
+
+    category falls back to the source's own when nothing in the title says
+    otherwise; recat is True when the title overruled the source, which the
+    frontend uses to explain "this was filed as X by its source"."""
+    t = " ".join(str(title or "").split())
+    loc = str(location or "")
+    src = source_category if source_category in CATEGORIES else "Tech & AI"
+    low_t = t.lower()
+
+    # --- category: weighted phrase hits, the source breaks ties ------------
+    scores = {c: 0 for c in CATEGORIES}
+    for cat, rules in _CAT_RULES.items():
+        for rx, w in rules:
+            n = len(rx.findall(t))
+            if n:
+                scores[cat] += w * min(n, 3)
+    # "Security" alone is the one word three categories share. A bare hit with
+    # no stronger cyber/intel/defence phrase stays with the source's category
+    # rather than being pulled into Cyber on a point.
+    scores[src] += 1.5
+    best = max(CATEGORIES, key=lambda c: (scores[c], c == src))
+    category = best if scores[best] > 1.5 else src
+    # A hackathon tag only sticks when the title really says so; a directory
+    # that lists reading groups as "hackathons" loses the argument here.
+    if category == "Hackathons" and not any(rx.search(t) for rx, _ in _CAT_RULES["Hackathons"]):
+        others = {c: s for c, s in scores.items() if c != "Hackathons"}
+        category = max(others, key=lambda c: (others[c], c == src))
+        if others[category] <= 1.5 and src != "Hackathons":
+            category = src
+        elif others[category] <= 1.5:
+            category = "Builder & Tech Community"
+
+    # --- format -------------------------------------------------------------
+    fmt = None
+    for name, rx in _FORMAT_RULES:
+        if rx.search(t):
+            fmt = name
+            break
+    if fmt is None and category == "Hackathons":
+        fmt = "Hackathon"
+    if fmt in (None, "Talk", "Meetup", "Networking", "Workshop", "Conference") and is_online and \
+            re.search(r"\b(webinar|online|virtual|livestream)\b", low_t):
+        fmt = "Webinar"
+
+    # --- off-topic gate ------------------------------------------------------
+    offtopic = None
+    # Geography is checked before the professional-marker exemption: a real
+    # expo in Silverstone is still not a London event.
+    if not is_online and _HOME_COUNTIES_RE.search(loc) and not _LONDON_NAME_RE.search(loc):
+        offtopic = "Outside London"
+    elif not _PROFESSIONAL_MARKER_RE.search(t) and category != "Hackathons":
+        if _OFFTOPIC_VENUE_RE.search(loc):
+            offtopic = "Nightlife"
+        else:
+            for reason, rx in _GATE_RULES:
+                if rx.search(t):
+                    offtopic = reason
+                    break
+            if offtopic is None and _JOB_AD_RE.match(t):
+                offtopic = "Job advert"
+
+    return {"category": category, "format": fmt, "offtopic": offtopic,
+            "recat": category != src}

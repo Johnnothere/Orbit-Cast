@@ -142,10 +142,10 @@ def run_scrape_background():
             return
         _scraping = True
     try:
-        from scraper import (SOURCES, event_id, HACKATHON_RE, is_london,
+        from scraper import (SOURCES, event_id, HACKATHON_RE, is_london, is_online,
                              norm_title, to_iso_date, harvest_luma_hosts,
                              collapse_series, discover_luma_sources,
-                             add_source_titles)
+                             add_source_titles, classify)
         all_events, summary_data = [], []
         lock = threading.Lock()
 
@@ -160,12 +160,17 @@ def run_scrape_background():
                     # that names a different city.
                     if not is_london(ev, src["name"]):
                         continue
-                    # Auto-tag hackathons from title, regardless of source -
-                    # keeps the category live instead of relying on a
-                    # hand-maintained list that goes stale.
-                    category = "Hackathons" if HACKATHON_RE.search(ev.get("title", "")) else src["category"]
+                    # Category, format and off-topic flag come from the TITLE
+                    # first and the source second (scraper.classify): a
+                    # source's category is a prior, not a verdict. Off-topic
+                    # listings are kept in the catalogue, flagged, so the
+                    # browse list can hold them back and say how many.
+                    cls = classify(ev.get("title", ""), src["category"],
+                                   ev.get("location", ""), is_online(ev))
                     enriched.append({**ev, "id": event_id(ev.get("title", ""), ev.get("url", "")),
-                                      "emoji": src["emoji"], "category": category})
+                                      "emoji": src["emoji"], "category": cls["category"],
+                                      "format": cls["format"], "offtopic": cls["offtopic"],
+                                      "recat": cls["recat"]})
                 # Trim recurring series to their next couple of dates - one
                 # calendar's weekly co-working slot is otherwise 16 of the
                 # rows in this catalog. Done HERE, after the London filter,
