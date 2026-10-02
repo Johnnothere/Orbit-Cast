@@ -3786,7 +3786,7 @@ CATEGORIES = ("Intelligence & Security", "Defence & Geopolitics", "Cyber & Infos
               "Business & Networking", "Hackathons")
 
 FORMATS = ("Hackathon", "Conference", "Expo", "Workshop", "Course", "Talk",
-           "Pitch", "Meetup", "Networking", "Webinar")
+           "Pitch", "Meetup", "Networking", "Social", "Webinar")
 
 
 def _rx(pattern):
@@ -3824,26 +3824,27 @@ _CAT_RULES = {
              r"|red team\w*|blue team\w*|purple team\w*|\bsoc\b|\bsiem\b|\bciso\w*|owasp|bsides|def ?con|appsec"
              r"|threat (intel\w*|hunting|detection)|zero.?trust|incident response|vulnerabilit\w+|\bcve\b|exploit\w*"
              r"|identity (and|&) access|\biam\b|cloud security|devsecops|security operations|ethical hack\w*|bug bounty)\b"), 3),
-        (_rx(r"\b(security|privacy|encryption|cryptograph\w*|resilience|data protection|gdpr)\b"), 1),
+        (_rx(r"\b(security|secur(e|ing)|privacy|encryption|cryptograph\w*|resilien\w*|data protection|gdpr|\brisk\b|compliance|forensic\w*|identit(y|ies)|insider|fraud|breach\w*|attack\w*|hack(er|ing)s?)\b"), 1.5),
     ],
     "Tech & AI": [
         (_rx(r"\b(artificial intelligence|machine learning|\bml\b|\bllms?\b|large language|generative ai|gen ?ai|agentic|ai agents?"
              r"|deep learning|neural|computer vision|\bnlp\b|data science|data engineering|\bmlops\b|\brag\b|transformers?"
              r"|robotics|quantum|blockchain|web3|crypto\w*|cloud native|kubernetes|devops|platform engineering"
              r"|software engineering|open ?source|developer\w*|programming|python|javascript|typescript|rust|golang)\b"), 3),
-        (_rx(r"\b(ai|tech|technology|data|automation|digital|saas|api|product management|engineering)\b"), 1),
+        (_rx(r"\b(ai|tech|technology|data|automation|digital|saas|api|product management|engineering|software|robot\w*|compute|infrastructure)\b"), 1.5),
     ],
     "Education & Research": [
         (_rx(r"\b(lecture|seminar|symposium|colloquium|research (seminar|talk|day|conference|forum|group)|reading group|journal club"
              r"|phd|doctoral|postgraduate|academic|professor|inaugural|imperial college|ucl|king'?s college|\blse\b|oxford|cambridge"
-             r"|university of|\buniversity\b|royal institution|royal society|british academy|short course|study)\b"), 3),
+             r"|university of|\buniversity\b|royal institution|royal society|british academy|short course|study|open day|careers? fair"
+             r"|commencement|\bcdt\b|\bmba\b|graduate|student\w*|telescope|physics|biolog\w*|mathemat\w*|chemistry|genomic\w*|neuro\w*|life sciences?)\b"), 3),
         (_rx(r"\b(research|science|scientist\w*|scholar\w*|paper|thesis|evals?|benchmark\w*|safety research)\b"), 1),
     ],
     "Builder & Tech Community": [
         (_rx(r"\b(builders?|build (night|day|session|club|sprint)|co.?working|coworking|demo ?day|indie|makers?|ship(ping)? (it|day|night)"
              r"|side.?projects?|hack(er)? ?club|dev ?club|study group|show ?(and|&) ?tell|office hours|community (meetup|night|day)"
              r"|superteam|encode|lu\.ma|founders? (house|hub)|open build|project night|vibe ?cod\w*)\b"), 3),
-        (_rx(r"\b(meetup|community|builders?|hangout|jam|session|night)\b"), 1),
+        (_rx(r"\b(meetup|meet.?up|community|builders?|hangout|jam|session|night|guild|chapter|circle|monthly|weekly|coworking|co.?working)\b|#\s?\d+"), 1.5),
     ],
     "Business & Networking": [
         (_rx(r"\b(founders?|investors?|investment|venture|\bvcs?\b|angel\w*|fundrais\w*|pitch(ing)? (night|event|competition|day)"
@@ -3856,17 +3857,29 @@ _CAT_RULES = {
 }
 
 _FORMAT_RULES = [
-    ("Hackathon",  _rx(r"\b(hackathon|buildathon|datathon|ideathon|makeathon|codefest|game ?jam|hack ?(day|night|week(end)?)|ctf|capture the flag|speed ?build)\b")),
-    ("Expo",       _rx(r"\b(expo|exhibition|trade ?show|showcase|fair)\b")),
-    ("Conference", _rx(r"\b(conference|summit|congress|symposium|convention|forum|festival|con\b|\bsummit\b)")),
-    ("Course",     _rx(r"\b(course|bootcamp|training|certification|programme|program|curriculum|cohort|fellowship|academy)\b")),
-    ("Workshop",   _rx(r"\b(workshop|masterclass|hands.?on|lab|clinic|tutorial|build (session|day|night)|practical)\b")),
-    ("Pitch",      _rx(r"\b(pitch\w*|demo ?day|investor day|showcase night|launch(pad)?|accelerator day)\b")),
-    ("Webinar",    _rx(r"\b(webinar|livestream|live stream|online (talk|session|briefing)|virtual (event|session|talk))\b")),
-    ("Talk",       _rx(r"\b(talk|lecture|keynote|fireside|panel|briefing|discussion|debate|q ?& ?a|in conversation|book launch|seminar|roundtable|round table)\b")),
-    ("Networking", _rx(r"\b(networking|mixer|drinks|breakfast|brunch|lunch(eon)?|dinner|social|reception|happy hour|coffee|walk)\b")),
-    ("Meetup",     _rx(r"\b(meetup|meet.?up|gathering|get.?together|hangout|community (night|day|meet)|co.?working|coworking|study group|reading group|journal club|office hours|show ?(and|&) ?tell)\b")),
+    ("Hackathon",  _rx(r"хакатон|\b(hackathon|buildathon|datathon|ideathon|makeathon|codefest|game ?jam|hack ?(day|night|week(end)?)"
+                       r"|ctf|capture the flag|speed ?build|hack(?!ney)\w*|\w+hack|ai wars|build ?weekend)\b")),
+    ("Expo",       _rx(r"\b(expo|exhibition|trade ?show|showcase|fair|open day|supplier day|careers? (fair|day))\b")),
+    ("Conference", _rx(r"\b(conference|summit|congress|symposium|convention|forum|festival|\w*con\b|live 20\d\d|week 20\d\d|annual (meeting|general meeting)|agm"
+                       r"|infosecurity europe|black hat|bsides|def ?con|owasp global|cyber ?uk|breakpoint|devcon|devconnect|token2049|slush|web summit|disrupt)\b")),
+    ("Workshop",   _rx(r"\b(workshop|masterclass|hands.?on|\blab\b|clinic|tutorial|build (session|day|night)|practical|tabletops?|focus group|working session|sprint)\b")),
+    ("Course",     _rx(r"\b(course|bootcamp|training|certification|(accelerator|builder|training|fellowship) programme?|curriculum|cohort|fellowship|academy|class(es)?|learn \w+|101|fundamentals|introduction to|intro to|for beginners|beginner'?s)\b")),
+    ("Pitch",      _rx(r"\b(pitch\w*|demo ?day|investor day|launch(pad)?|accelerator day|competition|finals?|awards?|elevator)\b")),
+    ("Meetup",     _rx(r"\b(meetup|meet.?up|gathering|get.?together|hangout|community|co.?working|coworking|study group|reading (group|club)|paper (reading|club)"
+                       r"|journal club|office hours|show ?(and|&) ?tell|guild|foundry|builders?|chapter|#\s?\d+|monthly|weekly|edition|night)\b")),
+    ("Networking", _rx(r"\b(networking|network|mixer|breakfast|breakie|lunch(eon)?|coffee|reception|meet and greet|open house|open rooms|club|circle)\b")),
+    ("Social",     _rx(r"\b(party|social(?! media)|after ?work|afterwork|after ?hours|happy hour|drinks|rooftop|running club|run ?club|padel|stroll|walk|football|five.?a.?side|7.?a.?side"
+                       r"|celebrat\w+|birthday|christmas|xmas|halloween|summer|picnic|karaoke|quiz|games? night|dinner|supper|brunch|bbq)\b")),
+    ("Webinar",    _rx(r"\b(webinar|livestream\w*|live stream|online (talk|session|briefing|event)|virtual (event|session|talk))\b")),
+    ("Talk",       _rx(r"\b(talks?|lecture|keynote|fireside|panel|briefing|discussion|debate|q ?& ?a|in conversation|conversations?|book (launch|talk)"
+                       r"|seminar|roundtable|round table|stocktake|session|update|reflections?|an evening with|evening of|presentation|address|interview|ama\b|town ?hall)\b")),
 ]
+# Titles that say what they are by their shape rather than by a keyword.
+_TALK_SHAPE_RE = _rx(r"^(how|why|what|when|where|who|is|are|can|should|do|does|will|the (future|case|cost|state|return|battle|art|rise|end) of|navigating|building|beyond|inside|lessons|reframing|redefining|rethinking|decrypting|from \w+ to|making|securing|scaling)\b|\?$|:\s")
+_FORMAT_FALLBACK = {"Hackathons": "Hackathon", "Builder & Tech Community": "Meetup",
+                    "Business & Networking": "Talk", "Education & Research": "Talk",
+                    "Intelligence & Security": "Talk", "Defence & Geopolitics": "Talk",
+                    "Cyber & Infosec": "Talk", "Tech & AI": "Talk"}
 
 # Off-topic reasons. A title that also carries professional substance (see
 # _PROFESSIONAL_MARKER_RE above) is never gated: "Sports, Fitness & Wellness:
@@ -3880,10 +3893,12 @@ _GATE_RULES = [
                                r"|sewing|knitting|cyanotype|pottery|ceramics|life drawing|paint(ing)? (class|night|and sip)|psychology of cats"
                                r"|beauty brand|culture market|community garden|comedy night|quiz night|wine tasting|beer tasting|cocktail"
                                r"|family science|mental[- ]health festival|philosophy course|sticker club|christmas party|halloween party"
-                               r"|wellbeing|wellness|mindfulness|meditation|sound bath|craft (night|club|fair)|book club|theatre|musical)\b")),
+                               r"|wellbeing|wellness|mindfulness|meditation|sound bath|craft (night|club|fair)|book club|theatre|musical"
+                               r"|for kids|children'?s|toddler|mass of|gig tickets|album launch|tour 20\d\d)\b|\(family\)")),
     ("Not an event",       _rx(r"\b(interest form|sign.?up form|waitlist|volunteer days?|special issue|exclusive offer|discount code"
                                r"|micro ?grants?|builder program(me)?|skit series|newsletter|survey|call for (papers|speakers|proposals)|application\w* (open|deadline))\b")),
 ]
+_NIGHTLIFE_STRONG_RE = _rx(r"(?<![a-z])(djs?\b|dj set|club ?night|nightclub|techno|drum ?(and|&) ?bass|afrobeats?|amapiano|garage night|silent disco|bottomless brunch|boiler ?room)\b")
 _JOB_AD_RE = _rx(r"^(?:senior |junior |lead |principal |head of |staff |associate )?[\w &/\-\[\]().]*"
                  r"\b(?:owner|engineer|manager|officer|director|analyst|developer|designer|scientist|consultant"
                  r"|specialist|architect|associate|intern|administrator|coordinator|lead|recruiter)\b[\w &/\-\[\]().]*,\s+[A-Z][\w &\-]{2,60}$")
@@ -3927,34 +3942,44 @@ def classify(title, source_category, location="", is_online=False):
         elif others[category] <= 1.5:
             category = "Builder & Tech Community"
 
-    # --- format -------------------------------------------------------------
-    fmt = None
+    # --- format: a keyword if the title has one, else the title's shape, else
+    # what events in this category almost always are. Every event ends up
+    # marked; `format_inferred` says when it was the fallback. ----------
+    fmt, inferred = None, False
     for name, rx in _FORMAT_RULES:
         if rx.search(t):
             fmt = name
             break
     if fmt is None and category == "Hackathons":
         fmt = "Hackathon"
-    if fmt in (None, "Talk", "Meetup", "Networking", "Workshop", "Conference") and is_online and \
-            re.search(r"\b(webinar|online|virtual|livestream)\b", low_t):
+    if fmt is None and _TALK_SHAPE_RE.search(t):
+        fmt = "Talk"
+    if fmt is None:
+        fmt, inferred = _FORMAT_FALLBACK.get(category, "Talk"), True
+    if fmt in ("Talk", "Meetup", "Networking", "Workshop", "Conference", "Course") and is_online and \
+            re.search(r"\b(webinar|online|virtual|livestream\w*)\b", low_t):
         fmt = "Webinar"
+    if fmt == "Social" and category == "Hackathons":
+        fmt = "Hackathon"
 
     # --- off-topic gate ------------------------------------------------------
     offtopic = None
-    # Geography is checked before the professional-marker exemption: a real
-    # expo in Silverstone is still not a London event.
+    # Geography and dedicated nightlife are checked before the
+    # professional-marker exemption: a real expo in Silverstone is still not a
+    # London event, and a "festival" with thirty DJs is a club night.
     if not is_online and _HOME_COUNTIES_RE.search(loc) and not _LONDON_NAME_RE.search(loc):
         offtopic = "Outside London"
+    elif category != "Hackathons" and (_NIGHTLIFE_STRONG_RE.search(t) or _OFFTOPIC_VENUE_RE.search(loc)):
+        offtopic = "Nightlife"
     elif not _PROFESSIONAL_MARKER_RE.search(t) and category != "Hackathons":
-        if _OFFTOPIC_VENUE_RE.search(loc):
-            offtopic = "Nightlife"
-        else:
-            for reason, rx in _GATE_RULES:
-                if rx.search(t):
-                    offtopic = reason
-                    break
-            if offtopic is None and _JOB_AD_RE.match(t):
-                offtopic = "Job advert"
+        for reason, rx in _GATE_RULES:
+            if rx.search(t):
+                offtopic = reason
+                break
+        if offtopic is None and _JOB_AD_RE.match(t):
+            offtopic = "Job advert"
+    elif _JOB_AD_RE.match(t) and not re.search(r"\b(summit|conference|workshop|hackathon|expo|forum)\b", low_t):
+        offtopic = "Job advert"
 
-    return {"category": category, "format": fmt, "offtopic": offtopic,
-            "recat": category != src}
+    return {"category": category, "format": fmt, "format_inferred": inferred,
+            "offtopic": offtopic, "recat": category != src}

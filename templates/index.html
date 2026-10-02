@@ -817,6 +817,9 @@ details.past[open]>summary .i{transform:rotate(180deg)}
 
 /* ---------- formats, filters, sort ---------- */
 .pill.fmt{background:transparent;border:1px solid var(--line-2);color:var(--tx-3)}
+.pill.fmt.inf{border-style:dashed}
+.row.compact .pill.fmt{height:18px;font-size:11px;padding:0 6px}
+.hc-foot .pill.fmt{margin-left:6px}
 .row-time .d{display:block;font-size:11.5px;color:var(--tx-3);margin-bottom:2px;white-space:nowrap}
 .menu.wide{min-width:380px;max-width:min(460px,calc(100vw - 32px));padding:14px 16px 12px;display:grid;gap:14px;max-height:min(70vh,560px);overflow:auto}
 .menu.wide button{height:auto;width:auto;display:inline-flex}
@@ -1231,13 +1234,13 @@ function makeEv(r,i){
   if(!srv&&cat==='Hackathons'&&!HACK.test(title)){cat=recatOf(title);recat=true;}
   const online=!!r.is_online||loc.kind==='online'||ONLINE_T.test(title);
   const gate=srv?(r.offtopic||null):gateOf(title,r.location||'');
-  let fmt=r.format||null;
+  let fmt=r.format||null;const fmtInf=!!r.format_inferred;
   if(!fmt&&cat==='Hackathons')fmt='Hackathon';
   if(!fmt&&online&&/\bwebinar\b/i.test(title))fmt='Webinar';
   const tod=tm.mins==null?null:tm.mins<12*60?'morning':tm.mins<17*60?'afternoon':'evening';
   const dow=date?((date.getDay()===0||date.getDay()===6)?'weekend':'weekday'):null;
   return{id:String(r.id||('e'+i)),title,url:r.url,cat,recat,date,dk:date?dkey(date):null,rawDate:r.date||'',
-    online,loc,time:tm.label,mins:tm.mins,end:tm.end,endMins:tm.endMins,fmt,tod,dow,
+    online,loc,time:tm.label,mins:tm.mins,end:tm.end,endMins:tm.endMins,fmt,fmtInf,tod,dow,
     aliases:(Array.isArray(r.aliases)?r.aliases:[]).filter(a=>a&&a!==r.title),gate,far,key:seriesKey(title)};
 }
 function buildEV(raw){
@@ -1265,7 +1268,7 @@ const upcoming=e=>!(e.date&&e.date<TODAY);
 /* ================= state ================= */
 const RANGES=[['all','Any date'],['today','Today'],['week','Next 7 days'],['month','This month'],['30','Next 30 days']];
 const SORTS=[['soon','Soonest first'],['time','Time of day'],['az','A to Z'],['cat','By category']];
-const FORMATS=['Conference','Talk','Workshop','Course','Meetup','Networking','Pitch','Hackathon','Expo','Webinar'];
+const FORMATS=['Conference','Talk','Workshop','Course','Meetup','Networking','Social','Pitch','Hackathon','Expo','Webinar'];
 const TODS=[['any','Any time'],['morning','Morning'],['afternoon','Afternoon'],['evening','Evening']];
 const DOWS=[['any','Any day'],['weekday','Weekdays'],['weekend','Weekends']];
 const S={view:'home',q:'',where:store.get('oc_where','london'),range:'all',cat:'all',savedOnly:false,showHidden:false,winDays:7,
@@ -1331,7 +1334,7 @@ function collapse(list){
   }
   return out;
 }
-const viewOpts=()=>S.view==='calendar'?{range:false}:S.view==='hackathons'?{range:false}:{};
+const viewOpts=()=>S.view==='calendar'?{range:false}:{};
 const hiddenCount=()=>EV.filter(e=>e.gate&&upcoming(e)).length;
 
 /* ================= shared fragments ================= */
@@ -1354,7 +1357,7 @@ function rowHTML(it,compact,withDate){
   if(it.more&&it.more.length)pills+='<span class="pill" title="Also on '+esc(it.more.slice(0,4).map(x=>fmtDay(x.date)).join(', '))+'">+'+it.more.length+' date'+(it.more.length>1?'s':'')+'</span>';
   if(m)pills+='<span class="pill match">'+ic('spark','s14')+'Match '+m.fit+'</span>';
   if(e.gate)pills+='<span class="pill hid">'+esc(e.gate)+'</span>';
-  if(e.fmt&&!compact)pills+='<span class="pill fmt">'+esc(e.fmt)+'</span>';
+  if(e.fmt)pills+='<span class="pill fmt'+(e.fmtInf?' inf':'')+'" title="'+(e.fmtInf?'Format judged from the category; the listing doesn’t say':'Format from the listing')+'">'+esc(e.fmt)+'</span>';
   let t=e.time?'<span>'+e.time+'</span>'+(e.end&&!compact?'<span class="end">'+e.end+'</span>':''):'<span class="tbc" title="The organiser hasn’t listed a start time">TBC</span>';
   if(withDate)t='<span class="d">'+(e.date?fmtDM(e.date):'TBC')+'</span>'+t;
   return '<div class="row'+(compact?' compact':'')+(e.gate?' is-hidden':'')+'" data-id="'+esc(e.id)+'">'
@@ -1417,10 +1420,20 @@ function renderToolbar(){
       +'<div class="menu" id="sortMenu" role="menu" hidden>'+SORTS.map(([k,l])=>'<button role="menuitemradio" data-sort="'+k+'" aria-checked="false">'+l+ic('check','s16')+'</button>').join('')+'</div></div>'
       +'<button class="chip tb-desk" data-act="saved" aria-pressed="false">'+ic('bookmark','s14')+'Saved <span class="n" id="savedN">0</span></button>';
   }else if(v==='calendar'){
-    h+='<span class="tb-desk">'+whereSeg()+'</span><span class="tb-spacer tb-desk"></span>'
+    h+='<span class="tb-desk">'+whereSeg()+'</span>'
+      +'<div class="menu-wrap tb-desk"><button class="btn btn-secondary sm" id="filterBtn" data-menu="filter" aria-haspopup="menu" aria-expanded="false">'+ic('sliders','s16')+'<span id="filterLbl">Filters</span>'+ic('chevron-down','s14')+'</button>'
+      +'<div class="menu wide" id="filterMenu" role="group" aria-label="More filters" hidden>'+filterPanelHTML()+'</div></div>'
+      +'<span class="tb-spacer tb-desk"></span>'
       +'<div class="seg tb-desk" role="group" aria-label="Calendar range"><button data-mode="weeks">Next 5 weeks</button><button data-mode="month">Month</button></div>';
   }else{
-    h+='<span class="tb-desk" id="hackWhere"></span><button class="chip tb-desk" data-act="saved" aria-pressed="false">'+ic('bookmark','s14')+'Saved <span class="n" id="savedN">0</span></button>';
+    h+='<span class="tb-desk" id="hackWhere"></span>'
+      +'<div class="menu-wrap tb-desk"><button class="btn btn-secondary sm" id="rangeBtn" data-menu="range" aria-haspopup="menu" aria-expanded="false">'+ic('calendar','s16')+'<span id="rangeLbl"></span>'+ic('chevron-down','s14')+'</button>'
+      +'<div class="menu" id="rangeMenu" role="menu" hidden>'+RANGES.map(([k,l])=>'<button role="menuitemradio" data-range="'+k+'" aria-checked="false">'+l+ic('check','s16')+'</button>').join('')+'</div></div>'
+      +'<div class="menu-wrap tb-desk"><button class="btn btn-secondary sm" id="filterBtn" data-menu="filter" aria-haspopup="menu" aria-expanded="false">'+ic('sliders','s16')+'<span id="filterLbl">Filters</span>'+ic('chevron-down','s14')+'</button>'
+      +'<div class="menu wide" id="filterMenu" role="group" aria-label="More filters" hidden>'+filterPanelHTML()+'</div></div>'
+      +'<div class="menu-wrap tb-desk"><button class="btn btn-ghost sm" id="sortBtn" data-menu="sort" aria-haspopup="menu" aria-expanded="false">'+ic('list','s16')+'<span id="sortLbl"></span>'+ic('chevron-down','s14')+'</button>'
+      +'<div class="menu" id="sortMenu" role="menu" hidden>'+SORTS.filter(x=>x[0]!=='cat').map(([k,l])=>'<button role="menuitemradio" data-sort="'+k+'" aria-checked="false">'+l+ic('check','s16')+'</button>').join('')+'</div></div>'
+      +'<button class="chip tb-desk" data-act="saved" aria-pressed="false">'+ic('bookmark','s14')+'Saved <span class="n" id="savedN">0</span></button>';
   }
   h+='<button class="icon-btn phone-only" data-act="filters" id="filtersBtn" aria-label="Filters">'+ic('sliders')+'</button>';
   $('#toolbar').innerHTML=h;
@@ -1430,7 +1443,7 @@ function renderToolbar(){
 // The same controls appear in the desktop drop-down and the phone sheet, so
 // they are built once here and bound through the shared click handler.
 function filterPanelHTML(){
-  const cnt={};for(const e of EV){if(!upcoming(e)||e.gate)continue;const k=e.fmt||'Other';cnt[k]=(cnt[k]||0)+1;}
+  const cnt={};const base=S.view==='hackathons'?(e=>e.cat==='Hackathons'):(e=>true);for(const e of EV){if(!upcoming(e)||e.gate||!base(e))continue;const k=e.fmt||'Other';cnt[k]=(cnt[k]||0)+1;}
   const fmts=FORMATS.concat(['Other']).filter(f=>cnt[f]||S.fmt.has(f));
   return'<div class="fp-sec"><h4>Format</h4><div class="chips">'+fmts.map(f=>'<button class="chip" data-fmt="'+esc(f)+'" aria-pressed="'+S.fmt.has(f)+'">'+esc(f)+(cnt[f]?' <span class="n">'+cnt[f]+'</span>':'')+'</button>').join('')+'</div></div>'
     +'<div class="fp-sec"><h4>Time of day</h4><div class="seg" role="group" aria-label="Time of day">'+TODS.map(([k,l])=>'<button data-tod="'+k+'" aria-pressed="'+(S.tod===k)+'">'+l+'</button>').join('')+'</div><p class="fp-hint">Morning is before 12:00, evening from 17:00.</p></div>'
@@ -1525,7 +1538,7 @@ function renderCal(){
   const lastDay=addDays(end,-1);
   const title=r.month===null?fmtDM(r.start)+' – '+fmtDM(lastDay)+' <span>'+lastDay.getFullYear()+'</span>':new Date(S.calY,S.calM,1).toLocaleDateString('en-GB',{month:'long'})+' <span>'+S.calY+'</span>';
   $('#vhead').innerHTML='<div style="width:100%"><div class="cal-top"><button class="icon-btn" data-act="calprev" aria-label="Previous">'+ic('chevron-left')+'</button><h1 class="cal-title">'+title+'</h1><button class="icon-btn" data-act="calnext" aria-label="Next">'+ic('chevron-right')+'</button><button class="btn btn-secondary sm" data-act="caltoday">Today</button></div>'
-    +'<p class="vsub"><span><b>'+list.length+'</b> events in view</span><span class="sep">·</span><span>'+(narrow('(max-width:1180px)')?'tap a day to see it':'select a day to see it on the right')+'</span></p></div>';
+    +'<p class="vsub"><span><b>'+list.length+'</b> events in view</span><span class="sep">·</span><span>'+(narrow('(max-width:1180px)')?'tap a day to see it':'select a day to see it on the right')+'</span>'+(extraFilterCount()?'<span class="sep">·</span><button class="linkish" data-act="clearextra">clear filters</button>':'')+'</p></div>';
   let cells='';
   for(let i=0;i<r.weeks*7;i++){
     const d=addDays(r.start,i),k=dkey(d),evs=CAL_DAYS[k]||[];
@@ -1565,16 +1578,16 @@ function selectDay(k){
 
 /* ---------- hackathons ---------- */
 function renderHack(){
-  const all=EV.filter(e=>e.cat==='Hackathons'&&passes(e,{where:'all',cat:false,range:false}));
+  const all=EV.filter(e=>e.cat==='Hackathons'&&passes(e,{where:'all',cat:false}));
   const lon=all.filter(e=>!e.online),onl=all.filter(e=>e.online);
-  const list=(S.where==='london'?lon:S.where==='online'?onl:all).slice().sort(cmp);
-  $('#vhead').innerHTML='<div><h1 class="vtitle">Hackathons</h1><p class="vsub"><span><b>'+lon.length+'</b> in London</span><span class="sep">·</span><span><b>'+onl.length+'</b> online</span>'+'<span class="sep">·</span><span>filed from the title, not the source</span></p></div>';
+  const list=(S.where==='london'?lon:S.where==='online'?onl:all).slice().sort(cmpSorted);
+  $('#vhead').innerHTML='<div><h1 class="vtitle">Hackathons</h1><p class="vsub"><span><b>'+lon.length+'</b> in London</span><span class="sep">·</span><span><b>'+onl.length+'</b> online</span>'+'<span class="sep">·</span><span>filed from the title, not the source</span>'+(extraFilterCount()||S.range!=='all'||S.sort!=='soon'?'<span class="sep">·</span><button class="linkish" data-act="clearall">clear filters</button>':'')+'</p></div>';
   const hw=$('#hackWhere');if(hw)hw.innerHTML=whereSeg({london:lon.length,online:onl.length,all:all.length});
   const card=e=>{
     const df=daysFrom(e.date);const soon=df!==null&&df<=3?(df===0?'Today':df===1?'Tomorrow':'In '+df+' days'):'';
     return'<article class="hcard"><div class="hc-top"><span class="hc-date">'+(e.date?fmtDay(e.date):'Date TBC')+(e.time?' · '+e.time:'')+'</span>'+(soon?'<span class="pill soon">'+soon+'</span>':'')+'</div>'
       +'<button class="hc-open" data-open="'+esc(e.id)+'"><span class="hc-title">'+esc(e.title)+'</span></button>'
-      +'<div class="hc-foot"><span class="where">'+ic(e.online?'globe':'pin','s14')+(e.online?'Online':esc(e.loc.kind==='venue'?e.loc.text:'London'))+'</span>'+saveBtn(e.id)+'</div></article>';
+      +'<div class="hc-foot"><span class="where">'+ic(e.online?'globe':'pin','s14')+(e.online?'Online':esc(e.loc.kind==='venue'?e.loc.text:'London'))+(e.fmt&&e.fmt!=='Hackathon'?' <span class="pill fmt">'+esc(e.fmt)+'</span>':'')+'</span>'+saveBtn(e.id)+'</div></article>';
   };
   let h=list.length?'<div class="hgrid">'+list.map(card).join('')+'</div>':emptyHTML();
   if(S.where==='london'&&onl.length)h+='<div class="hidden-note">'+ic('globe')+'<div><b>'+onl.length+' online hackathons aren’t shown.</b> Most are run from outside the UK. <button class="linkish" data-where="online">Show online</button></div></div>';
@@ -1855,7 +1868,7 @@ function openEvent(id){
   let h='<div class="dr-grab"></div><div class="dr-hd"><span class="dr-cat"><span class="dot" style="--c:var('+c.v+')"></span>'+esc(c.label)+'</span><button class="icon-btn" data-act="close" aria-label="Close">'+ic('x')+'</button></div>'
    +'<div class="dr-body"><h2 class="dr-title">'+esc(e.title)+'</h2>'
    +'<ul class="facts"><li>'+ic('calendar')+'<div><b>'+(e.date?fmtLong(e.date):'Date TBC')+'</b><span>'+esc(timeLine)+'</span></div></li><li>'+ic(where[0])+'<div><b>'+esc(where[1])+'</b><span>'+esc(where[2])+'</span></div></li>'
-   +(e.fmt?'<li>'+ic('target')+'<div><b>'+esc(e.fmt)+'</b><span>'+esc(c.label)+(e.recat?' · filed here from the title, not the source':'')+'</span></div></li>':'')+'</ul>';
+   +(e.fmt?'<li>'+ic('target')+'<div><b>'+esc(e.fmt)+(e.fmtInf?' <span class="muted">(probably)</span>':'')+'</b><span>'+esc(c.label)+(e.recat?' · filed here from the title, not the source':'')+(e.fmtInf?' · the listing doesn’t say what kind of event it is':'')+'</span></div></li>':'')+'</ul>';
   if(m){
     const det=[m.why_now?['Why now',m.why_now]:null,m.prepare?['Prepare',m.prepare]:null,m.benefit?['Benefit',m.benefit]:null].filter(Boolean);
     const hasMap=m.distance_km!=null&&m.event_lat!=null&&m.event_lng!=null&&!!OC_USER_LOC;
@@ -1878,10 +1891,10 @@ function openFilters(){
   const n=v==='events'?EV.filter(e=>passes(e)).length:null;
   let h='<div class="dr-grab"></div><div class="dr-hd"><span class="dr-cat">'+ic('sliders','s16')+'Filters</span><button class="icon-btn" data-act="close" aria-label="Close">'+ic('x')+'</button></div><div class="dr-body">'
    +'<div class="sheet-sec" style="margin-top:4px"><h4>Where</h4><div class="seg" role="group" aria-label="Where">'+['london','online','all'].map(w=>'<button data-where="'+w+'" aria-pressed="'+(S.where===w)+'">'+lbl[w]+'</button>').join('')+'</div></div>';
-  if(v==='events')h+='<div class="sheet-sec"><h4>When</h4><div class="opt-list" role="radiogroup" aria-label="When">'+RANGES.map(([k,l])=>'<button class="opt" role="radio" data-range="'+k+'" aria-checked="'+(S.range===k)+'">'+l+ic('check','s16')+'</button>').join('')+'</div></div>';
+  if(v!=='calendar')h+='<div class="sheet-sec"><h4>When</h4><div class="opt-list" role="radiogroup" aria-label="When">'+RANGES.map(([k,l])=>'<button class="opt" role="radio" data-range="'+k+'" aria-checked="'+(S.range===k)+'">'+l+ic('check','s16')+'</button>').join('')+'</div></div>';
   if(v==='calendar')h+='<div class="sheet-sec"><h4>Show</h4><div class="seg" role="group"><button data-mode="weeks" aria-pressed="'+(S.calMode==='weeks')+'">Next 5 weeks</button><button data-mode="month" aria-pressed="'+(S.calMode==='month')+'">Month</button></div></div>';
   if(v!=='calendar')h+='<div class="sheet-sec"><div class="set-row"><div><b>Saved only</b><span>'+saved.size+' saved'+(ME.signed_in&&SAVED_SRV?' on your account':' on this device')+'</span></div><button class="switch" role="switch" data-act="saved" aria-checked="'+S.savedOnly+'" aria-label="Saved only"></button></div></div>';
-  if(v==='events')h+='<div class="sheet-sec"><h4>Sort</h4><div class="opt-list" role="radiogroup" aria-label="Sort"><'+SORTS.map(([k,l])=>'button class="opt" role="radio" data-sort="'+k+'" aria-checked="'+(S.sort===k)+'">'+l+ic('check','s16')+'</button>').join('<')+'</div></div>';
+  if(v!=='calendar')h+='<div class="sheet-sec"><h4>Sort</h4><div class="opt-list" role="radiogroup" aria-label="Sort"><'+SORTS.map(([k,l])=>'button class="opt" role="radio" data-sort="'+k+'" aria-checked="'+(S.sort===k)+'">'+l+ic('check','s16')+'</button>').join('<')+'</div></div>';
   h+='<div class="sheet-sec">'+filterPanelHTML()+'</div>';
   h+='</div><div class="dr-foot"><button class="btn btn-primary" data-act="close">'+(n!=null?'Show '+n+' events':'Done')+'</button></div>';
   openDrawer(h,'Filters');
@@ -2372,6 +2385,7 @@ document.addEventListener('click',ev=>{
     case'clear':resetFilters();render();updateToolbar();break;
     case'timed':S.timed=!S.timed;S.winDays=7;refilter();break;
     case'clearextra':clearExtra();S.winDays=7;closeMenu();render();if(filtersOpen())openFilters();break;
+    case'clearall':clearExtra();S.range='all';S.winDays=7;closeMenu();render();break;
     case'retry':LOAD_ERR=null;render();loadEvents(true);break;
 
     case'filters':openFilters();break;
