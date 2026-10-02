@@ -716,6 +716,104 @@ details.card .body{margin-top:14px;display:grid;gap:14px;font-size:14.5px;color:
 .mo-body .btn.block .g-logo{flex:none}
 .set-row .btn{flex:none}
 .nojs{padding:120px 24px;text-align:center;color:var(--tx-2)}
+
+/* ---------- account panel ---------- */
+.modal.wide{width:min(800px,100%);height:min(740px,calc(100dvh - 48px));max-height:none;display:flex;flex-direction:column;overflow:hidden}
+.ac-hd{display:flex;align-items:center;gap:8px;padding:14px 14px 0 16px}
+.ac-hd .acct-id{flex:1;min-width:0;background:none;padding:0 0 0 6px}
+.ac-hd .who b,.ac-hd .who span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ac-hd .saved-flash{flex:none}
+.ac-tabs{display:flex;gap:2px;padding:10px 16px 0;border-bottom:1px solid var(--line-2);overflow-x:auto;scrollbar-width:none;flex:none}
+.ac-tabs::-webkit-scrollbar{display:none}
+.ac-tab{display:inline-flex;align-items:center;gap:7px;height:42px;padding:0 13px;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;background:none;color:var(--tx-3);font:500 14px/1 var(--f-body);white-space:nowrap;border-radius:8px 8px 0 0}
+.ac-tab:hover{color:var(--tx)}
+.ac-tab[aria-selected="true"]{color:var(--tx);border-bottom-color:var(--ac)}
+.ac-tab[aria-selected="true"] .i{color:var(--ac)}
+.ac-tab .n{font:500 11.5px var(--f-mono);color:var(--tx-3);padding:2px 6px;border-radius:999px;background:var(--s3)}
+.ac-body{flex:1;min-height:0;overflow:auto;padding:20px 22px 24px;display:grid;gap:16px;align-content:start;overscroll-behavior:contain}
+.ac-card{display:grid;gap:14px;padding:18px 20px;border-radius:18px;border:1px solid var(--line-2);background:color-mix(in oklab,var(--s2) 55%,transparent)}
+.ac-card-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.ac-card h3,.ac-sec h3{font:600 15.5px/1.3 var(--f-display);letter-spacing:-.01em}
+.ac-card .sub{margin-top:3px;font-size:13px;color:var(--tx-3);max-width:60ch}
+.ac-card .tags{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.ac-card .pgrid{margin-top:0}
+.ac-card .traj{margin-top:0}
+.ac-lede{font-size:15px;color:var(--tx)}
+.ac-sec{display:grid;gap:10px}
+.ac-sec h3 .n,.ac-sec-hd .n{font:500 12px var(--f-mono);color:var(--tx-3);margin-left:4px}
+.ac-sec-hd{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.ac-foot{display:grid;gap:12px;padding-top:14px;border-top:1px solid var(--line)}
+.ac-foot p{font-size:13.5px;color:var(--tx-2);max-width:64ch}
+.ac-foot p b{font-weight:600;color:var(--tx)}
+.row-btns{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.ac-note{padding:10px 14px;border-radius:12px;background:var(--s2);font-size:13.5px;color:var(--tx)}
+.ac-note.ok{background:color-mix(in oklab,var(--ok) 14%,transparent)}
+.ac-note.err{background:color-mix(in oklab,var(--danger) 14%,transparent)}
+.ac-empty{display:grid;justify-items:center;gap:8px;padding:40px 20px;text-align:center;border:1px dashed var(--line-3);border-radius:18px}
+.ac-empty>.i{width:26px;height:26px;color:var(--tx-3)}
+.ac-empty h3{font:600 17px/1.3 var(--f-display)}
+.ac-empty p{max-width:52ch;font-size:14px;color:var(--tx-2)}
+.ac-empty .btn{margin-top:8px}
+.run{border:1px solid var(--line-2);border-radius:18px;overflow:clip}
+.run-hd{display:flex;align-items:center;gap:10px;min-height:42px;padding:8px 16px;background:var(--s2);font-size:13.5px;color:var(--tx-2)}
+.run-hd b{font-weight:600;color:var(--tx);flex:none}
+.run-hd span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.run-hd .n{margin-left:auto;flex:none;font:500 12px var(--f-mono);color:var(--tx-3)}
+.hm{display:grid;grid-template-columns:52px minmax(0,1fr);gap:14px;padding:14px 16px;border-top:1px solid var(--line)}
+.hm.muted .hm-main>h4,.hm.muted .hm-why,.hm.muted .hm-score{opacity:.5}
+.hm-score{font:500 24px/1.1 var(--f-mono);color:var(--ac);font-variant-numeric:tabular-nums;padding-top:1px}
+.hm-score.hot{color:var(--warm)}
+.hm-main h4,.sv-main h4{font:500 15px/1.35 var(--f-body);color:var(--tx)}
+.hm-meta{margin-top:3px;font-size:13px;line-height:1.45;color:var(--tx-3)}
+.hm-meta .dot{margin-right:7px;vertical-align:1px}
+.pill.match{padding:0 7px;border:0;border-radius:999px}
+.hm-meta .warn{color:var(--danger)}
+.hm-why{margin-top:8px;font-size:14px;color:var(--tx-2)}
+.hm-acts{display:flex;align-items:center;gap:2px;flex-wrap:wrap;margin:8px 0 0 -8px}
+.hm-acts .btn.sm{height:32px;padding:0 10px}
+.sv-list{border:1px solid var(--line-2);border-radius:18px;overflow:clip}
+.sv{display:grid;grid-template-columns:78px minmax(0,1fr) auto;align-items:center;gap:12px;padding:11px 8px 11px 16px}
+.sv+.sv{border-top:1px solid var(--line)}
+.sv-when b{display:block;font:500 13.5px var(--f-mono);color:var(--tx)}
+.sv-when span{display:block;margin-top:2px;font:400 12px var(--f-mono);color:var(--tx-3)}
+.sv-main h4{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sv-acts{display:flex;gap:2px}
+details.past>summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between}
+details.past>summary::-webkit-details-marker{display:none}
+details.past>summary .i{color:var(--tx-3);transition:transform .15s}
+details.past[open]>summary .i{transform:rotate(180deg)}
+.copy-row{display:flex;gap:8px;align-items:center}
+.copy-row .input{height:40px;font:400 12.5px var(--f-mono);color:var(--tx-2);text-overflow:ellipsis}
+.copy-row .btn{flex:none;min-width:76px}
+.dg-grid{display:grid;gap:14px}
+.dg-grid .seg{justify-self:start;max-width:100%;overflow-x:auto}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chips .chip{height:32px}
+.sends{list-style:none;margin:0;padding:0;border:1px solid var(--line-2);border-radius:14px;overflow:clip}
+.sends li{display:grid;grid-template-columns:96px minmax(0,1fr);gap:12px;padding:10px 14px;font-size:13.5px;color:var(--tx-2)}
+.sends li+li{border-top:1px solid var(--line)}
+.sends b{font:500 12.5px var(--f-mono);color:var(--tx)}
+.held{list-style:none;margin:0;padding:0;border:1px solid var(--line-2);border-radius:18px;overflow:clip}
+.held li{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 10px 12px 16px}
+.held li+li{border-top:1px solid var(--line)}
+.held b{display:block;font-weight:500;font-size:14.5px}
+.held span{display:block;font-size:13px;color:var(--tx-3)}
+.ac-card .set-row+.set-row{padding-top:14px;border-top:1px solid var(--line)}
+.confirm .row-btns{margin-top:2px}
+.switch[disabled]{opacity:.45;cursor:not-allowed}
+@media (max-width:860px){
+  .modal.wide{width:100%;height:92dvh;border-radius:22px 22px 0 0}
+  .ac-body{padding:16px 16px 22px}
+  .ac-hd .btn-ghost{padding:0 8px}
+  .ac-card{padding:16px}
+  .hm{grid-template-columns:40px minmax(0,1fr);gap:10px;padding:14px}
+  .hm-score{font-size:20px}
+  .sv{grid-template-columns:64px minmax(0,1fr) auto;padding-left:14px}
+  .sv-main h4{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .sv-acts a{display:none}
+  .copy-row{flex-wrap:wrap}
+  .set-row{align-items:flex-start}
+}
 </style>
 </head>
 <body>
@@ -1622,8 +1720,8 @@ function openFilters(){
 /* ================= modal: sign in / account ================= */
 const GLOGO='<svg class="g-logo" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>';
 let modalFocus=null;
-function modal(html){modalFocus=document.activeElement;$('#modalBox').innerHTML=html;$('#modal').hidden=false;setTimeout(()=>{const f=$('#modalBox input,#modalBox a.btn,#modalBox button:not([data-act="mclose"])');if(f)f.focus();},30);}
-function closeModal(){if($('#modal').hidden)return;$('#modal').hidden=true;if(modalFocus&&document.contains(modalFocus))modalFocus.focus();}
+function modal(html){modalFocus=document.activeElement;$('#modalBox').classList.remove('wide');$('#modalBox').innerHTML=html;$('#modal').hidden=false;setTimeout(()=>{const f=$('#modalBox input,#modalBox a.btn,#modalBox button:not([data-act="mclose"])');if(f)f.focus();},30);}
+function closeModal(){if($('#modal').hidden)return;$('#modal').hidden=true;$('#modalBox').classList.remove('wide');if(modalFocus&&document.contains(modalFocus))modalFocus.focus();}
 function openSignin(gate){
   S.pendingRun=!!gate;
   if(gate){saveDraft();store.set('oc_pending',1);}
@@ -1649,12 +1747,15 @@ async function sendLink(){
 }
 async function loadMe(){
   try{const r=await fetch('/api/me',{cache:'no-store'});ME=await r.json();}catch(e){ME={signed_in:false,google_enabled:true};}
-  syncRun();checkReturning();
+  syncRun();checkReturning();syncSaved();
   return ME;
 }
 async function signOut(){
   try{await fetch('/api/auth/logout',{method:'POST'});}catch(e){}
   ME={signed_in:false,google_enabled:ME.google_enabled};S.result=null;S.matches=null;
+  /* An account's saved list must not stay behind on a shared browser. */
+  if(SAVED_SRV){saved.clear();store.set('oc_saved',[]);}
+  SAVED_SRV=null;savedSyncedFor=null;ACCT.hist=null;
   $('#results').hidden=true;$('#results').innerHTML='';$('#returning').hidden=true;
   closeModal();syncRun();if(S.view!=='home')render();
   toast('Signed out');
@@ -1662,71 +1763,294 @@ async function signOut(){
 function fmtBytes(n){if(!n)return'';return n<1024?n+' B':n<1048576?(n/1024).toFixed(0)+' KB':(n/1048576).toFixed(1)+' MB';}
 function fmtWhen(iso){if(!iso)return'';const d=new Date(iso);return isNaN(d)?'':d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});}
 function nextText(iso){if(!iso)return'';const d=new Date(iso);if(isNaN(d))return'';return d.toLocaleString('en-GB',{weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'});}
-function openAccount(){
+function dayText(iso){if(!iso)return'';const d=new Date(iso);return isNaN(d)?'':d.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'});}
+
+/* ---------- saved events on the account ----------
+   Signed out, saved events live in this browser. Signed in, the account is
+   the source of truth: what this browser had is merged up once, then the
+   list follows the person to any device. The server keeps a snapshot of
+   each event, so one that leaves the catalogue stays in the list. */
+let SAVED_SRV=null,savedSyncedFor=null;
+const snap=e=>({id:e.id,title:e.title,url:e.url,category:e.cat,date:e.rawDate||e.dk||'',time:e.time?(e.end?e.time+'–'+e.end:e.time):'',location:e.loc.text||'',is_online:e.online});
+function setSavedFromServer(list){
+  SAVED_SRV=list;saved.clear();list.forEach(e=>saved.add(e.id));store.set('oc_saved',Array.from(saved));
+  if(S.view!=='home')render();
+  if(acctOpen())renderAccount();
+}
+async function syncSaved(){
+  if(!ME.signed_in){savedSyncedFor=null;SAVED_SRV=null;return;}
+  if(savedSyncedFor===ME.email)return;
+  savedSyncedFor=ME.email;
+  try{
+    let r=await fetch('/api/me/saved',{cache:'no-store'});
+    if(!r.ok){savedSyncedFor=null;return;}            /* unavailable: keep this device's list */
+    let list=(await r.json()).events||[];
+    const have=new Set(list.map(e=>e.id));
+    const extra=Array.from(saved).filter(id=>!have.has(id));
+    if(extra.length){
+      r=await postJSON('/api/me/saved',{events:extra.map(id=>BY[id]?snap(BY[id]):{id})});
+      if(r.ok)list=(await r.json()).events||[];
+    }
+    setSavedFromServer(list);
+  }catch(e){savedSyncedFor=null;}
+}
+function evFromSnap(s){
+  if(BY[s.id])return BY[s.id];
+  const e=makeEv({id:s.id,title:s.title,url:s.url||'#',category:s.category,date:s.date,time:s.time,location:s.location,is_online:s.is_online},0);
+  e.unlisted=LOADED;BY[e.id]=e;return e;
+}
+
+/* ================= your account ================= */
+const ACCT={tab:'profile',hist:null,confirm:null,note:null,dg:null,busy:null};
+const TABS=[['profile','Profile','user'],['matches','Matches','spark'],['saved','Saved','bookmark'],['digest','Digest','mail'],['data','Data','sliders']];
+const acctOpen=()=>!$('#modal').hidden&&$('#modalBox').classList.contains('wide');
+function openAccount(tab){
   if(!ME.signed_in){openSignin(false);return;}
-  const a=ME.alerts||{},cv=ME.cv||{};
-  const on=!!(a.configured&&!a.paused);
-  const freq=a.frequency||'weekly',every=a.interval_days||3,day=a.weekday||0,hour=(a.send_hour===0||a.send_hour)?a.send_hour:8;
-  const days=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-  const freqSeg='<div class="seg" role="group" aria-label="How often">'+[['daily','Daily'],['every_n_days','Every few days'],['weekly','Weekly']].map(([k,l])=>'<button data-freq="'+k+'" aria-pressed="'+(freq===k)+'">'+l+'</button>').join('')+'</div>';
-  const dayField=freq==='weekly'?'<label class="field"><span>On</span><select class="select" id="dgDay">'+days.map((d,i)=>'<option value="'+i+'"'+(day===i?' selected':'')+'>'+d+'</option>').join('')+'</select></label>'
-    :freq==='every_n_days'?'<label class="field"><span>Every</span><select class="select" id="dgEvery">'+[2,3,4,5,7,10,14].map(n=>'<option value="'+n+'"'+(every===n?' selected':'')+'>'+n+' days</option>').join('')+'</select></label>':'<div></div>';
-  const hourField='<label class="field"><span>At (your local time)</span><select class="select" id="dgHour">'+Array.from({length:24},(_,i)=>i).map(hh=>'<option value="'+hh+'"'+(hour===hh?' selected':'')+'>'+pad(hh)+':00</option>').join('')+'</select></label>';
+  if(tab&&TABS.some(t=>t[0]===tab))ACCT.tab=tab;
+  ACCT.confirm=null;ACCT.note=null;ACCT.dg=Object.assign({},ME.alerts||{});
+  if($('#modal').hidden)modalFocus=document.activeElement;
+  $('#modalBox').classList.add('wide');$('#modal').hidden=false;
+  renderAccount();
+  loadHistory();syncSaved();
+  setTimeout(()=>{const t=$('#modalBox .ac-tab[aria-selected="true"]');if(t)t.focus();},30);
+}
+async function loadHistory(){
+  try{
+    const r=await fetch('/api/me/history',{cache:'no-store'});
+    ACCT.hist=r.ok?await r.json():{runs:[],profile:null,failed:true};
+  }catch(e){ACCT.hist={runs:[],profile:null,failed:true};}
+  if(acctOpen())renderAccount();
+}
+function acNote(text,cls){ACCT.note={tab:ACCT.tab,text,cls:cls||''};renderAccount();}
+function setTab(tab){ACCT.tab=tab;ACCT.confirm=null;ACCT.note=null;renderAccount(true);const t=$('#modalBox .ac-tab[aria-selected="true"]');if(t)t.focus();}
+function renderAccount(resetScroll){
+  const box=$('#modalBox');const old=$('.ac-body',box);const top=old&&!resetScroll?old.scrollTop:0;
   const first=(ME.name||'').trim();
   const av=ME.avatar_url?'<img class="nav-avatar" src="'+esc(ME.avatar_url)+'" alt="" referrerpolicy="no-referrer">':'<span class="avatar">'+esc((first||ME.email||'A').charAt(0).toUpperCase())+'</span>';
-  const cvCard=cv.on_file
-    ?'<div class="cv-card">'+ic('file')+'<div class="nm"><b>'+esc(cv.last_filename||'Written description')+'</b><span>'+esc([cv.file_count?(cv.file_count===1?'1 file':cv.file_count+' files'):'',cv.total_bytes?fmtBytes(cv.total_bytes):'',fmtWhen(cv.last_file_at||cv.last_text_at)?'updated '+fmtWhen(cv.last_file_at||cv.last_text_at):''].filter(Boolean).join(' · ')||'Used for your matches and your digest')+'</span></div><button class="btn btn-secondary sm" data-act="replacecv">Replace</button><button class="btn btn-ghost sm" data-act="delcv">Delete</button></div>'
-    :'<div class="cv-card">'+ic('file')+'<div class="nm"><b>Nothing stored yet</b><span>Run an analysis with “Keep my CV and profile” on and it is kept here.</span></div></div>';
-  modal('<div class="mo-hd"><h2 id="moTitle">Your account</h2><button class="icon-btn" data-act="mclose" aria-label="Close">'+ic('x')+'</button></div><div class="mo-body">'
-   +'<div class="acct-id">'+av+'<div class="who"><b>'+esc(first||ME.email||'')+'</b><span>'+esc(first?ME.email:'')+'</span></div><button class="btn btn-ghost sm" data-act="signout">Sign out</button></div>'
-   +'<section class="mo-sec"><h3>Stored CV</h3>'+cvCard+'<p class="status" id="cvStatus" aria-live="polite"></p></section>'
-   +'<section class="mo-sec"><div class="set-row"><div><b>Email digest</b><span>New events that score 65 or more against your profile. Some weeks that is none, and the email says so.</span></div><button class="switch" role="switch" data-act="dg-on" aria-checked="'+on+'" aria-label="Email digest"'+(ME.has_profile?'':' disabled')+'></button></div>'
-   +(ME.has_profile?'':'<p class="muted">Run an analysis first. The digest matches against your saved profile.</p>')
-   +'<div id="dgOpts" style="display:grid;gap:10px"'+(on?'':' hidden')+'>'+freqSeg+'<div class="two">'+dayField+hourField+'</div><p class="next" id="dgNext">'+(a.next_send_at?'Next email: <b>'+esc(nextText(a.next_send_at))+'</b>':'')+'</p></div><p class="status" id="dgStatus" aria-live="polite"></p></section>'
-   +'<section class="mo-sec"><h3>Your data</h3>'
-   +'<div class="set-row"><div><b>Keep my CV and profile</b><span>Needed for the digest and for reusing your profile. Also the switch next to the run button.</span></div><button class="switch" role="switch" data-act="keep2" aria-checked="'+S.keep+'" aria-label="Keep my CV and profile"></button></div>'
-   +'<div class="set-row"><div><b>Use my location for distances</b><span>Shows how far each match is. Never changes which events you see.</span></div><button class="switch" role="switch" data-act="loc" aria-checked="'+S.locOn+'" aria-label="Use my location"></button></div>'
-   +'<div id="delWrap"><button class="btn btn-danger sm" data-act="delask">Delete my data</button></div></section>'
-   +'<p class="saved-flash" id="savedFlash" aria-live="polite">Saved</p></div>');
-  ['dgDay','dgHour','dgEvery'].forEach(id=>{const el=$('#'+id);if(el)el.addEventListener('change',()=>saveDigest());});
+  const how=ME.signin_method==='google'?'Signs in with Google':'Signs in by emailed link';
+  const nMatch=ACCT.hist&&ACCT.hist.runs.length?ACCT.hist.runs.find(r=>r.matches.length):null;
+  const counts={matches:nMatch?nMatch.matches.length:'',saved:saved.size||''};
+  const body={profile:tabProfile,matches:tabMatches,saved:tabSaved,digest:tabDigest,data:tabData}[ACCT.tab]();
+  const note=ACCT.note&&ACCT.note.tab===ACCT.tab?'<p class="ac-note '+ACCT.note.cls+'" role="status">'+esc(ACCT.note.text)+'</p>':'';
+  box.innerHTML='<div class="ac-hd"><div class="acct-id">'+av+'<div class="who"><b>'+esc(first||ME.email||'')+'</b><span>'+esc((first?ME.email+' · ':'')+how)+'</span></div></div>'
+    +'<span class="saved-flash" id="savedFlash" aria-live="polite">Saved</span>'
+    +'<button class="btn btn-ghost sm" data-act="signout">Sign out</button><button class="icon-btn" data-act="mclose" aria-label="Close">'+ic('x')+'</button></div>'
+    +'<h2 class="sr" id="moTitle">Your account</h2>'
+    +'<div class="ac-tabs" role="tablist" aria-label="Account sections">'+TABS.map(([k,l,i])=>'<button class="ac-tab" role="tab" data-act="ac-tab" data-tab="'+k+'" aria-selected="'+(ACCT.tab===k)+'" tabindex="'+(ACCT.tab===k?0:-1)+'">'+ic(i,'s16')+l+(counts[k]?'<span class="n">'+counts[k]+'</span>':'')+'</button>').join('')+'</div>'
+    +'<div class="ac-body" role="tabpanel">'+note+body+'</div>';
+  const nb=$('.ac-body',box);if(nb)nb.scrollTop=top;
+  const st=$('.ac-tab[aria-selected="true"]',box);if(st&&st.scrollIntoView)st.scrollIntoView({block:'nearest',inline:'center'});
+  ['dgDay','dgHour','dgEvery'].forEach(id=>{const el=$('#'+id);if(el)el.addEventListener('change',()=>{const k={dgDay:'weekday',dgHour:'send_hour',dgEvery:'interval_days'}[id];ACCT.dg[k]=+el.value;saveDigest();});});
 }
-let dgFreq=null;
+const acSkel='<div class="ac-card"><div class="skel" style="height:18px;width:45%"></div><div class="skel" style="height:14px;margin-top:14px"></div><div class="skel" style="height:14px;width:80%;margin-top:8px"></div></div>';
+const acEmpty=(icon,h,p,btn)=>'<div class="ac-empty">'+ic(icon)+'<h3>'+h+'</h3><p>'+p+'</p>'+(btn||'')+'</div>';
+
+/* ---------- profile ---------- */
+function cvCardHTML(){
+  const cv=ME.cv||{};
+  if(!cv.on_file)return'<div class="cv-card">'+ic('file')+'<div class="nm"><b>Nothing stored</b><span>Run an analysis with “Keep my CV and profile” on and it is kept here.</span></div></div>';
+  const meta=[cv.file_count?(cv.file_count===1?'1 file':cv.file_count+' files'):'',cv.total_bytes?fmtBytes(cv.total_bytes):'',fmtWhen(cv.last_file_at||cv.last_text_at)?'updated '+fmtWhen(cv.last_file_at||cv.last_text_at):''].filter(Boolean).join(' · ');
+  if(ACCT.confirm==='cv')return'<div class="confirm"><b>Delete your stored CV?</b><span>The uploaded file and its extracted text are removed. The profile built from it stays, so your matches and digest keep working.</span><div class="row-btns"><button class="btn btn-danger sm" data-act="delcv">Delete the CV</button><button class="btn btn-ghost sm" data-act="ac-cancel">Cancel</button></div></div>';
+  return'<div class="cv-card">'+ic('file')+'<div class="nm"><b>'+esc(cv.last_filename||'Written description')+'</b><span>'+esc(meta||'Used for your matches and your digest')+'</span></div><button class="btn btn-secondary sm" data-act="replacecv">Replace</button><button class="btn btn-ghost sm" data-act="ac-ask" data-what="cv">Delete</button></div>';
+}
+function tabProfile(){
+  const h=ACCT.hist;if(!h)return acSkel+acSkel;
+  const p=h.profile;
+  if(!p)return acEmpty('user','No profile yet','Run an analysis and the profile the engine builds from your CV appears here: what it found strong, what it found thin, and where it thinks you are headed. Every match is scored against it.','<button class="btn btn-primary sm" data-act="getmatched">Get matched '+ic('arrow-right','s14')+'</button>')
+    +'<section class="ac-sec"><h3>Stored CV</h3>'+cvCardHTML()+'</section>';
+  const src=h.runs.find(r=>!r.reused)||h.runs[0];
+  const from=src?(src.filename?'Built from '+src.filename:'Built from what you wrote')+' · '+fmtWhen(src.at):'';
+  const li=a=>(a&&a.length)?a.map(s=>'<li>'+esc(s)+'</li>').join(''):'';
+  const thin=h.evidence_level==='thin';
+  return'<section class="ac-card"><div class="ac-card-hd"><div><h3>What the engine knows about you</h3><p class="sub">'+esc(from)+'</p></div>'
+    +'<div class="tags">'+(p.seniority?'<span class="pill match">'+esc(p.seniority)+'</span>':'')+(h.field?'<span class="pill">'+esc(h.field)+'</span>':'')+'</div></div>'
+    +(p.summary?'<p class="ac-lede">'+esc(p.summary)+'</p>':'')
+    +'<div class="pgrid"><div class="strong"><h4><span class="dot" style="--c:var(--ac)"></span>Strong in</h4><ul>'+(li(p.strengths)||'<li>'+(thin?'Nothing to point at yet. You told us where you’re going, not where you’ve been.':'No specific strengths surfaced.')+'</li>')+'</ul></div>'
+    +'<div><h4><span class="dot"></span>Thin on</h4><ul>'+(li(p.gaps)||'<li>No notable gaps detected.</li>')+'</ul></div></div>'
+    +(p.trajectory?'<p class="traj"><b>Where you’re headed.</b> '+esc(p.trajectory)+'</p>':'')
+    +'<div class="ac-foot"><p>Every match and every digest is scored against this and nothing else. If it reads wrong, your matches will be wrong, so update it.</p>'
+    +'<div class="row-btns"><button class="btn btn-primary sm" data-act="ac-rerun">Run again with this profile</button><button class="btn btn-secondary sm" data-act="replacecv">Update with a new CV</button></div></div></section>'
+    +'<section class="ac-sec"><h3>Stored CV</h3>'+cvCardHTML()+'</section>';
+}
+
+/* ---------- matches ---------- */
+function matchEv(m){
+  if(BY[m.event_id])return BY[m.event_id];
+  if(!m.listed)return null;
+  const e=makeEv({id:m.event_id,title:m.title,url:m.url,category:m.category,date:m.date,time:m.time,location:m.location,is_online:m.is_online},0);
+  BY[e.id]=e;return e;
+}
+function tabMatches(){
+  const h=ACCT.hist;if(!h)return acSkel+acSkel;
+  if(h.failed)return acEmpty('info','Your history could not be loaded','Close this panel and open it again in a moment.','');
+  const total=h.runs.reduce((n,r)=>n+r.matches.length,0);
+  if(!h.runs.length||(!total&&h.runs.length<2))return acEmpty('spark','No matches yet','Each time you run an analysis, what it matched is kept here with the score and the reason, so you can come back to it.','<button class="btn btn-primary sm" data-act="getmatched">Get matched '+ic('arrow-right','s14')+'</button>');
+  const runHTML=r=>{
+    const label=r.reused?'Re-run of your profile':(r.filename?esc(r.filename):'Written description');
+    let out='<section class="run"><header class="run-hd"><b>'+fmtWhen(r.at)+'</b><span>'+label+'</span><span class="n">'+(r.matches.length?r.matches.length+' match'+(r.matches.length===1?'':'es'):'nothing cleared 65')+'</span></header>';
+    out+=r.matches.map(m=>{
+      const e=matchEv(m),c=catOf(e?e.cat:m.category),fit=Math.round(m.fit_score||0);
+      const meta=e?esc(c.label)+(e.date?' · '+fmtDay(e.date):'')+(e.time?' · '+e.time:'')+' · '+esc(e.online?'Online':(e.loc.kind==='venue'?e.loc.text:'London')):esc(c.label)+' · no longer listed';
+      return'<article class="hm'+(m.dismissed?' muted':'')+'"><div class="hm-score'+(fit>=85?' hot':'')+'">'+fit+'</div><div class="hm-main"><h4>'+esc(e?e.title:m.title)+'</h4><p class="hm-meta"><span class="dot" style="--c:var('+c.v+')"></span>'+meta+'</p>'
+        +(m.why?'<p class="hm-why">'+esc(m.why)+'</p>':'')
+        +'<div class="hm-acts">'+(e?saveBtn(e.id,'sm')+'<button class="btn btn-ghost sm" data-act="ac-details" data-id="'+esc(e.id)+'">Details</button><a class="btn btn-ghost sm" href="'+esc(e.url)+'" target="_blank" rel="noopener"'+(m.recommendation_id?' data-track="'+esc(m.recommendation_id)+'"':'')+'>View event '+ic('arrow-up-right','s14')+'</a>':'')
+        +'<button class="btn btn-ghost sm" data-act="ac-mute" data-id="'+esc(m.event_id)+'" data-title="'+esc(m.title)+'" aria-pressed="'+!!m.dismissed+'">'+(m.dismissed?'Muted · undo':'Not for me')+'</button></div></div></article>';
+    }).join('');
+    return out+'</section>';
+  };
+  const clear=ACCT.confirm==='history'
+    ?'<div class="confirm"><b>Clear your match history?</b><span>Every past match and its reasoning is removed. Your profile, stored CV, saved events and digest are not touched.</span><div class="row-btns"><button class="btn btn-danger sm" data-act="ac-clear">Clear history</button><button class="btn btn-ghost sm" data-act="ac-cancel">Cancel</button></div></div>'
+    :'<button class="btn btn-ghost sm" data-act="ac-ask" data-what="history">Clear match history</button>';
+  return h.runs.map(runHTML).join('')
+    +'<div class="ac-foot"><p><b>Not for me</b> mutes one event: it is never emailed to you again. It does not change how anything is scored.</p>'+(total?clear:'')+'</div>';
+}
+
+/* ---------- saved ---------- */
+function savedList(){
+  const src=SAVED_SRV||Array.from(saved).map(id=>BY[id]).filter(Boolean).map(snap);
+  return src.map(evFromSnap);
+}
+function feedHTML(){
+  const f=ME.calendar_feed;
+  if(!f)return'<section class="ac-card"><div class="ac-card-hd"><div><h3>Keep your calendar in step</h3><p class="sub">A private link for Google Calendar, Apple Calendar or Outlook. Save an event here and it shows up there, with its time and venue. Remove it here and it goes.</p></div></div><div class="row-btns"><button class="btn btn-secondary sm" data-act="ac-feed" data-do="create">'+ic('calendar-plus','s16')+'Create my calendar link</button></div></section>';
+  if(ACCT.confirm==='feed')return'<section class="ac-card"><div class="confirm"><b>Turn the calendar link off?</b><span>Calendar apps subscribed to it stop updating. You can create a new link later; it will be a different address.</span><div class="row-btns"><button class="btn btn-danger sm" data-act="ac-feed" data-do="revoke">Turn it off</button><button class="btn btn-ghost sm" data-act="ac-cancel">Cancel</button></div></div></section>';
+  return'<section class="ac-card"><div class="ac-card-hd"><div><h3>Your calendar link</h3><p class="sub">Subscribed calendars refresh every few hours. Anyone with this link can see your saved events, so reset it if it gets shared by mistake.</p></div></div>'
+    +'<div class="copy-row"><input class="input" id="feedUrl" readonly value="'+esc(f.https)+'" aria-label="Calendar link"><button class="btn btn-secondary sm" data-act="ac-copy">Copy</button></div>'
+    +'<div class="row-btns"><a class="btn btn-primary sm" href="'+esc(f.webcal)+'">'+ic('calendar-plus','s16')+'Open in my calendar app</a><button class="btn btn-ghost sm" data-act="ac-feed" data-do="rotate">Reset link</button><button class="btn btn-ghost sm" data-act="ac-ask" data-what="feed">Turn off</button></div></section>';
+}
+function tabSaved(){
+  const list=savedList().sort(cmp);
+  if(!list.length)return acEmpty('bookmark','Nothing saved yet','Use the bookmark on any event. Saved events are kept on your account, so they are here on every device you sign in on, and stay listed even if the organiser takes the page down.','<button class="btn btn-primary sm" data-view="events">Browse events '+ic('arrow-right','s14')+'</button>')+feedHTML();
+  const up=list.filter(upcoming),past=list.filter(e=>!upcoming(e)).reverse();
+  const row=e=>{const c=catOf(e.cat);
+    return'<div class="sv"><div class="sv-when"><b>'+(e.date?fmtDM(e.date):'TBC')+'</b><span>'+(e.date?e.date.toLocaleDateString('en-GB',{weekday:'short'}):'')+(e.time?' '+e.time:'')+'</span></div>'
+      +'<div class="sv-main"><h4>'+esc(e.title)+'</h4><p class="hm-meta"><span class="dot" style="--c:var('+c.v+')"></span>'+esc(c.label)+' · '+esc(e.online?'Online':(e.loc.kind==='venue'?e.loc.text:'London'))+(e.unlisted?' · <span class="warn">no longer listed</span>':'')+'</p></div>'
+      +'<div class="sv-acts"><a class="icon-btn sm" href="'+esc(e.url)+'" target="_blank" rel="noopener" aria-label="Open the organiser’s page">'+ic('arrow-up-right','s16')+'</a><button class="icon-btn sm" data-ics="'+esc(e.id)+'" aria-label="Add to calendar">'+ic('calendar-plus','s16')+'</button>'+saveBtn(e.id,'sm')+'</div></div>';};
+  return'<section class="ac-sec"><div class="ac-sec-hd"><h3>Upcoming <span class="n">'+up.length+'</span></h3>'+(up.some(e=>e.date)?'<button class="btn btn-ghost sm" data-act="ac-saved-ics">'+ic('download','s16')+'Download .ics</button>':'')+'</div>'
+    +(up.length?'<div class="sv-list">'+up.map(row).join('')+'</div>':'<p class="muted">Nothing upcoming. Everything you saved has already happened.</p>')+'</section>'
+    +feedHTML()
+    +(past.length?'<details class="ac-sec past"><summary><h3>Past <span class="n">'+past.length+'</span></h3>'+ic('chevron-down')+'</summary><div class="sv-list">'+past.map(row).join('')+'</div></details>':'');
+}
+
+/* ---------- digest ---------- */
+const DG_STATUS={sent:n=>n+' match'+(n===1?'':'es')+' sent',sent_empty:()=>'Nothing cleared 65, so you got the short empty one',skipped_empty:()=>'Nothing new. No email sent',send_failed:()=>'Could not be delivered. Those events will be tried again',no_profile:()=>'Skipped: no profile to match against',error:()=>'Failed on our side. Nothing was sent'};
+function tabDigest(){
+  const g=ACCT.dg||{};const on=!!(g.configured&&!g.paused);
+  const freq=g.frequency||'weekly',every=g.interval_days||3,day=g.weekday||0,hour=(g.send_hour===0||g.send_hour)?g.send_hour:8;
+  const days=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  const cats=g.categories||[];const snoozed=g.snooze_until&&new Date(g.snooze_until)>new Date();
+  let h='<section class="ac-card"><div class="set-row"><div><b>Email digest</b><span>New events that score 65 or more against your profile. Some weeks that is none, and the email says so in two lines.</span></div><button class="switch" role="switch" data-act="dg-on" aria-checked="'+on+'" aria-label="Email digest"'+(ME.has_profile?'':' disabled')+'></button></div>';
+  if(!ME.has_profile)h+='<p class="muted">Run an analysis first. The digest matches against your saved profile.</p>';
+  if(on){
+    if(snoozed)h+='<div class="res-note">'+ic('clock','s16')+'<div>On a break until <b>'+esc(dayText(g.snooze_until))+'</b>. <button class="linkish" data-act="ac-resume">Resume now</button></div></div>';
+    h+='<div class="dg-grid"><div class="field"><span>How often</span><div class="seg" role="group" aria-label="How often">'+[['daily','Daily'],['every_n_days','Every few days'],['weekly','Weekly']].map(([k,l])=>'<button data-freq="'+k+'" aria-pressed="'+(freq===k)+'">'+l+'</button>').join('')+'</div></div>'
+      +'<div class="two">'+(freq==='weekly'?'<label class="field"><span>On</span><select class="select" id="dgDay">'+days.map((d,i)=>'<option value="'+i+'"'+(day===i?' selected':'')+'>'+d+'</option>').join('')+'</select></label>'
+        :freq==='every_n_days'?'<label class="field"><span>Every</span><select class="select" id="dgEvery">'+[2,3,4,5,7,10,14].map(n=>'<option value="'+n+'"'+(every===n?' selected':'')+'>'+n+' days</option>').join('')+'</select></label>':'')
+      +'<label class="field"><span>At (your local time)</span><select class="select" id="dgHour">'+Array.from({length:24},(_,i)=>i).map(hh=>'<option value="'+hh+'"'+(hour===hh?' selected':'')+'>'+pad(hh)+':00</option>').join('')+'</select></label></div>'
+      +'<div class="field"><span>Only these categories</span><div class="chips"><button class="chip" data-dcat="all" aria-pressed="'+(!cats.length)+'">Everything</button>'+CATS.map(c=>'<button class="chip" data-dcat="'+esc(c.key)+'" aria-pressed="'+cats.includes(c.key)+'"><span class="dot" style="--c:var('+c.v+')"></span>'+esc(c.label)+'</button>').join('')+'</div></div>'
+      +(snoozed?'':'<div class="field"><span>Take a break</span><div class="chips">'+[[7,'1 week'],[14,'2 weeks'],[30,'1 month']].map(([n,l])=>'<button class="chip" data-snooze="'+n+'">'+l+'</button>').join('')+'</div></div>')
+      +'</div><p class="next">'+(g.next_send_at?'Next email: <b>'+esc(nextText(g.next_send_at))+'</b>':'')+'</p>';
+  }
+  h+='</section>';
+  h+='<section class="ac-card"><div class="set-row"><div><b>See one now</b><span>Sends today’s digest to '+esc(ME.email||'your address')+', scored exactly like the scheduled one. It takes about a minute and does not use up your next email.</span></div><button class="btn btn-secondary sm" data-act="ac-test"'+(ME.has_profile&&ACCT.busy!=='test'?'':' disabled')+'>'+(ACCT.busy==='test'?'<span class="sp"></span>Sending':'Send it')+'</button></div></section>';
+  const rec=(g.recent||[]);
+  h+='<section class="ac-sec"><h3>What you’ve been sent</h3>'+(rec.length?'<ul class="sends">'+rec.map(s=>'<li><b>'+esc(dayText(s.at))+'</b><span>'+esc((DG_STATUS[s.status]||(()=>s.status))(s.matches||0))+'</span></li>').join('')+'</ul>':'<p class="muted">Nothing yet.</p>')
+    +'<p class="muted">This is the only email OrbitCast sends, apart from the sign-in link you ask for. Every one has a link that turns it off in one click, without signing in.</p></section>';
+  return h;
+}
 async function saveDigest(over){
   if(!ME.signed_in)return;
-  const a=ME.alerts||{};
-  const sw=$('[data-act="dg-on"]');const on=sw?sw.getAttribute('aria-checked')==='true':!(a.paused);
-  const body=Object.assign({
-    frequency:dgFreq||a.frequency||'weekly',
-    interval_days:+(($('#dgEvery')||{}).value||a.interval_days||3),
-    weekday:+(($('#dgDay')||{}).value||a.weekday||0),
-    send_hour:+(($('#dgHour')||{}).value||((a.send_hour===0||a.send_hour)?a.send_hour:8)),
+  const g=Object.assign(ACCT.dg||{},over||{});
+  const body={frequency:g.frequency||'weekly',interval_days:g.interval_days||3,weekday:g.weekday||0,
+    send_hour:(g.send_hour===0||g.send_hour)?g.send_hour:8,
     timezone:(Intl.DateTimeFormat().resolvedOptions().timeZone)||'Europe/London',
-    paused:!on
-  },over||{});
-  const st=$('#dgStatus');if(st){st.className='status';st.textContent='Saving…';}
+    paused:!!g.paused,categories:g.categories||[]};
+  if('snooze_days' in g){body.snooze_days=g.snooze_days;delete g.snooze_days;}
   try{
     const r=await postJSON('/api/digest/prefs',body);const d=await r.json().catch(()=>({}));
-    if(!r.ok){if(st){st.className='status err';st.textContent=d.error||'Could not save that.';}return;}
-    if(st){st.className='status ok';st.textContent=d.paused?'Digest paused.':'Saved.';}
-    const nx=$('#dgNext');if(nx)nx.innerHTML=d.next_send_at?'Next email: <b>'+esc(nextText(d.next_send_at))+'</b>':'';
-    flash();
-    try{const r2=await fetch('/api/me',{cache:'no-store'});ME=await r2.json();}catch(e){}
+    if(!r.ok){acNote(d.error||'Could not save that.','err');return;}
+    Object.assign(g,body,{configured:true,paused:d.paused,next_send_at:d.next_send_at,categories:d.categories||body.categories,snooze_until:d.snooze_until||null});
+    ACCT.dg=g;ME.alerts=Object.assign({},ME.alerts,g);
     if(!d.paused)setKeep(true);
-  }catch(e){if(st){st.className='status err';st.textContent='Network error. Try again.';}}
+    ACCT.note=null;renderAccount();flash();
+  }catch(e){acNote('Network error. Nothing was saved.','err');}
+}
+async function testDigest(){
+  ACCT.busy='test';renderAccount();
+  try{
+    const r=await fetch('/api/me/digest/test',{method:'POST'});const d=await r.json().catch(()=>({}));
+    ACCT.busy=null;
+    if(r.status===429)acNote('You can send three of these an hour. Try again later.','err');
+    else if(!r.ok)acNote(d.error||'Could not send that.','err');
+    else acNote('On its way to '+(d.to||ME.email)+'. Give it a minute.','ok');
+  }catch(e){ACCT.busy=null;acNote('Network error. Nothing was sent.','err');}
+}
+
+/* ---------- data ---------- */
+function tabData(){
+  const h=ACCT.hist,cv=ME.cv||{},g=ME.alerts||{};
+  const runs=h?h.runs.length:0,matches=h?h.runs.reduce((n,r)=>n+r.matches.length,0):0;
+  const item=(k,v,act)=>'<li><div><b>'+k+'</b><span>'+v+'</span></div>'+(act||'')+'</li>';
+  const how=ME.signin_method==='google'?'With your Google account. OrbitCast never sees a password.':'With a link emailed to '+esc(ME.email||'you')+'. There is no password to forget or reset.';
+  let s='<section class="ac-sec"><h3>What OrbitCast holds about you</h3><ul class="held">'
+    +item('Profile',h&&h.profile?'Built by the engine from your CV or description. Shown in full under Profile.':'None.','<button class="btn btn-ghost sm" data-act="ac-tab" data-tab="profile">View</button>')
+    +item('CV',cv.on_file?esc([cv.last_filename||'Written description',cv.total_bytes?fmtBytes(cv.total_bytes):''].filter(Boolean).join(' · '))+'. The file and its extracted text.':'Nothing stored.',cv.on_file?'<button class="btn btn-ghost sm" data-act="ac-tab" data-tab="profile">Manage</button>':'')
+    +item('Match history',h?(runs+' run'+(runs===1?'':'s')+', '+matches+' match'+(matches===1?'':'es')+' with their reasoning.'):'Loading…','<button class="btn btn-ghost sm" data-act="ac-tab" data-tab="matches">View</button>')
+    +item('Saved events',saved.size+' saved'+(ME.calendar_feed?', shared with your calendar by private link.':'.'),'<button class="btn btn-ghost sm" data-act="ac-tab" data-tab="saved">View</button>')
+    +item('Email schedule',g.configured&&!g.paused?'On. '+(g.next_send_at?'Next '+esc(dayText(g.next_send_at))+'.':''):'Off.','<button class="btn btn-ghost sm" data-act="ac-tab" data-tab="digest">Change</button>')
+    +item('Sign-in',how,'')
+    +'</ul><p class="muted">Not held: a password, your LinkedIn login, or any tracking beyond the clicks on your own matches. Nothing is sold or shared, and there are no paid placements.</p></section>';
+  s+='<section class="ac-card"><div class="set-row"><div><b>Keep my CV and profile</b><span>Needed for the digest and for reusing your profile. Off means the next run stores nothing.</span></div><button class="switch" role="switch" data-act="keep2" aria-checked="'+S.keep+'" aria-label="Keep my CV and profile"></button></div>'
+    +'<div class="set-row"><div><b>Use my location for distances</b><span>Shows how far each match is. It never changes which events you see.</span></div><button class="switch" role="switch" data-act="loc" aria-checked="'+S.locOn+'" aria-label="Use my location"></button></div></section>';
+  s+='<section class="ac-card"><div class="set-row"><div><b>Download everything</b><span>One readable file with your profile, CV text, every run and match, saved events and email history. Member since '+esc(fmtWhen(ME.member_since)||'today')+'.</span></div><a class="btn btn-secondary sm" href="/api/me/export" download>'+ic('download','s16')+'Download</a></div></section>';
+  s+='<section class="ac-sec">'+(ACCT.confirm==='all'
+    ?'<div class="confirm"><b>Delete everything?</b><span>This removes your stored CV, profile, every run and match, saved events, calendar link and location, deletes your account and stops the digest. It happens now and can’t be undone. Download your data first if you want a copy.</span><div class="row-btns"><button class="btn btn-danger sm" data-act="delyes">Delete everything</button><button class="btn btn-ghost sm" data-act="ac-cancel">Cancel</button></div></div>'
+    :'<div class="set-row"><div><b>Delete my account and data</b><span>Everything listed above, immediately. No waiting period and no email to confirm.</span></div><button class="btn btn-danger sm" data-act="ac-ask" data-what="all">Delete…</button></div>')+'</section>';
+  return s;
 }
 async function deleteCv(){
-  const st=$('#cvStatus');st.className='status';st.textContent='Deleting…';
+  ACCT.confirm=null;
   try{
     const r=await fetch('/api/me/cv',{method:'DELETE'});const d=await r.json().catch(()=>({}));
-    if(!r.ok){st.className='status err';st.textContent=d.error||'Could not delete that.';return;}
-    await loadMe();openAccount();
-    const s2=$('#cvStatus');const n=d.files_deleted||0,t=d.texts_cleared||0;
-    s2.className='status ok';s2.textContent=(n||t)?'Deleted '+n+' file'+(n===1?'':'s')+' and cleared '+t+' stored text'+(t===1?'':'s')+'. Your profile and digest are unchanged.':'There was nothing stored to delete.';
-  }catch(e){st.className='status err';st.textContent='Network error. Try again.';}
+    if(!r.ok){acNote(d.error||'Could not delete that.','err');return;}
+    await loadMe();
+    const n=d.files_deleted||0,t=d.texts_cleared||0;
+    acNote((n||t)?'Deleted '+n+' file'+(n===1?'':'s')+' and cleared '+t+' stored text'+(t===1?'':'s')+'. Your profile and digest are unchanged.':'There was nothing stored to delete.','ok');
+    loadHistory();
+  }catch(e){acNote('Network error. Nothing was deleted.','err');}
+}
+async function clearHistory(){
+  ACCT.confirm=null;
+  try{
+    const r=await fetch('/api/me/history',{method:'DELETE'});const d=await r.json().catch(()=>({}));
+    if(!r.ok){acNote(d.error||'Could not clear that.','err');return;}
+    S.matches=null;
+    await loadHistory();
+    acNote('Cleared '+(d.matches_removed||0)+' match'+(d.matches_removed===1?'':'es')+'. Your profile and stored CV are untouched.','ok');
+    if(S.view!=='home')render();
+  }catch(e){acNote('Network error. Nothing was cleared.','err');}
+}
+async function muteMatch(id,title,on){
+  try{
+    const r=await postJSON('/api/me/dismissed',{event_id:id,title,dismissed:on});
+    if(!r.ok){acNote('Could not save that.','err');return;}
+    if(ACCT.hist)ACCT.hist.runs.forEach(run=>run.matches.forEach(m=>{if(m.event_id===id)m.dismissed=on;}));
+    renderAccount();
+  }catch(e){acNote('Network error. Nothing was saved.','err');}
+}
+async function feedAction(what){
+  ACCT.confirm=null;
+  try{
+    const r=await postJSON('/api/me/calendar-feed',{action:what});const d=await r.json().catch(()=>({}));
+    if(!r.ok){acNote(d.error||'Could not do that.','err');return;}
+    ME.calendar_feed=d.calendar_feed||null;
+    acNote(what==='revoke'?'Calendar link turned off.':what==='rotate'?'New link created. The old one no longer works, so re-subscribe your calendar.':'Calendar link created.','ok');
+  }catch(e){acNote('Network error. Nothing changed.','err');}
 }
 async function deleteAll(){
   try{await fetch('/api/forget',{method:'POST'});}catch(e){}
   ME={signed_in:false,google_enabled:ME.google_enabled};S.result=null;S.matches=null;S.keep=true;S.locOn=false;OC_USER_LOC=null;
+  ACCT.hist=null;SAVED_SRV=null;savedSyncedFor=null;saved.clear();store.set('oc_saved',[]);
   clearFile();clearDraft();$('#aiText').value='';updCount();$('#results').hidden=true;$('#results').innerHTML='';$('#returning').hidden=true;
   closeModal();syncRun();if(S.view!=='home')render();
   toast('Deleted. Your data and account are gone.');
@@ -1801,13 +2125,24 @@ function toast(msg){
   w.appendChild(t);setTimeout(()=>{t.style.transition='opacity .25s';t.style.opacity='0';setTimeout(()=>t.remove(),260);},Math.min(5000,1800+msg.length*45));
 }
 function toggleSave(id){
-  if(saved.has(id))saved.delete(id);else saved.add(id);
+  const on=!saved.has(id);
+  if(on)saved.add(id);else saved.delete(id);
   store.set('oc_saved',Array.from(saved));
-  const on=saved.has(id);
+  if(ME.signed_in&&SAVED_SRV){
+    if(on){
+      const sn=BY[id]?snap(BY[id]):{id};
+      SAVED_SRV.unshift(Object.assign({saved_at:new Date().toISOString()},sn));
+      postJSON('/api/me/saved',{events:[sn]}).then(r=>r.ok?r.json():null).then(d=>{if(d&&d.events)SAVED_SRV=d.events;}).catch(()=>{});
+    }else{
+      SAVED_SRV=SAVED_SRV.filter(x=>x.id!==id);
+      fetch('/api/me/saved/'+encodeURIComponent(id),{method:'DELETE'}).catch(()=>{});
+    }
+  }
   $$('[data-save="'+CSS.escape(id)+'"]').forEach(b=>{b.setAttribute('aria-pressed',String(on));b.setAttribute('aria-label',on?'Remove from saved':'Save');b.innerHTML=ic(on?'bookmark-fill':'bookmark','s16');});
-  toast(on?'Saved':'Removed from saved');
+  toast(on?(ME.signed_in&&SAVED_SRV?'Saved to your account':'Saved on this device'):'Removed from saved');
   const sn=$('#savedN');if(sn)sn.textContent=saved.size;
   if(S.savedOnly&&S.view!=='home')render();
+  if(acctOpen()&&ACCT.tab==='saved')renderAccount();
 }
 let menuOpen=false;
 function openMenu(){const m=$('#rangeMenu'),b=$('#rangeBtn');if(!m)return;m.hidden=false;b.setAttribute('aria-expanded','true');menuOpen=true;const c=m.querySelector('[aria-checked="true"]')||m.querySelector('button');c&&c.focus();}
@@ -1817,12 +2152,12 @@ const filtersOpen=()=>$('#drawer').classList.contains('open')&&$('#drawer').getA
 function scrollToConsole(){setTimeout(()=>{$('#console').scrollIntoView({behavior:REDUCE?'auto':'smooth',block:'start'});},40);}
 
 document.addEventListener('click',ev=>{
-  const t=ev.target.closest('[data-view],[data-act],[data-open],[data-save],[data-ics],[data-cat],[data-where],[data-range],[data-day],[data-pane],[data-mode],[data-freq],[data-ex],[data-track]');
+  const t=ev.target.closest('[data-view],[data-act],[data-open],[data-save],[data-ics],[data-cat],[data-where],[data-range],[data-day],[data-pane],[data-mode],[data-freq],[data-ex],[data-track],[data-dcat],[data-snooze]');
   if(menuOpen&&!ev.target.closest('.menu-wrap'))closeMenu();
   if(!t)return;
   const d=t.dataset;
   if(d.track){trackView(d.track);return;}
-  if(d.view){ev.preventDefault();go(d.view);return;}
+  if(d.view){ev.preventDefault();closeModal();go(d.view);return;}
   if(d.open){openEvent(d.open);return;}
   if(d.save){ev.preventDefault();toggleSave(d.save);return;}
   if(d.ics){dlICS(d.ics);return;}
@@ -1832,12 +2167,14 @@ document.addEventListener('click',ev=>{
   if(d.day){selectDay(d.day);return;}
   if(d.mode){S.calMode=d.mode;S.calOff=0;S.calY=TODAY.getFullYear();S.calM=TODAY.getMonth();S.calSel=null;render();if(filtersOpen())openFilters();return;}
   if(d.pane){setPane(d.pane);return;}
-  if(d.freq){dgFreq=d.freq;ME.alerts=Object.assign({},ME.alerts,{frequency:d.freq});saveDigest({frequency:d.freq}).then(()=>openAccount());return;}
+  if(d.freq){saveDigest({frequency:d.freq});return;}
+  if(d.dcat){const g=ACCT.dg||{};let c=(g.categories||[]).slice();if(d.dcat==='all')c=[];else if(c.includes(d.dcat))c=c.filter(x=>x!==d.dcat);else c.push(d.dcat);if(c.length===CATS.length)c=[];saveDigest({categories:c});return;}
+  if(d.snooze){saveDigest({snooze_days:+d.snooze});return;}
   if(d.ex!==undefined){const ta=$('#aiText');const ex=EXAMPLES[+d.ex];if(ta.value.trim()&&ta.value.trim()!==ta.dataset.last){toast('Clear the box first to start from an example.');return;}ta.value=ex[1];ta.dataset.last=ex[1];updCount();saveDraft();ta.focus();const i=ex[1].indexOf('['),j=ex[1].indexOf(']',i);if(i>=0)ta.setSelectionRange(i,j+1);return;}
   switch(d.act){
     case'theme':toggleTheme();break;
     case'account':openAccount();break;
-    case'getmatched':if(S.view!=='home')go('home',{scroll:false});scrollToConsole();break;
+    case'getmatched':closeModal();if(S.view!=='home')go('home',{scroll:false});scrollToConsole();break;
     case'saved':S.savedOnly=!S.savedOnly;S.winDays=7;render();if(filtersOpen())openFilters();break;
     case'hidden':S.showHidden=!S.showHidden;render();break;
     case'more':S.winDays+=7;render();break;
@@ -1864,12 +2201,22 @@ document.addEventListener('click',ev=>{
     case'google':saveDraft();if(S.pendingRun)store.set('oc_pending',1);break; /* real navigation to /auth/login */
     case'emaillink':sendLink();break;
     case'signout':signOut();break;
-    case'dg-on':{const on=t.getAttribute('aria-checked')!=='true';t.setAttribute('aria-checked',String(on));$('#dgOpts').hidden=!on;saveDigest({paused:!on});break;}
+    case'dg-on':saveDigest({paused:t.getAttribute('aria-checked')==='true'});break;
     case'keep2':setKeep(!S.keep);postJSON('/api/consent',Object.assign({accepted:S.keep},TRAFFIC)).catch(()=>{});flash();break;
     case'loc':setLocation(t.getAttribute('aria-checked')!=='true');break;
-    case'delask':$('#delWrap').innerHTML='<div class="confirm"><b>Delete everything?</b><span>This removes your stored CV, profile, analyses, matches and location, deletes your account and stops the digest. It can’t be undone.</span><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-danger sm" data-act="delyes">Delete everything</button><button class="btn btn-ghost sm" data-act="delno">Cancel</button></div></div>';break;
-    case'delno':$('#delWrap').innerHTML='<button class="btn btn-danger sm" data-act="delask">Delete my data</button>';break;
     case'delyes':deleteAll();break;
+    case'ac-tab':setTab(d.tab);break;
+    case'ac-ask':ACCT.confirm=d.what;ACCT.note=null;renderAccount();{const c=$('#modalBox .confirm .btn-ghost');c&&c.focus();}break;
+    case'ac-cancel':ACCT.confirm=null;renderAccount();break;
+    case'ac-clear':clearHistory();break;
+    case'ac-rerun':closeModal();if(S.view!=='home')go('home',{scroll:false});scrollToConsole();runAnalysis({reuse:true});break;
+    case'ac-details':closeModal();openEvent(d.id);break;
+    case'ac-mute':muteMatch(d.id,d.title,t.getAttribute('aria-pressed')!=='true');break;
+    case'ac-saved-ics':{const l=savedList().filter(e=>e.date&&upcoming(e)).sort(cmp);if(l.length){download(buildICS(l),'orbitcast-saved.ics','text/calendar');toast(l.length+' saved event'+(l.length===1?'':'s')+' downloaded');}break;}
+    case'ac-feed':feedAction(d.do);break;
+    case'ac-copy':{const i=$('#feedUrl');if(!i)break;const done=()=>{t.textContent='Copied';setTimeout(()=>{t.textContent='Copy';},1600);};if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(i.value).then(done,()=>{i.select();});else{i.select();try{document.execCommand('copy');done();}catch(e){}}break;}
+    case'ac-resume':saveDigest({snooze_days:0});break;
+    case'ac-test':testDigest();break;
   }
 });
 document.addEventListener('keydown',ev=>{
@@ -1881,6 +2228,7 @@ document.addEventListener('keydown',ev=>{
     if(typing){ev.preventDefault();ev.target.blur();} /* preventDefault: a native search input wipes its value on Escape */
     return;
   }
+  if((ev.key==='ArrowRight'||ev.key==='ArrowLeft')&&ev.target.classList&&ev.target.classList.contains('ac-tab')){ev.preventDefault();const i=TABS.findIndex(x=>x[0]===ACCT.tab);setTab(TABS[(i+(ev.key==='ArrowRight'?1:-1)+TABS.length)%TABS.length][0]);return;}
   if(ev.key==='Tab'){const root=!$('#modal').hidden?$('#modalBox'):$('#drawer').classList.contains('open')?$('#drawer'):null;if(root)trap(ev,root);return;}
   if(menuOpen&&(ev.key==='ArrowDown'||ev.key==='ArrowUp')){ev.preventDefault();const items=$$('#rangeMenu button');const i=items.indexOf(document.activeElement);const n=(i+(ev.key==='ArrowDown'?1:-1)+items.length)%items.length;items[n].focus();return;}
   if(typing||ev.metaKey||ev.ctrlKey||ev.altKey)return;
@@ -1929,6 +2277,7 @@ go(fromHash(),{push:false,scroll:false});
   if(signin){
     const msg={ok:'Signed in',expired:'That sign-in link has expired. Request another.',failed:'That sign-in did not complete. Try again.',google_off:'Google sign-in is not set up yet. Use the email link.',unavailable:'Accounts are unavailable right now. Try again shortly.'}[signin];
     if(msg)setTimeout(()=>toast(msg),300);
+    if(signin==='ok'&&ME.signed_in&&store.get('oc_after_signin',null)){const tab=store.get('oc_after_signin',null);store.del('oc_after_signin');setTimeout(()=>openAccount(tab),350);}
     if(signin==='ok'&&ME.signed_in&&store.get('oc_pending',0)){
       store.del('oc_pending');
       if(S.view!=='home')go('home',{push:false});
@@ -1937,7 +2286,7 @@ go(fromHash(),{push:false,scroll:false});
     }else if(signin!=='ok'&&!ME.signed_in){store.del('oc_pending');setTimeout(()=>openSignin(false),500);}
   }
   if(settings==='alerts'){
-    if(ME.signed_in)openAccount();else openSignin(false);
+    if(ME.signed_in)openAccount('digest');else{store.set('oc_after_signin','digest');openSignin(false);}
   }
 })();
 })();

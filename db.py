@@ -1914,3 +1914,313 @@ def last_empty_digest_at(account_id):
     except Exception as exc:
         log.warning(f"last_empty_digest_at failed: {exc}")
         return None
+
+
+# --------------------------------------------------------------------------
+# Account panel: saved events, dismissed events, digest extras, history,
+# calendar feed, export
+# --------------------------------------------------------------------------
+# Every function below reads or writes something added by migration 0013.
+# Each one swallows its own failure and returns an empty value, so the app
+# behaves exactly as it did before if the migration has not been applied
+# yet - the panel simply shows less.
+
+_SAVED_COLS = ("event_id, title, url, category, event_date, event_time, "
+               "location, is_online, saved_at")
+
+
+def _saved_row(row):
+    return {"id": row[0], "title": row[1], "url": row[2], "category": row[3],
+            "date": row[4], "time": row[5], "location": row[6],
+            "is_online": row[7], "saved_at": _iso(row[8])}
+
+
+def list_saved_events(account_id):
+    """None means 'could not read' (no database, or 0013 not applied) - the
+    caller keeps the browser's own list rather than treating it as empty."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute(f"select {_SAVED_COLS} from saved_events "
+                        "where account_id = %s order by saved_at desc", (account_id,))
+            return [_saved_row(r) for r in cur.fetchall()]
+    except Exception as exc:
+        log.warning(f"list_saved_events failed: {exc}")
+        return None
+
+
+def upsert_saved_events(account_id, events: list) -> int:
+    """Saves a snapshot of each event. Re-saving refreshes the snapshot (a
+    changed time or venue) but keeps the original saved_at."""
+    if not events:
+        return 0
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return 0
+            n = 0
+            for e in events:
+                cur.execute(
+                    """
+                    insert into saved_events (account_id, event_id, title, url, category,
+                                              event_date, event_time, location, is_online)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    on conflict (account_id, event_id) do update set
+                        title = excluded.title, url = excluded.url,
+                        category = excluded.category, event_date = excluded.event_date,
+                        event_time = excluded.event_time, location = excluded.location,
+                        is_online = excluded.is_online
+                    """,
+                    (account_id, e["id"], e["title"], e.get("url"), e.get("category"),
+                     e.get("date"), e.get("time"), e.get("location"), e.get("is_online")),
+                )
+                n += 1
+            return n
+    except Exception as exc:
+        log.warning(f"upsert_saved_events failed: {exc}")
+        return 0
+
+
+def delete_saved_event(account_id, event_id: str) -> bool:
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute("delete from saved_events where account_id = %s and event_id = %s",
+                        (account_id, event_id))
+            return True
+    except Exception as exc:
+        log.warning(f"delete_saved_event failed: {exc}")
+        return False
+
+
+def list_dismissed(account_id):
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return []
+            cur.execute("select event_id, title, created_at from dismissed_events "
+                        "where account_id = %s order by created_at desc", (account_id,))
+            return [{"id": r[0], "title": r[1], "at": _iso(r[2])} for r in cur.fetchall()]
+    except Exception as exc:
+        log.warning(f"list_dismissed failed: {exc}")
+        return []
+
+
+def set_dismissed(account_id, event_id: str, title: str, dismissed: bool) -> bool:
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            if dismissed:
+                cur.execute(
+                    "insert into dismissed_events (account_id, event_id, title) values (%s, %s, %s) "
+                    "on conflict (account_id, event_id) do nothing",
+                    (account_id, event_id, title))
+            else:
+                cur.execute("delete from dismissed_events where account_id = %s and event_id = %s",
+                            (account_id, event_id))
+            return True
+    except Exception as exc:
+        log.warning(f"set_dismissed failed: {exc}")
+        return False
+
+
+def get_digest_extras(account_id) -> dict:
+    """categories + snooze_until. Read separately from get_digest_prefs() on
+    purpose: that query is on the scheduler's critical path and must keep
+    working on a database where 0013 has not been applied."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return {}
+            cur.execute("select categories, snooze_until from digest_prefs where account_id = %s",
+                        (account_id,))
+            row = cur.fetchone()
+            if not row:
+                return {}
+            return {"categories": list(row[0] or []), "snooze_until": row[1]}
+    except Exception as exc:
+        log.warning(f"get_digest_extras failed: {exc}")
+        return {}
+
+
+def set_digest_extras(account_id, categories, snooze_until) -> bool:
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute("update digest_prefs set categories = %s, snooze_until = %s, "
+                        "updated_at = now() where account_id = %s",
+                        (list(categories) if categories else None, snooze_until, account_id))
+            return True
+    except Exception as exc:
+        log.warning(f"set_digest_extras failed: {exc}")
+        return False
+
+
+def recent_digest_sends(account_id, limit: int = 6):
+    """What was actually sent, most recent first. 'claimed' rows are sends
+    in flight and are left out."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return []
+            cur.execute(
+                """
+                select sent_at, status, match_count from digest_sends
+                where account_id = %s and status <> 'claimed'
+                order by sent_at desc limit %s
+                """,
+                (account_id, int(limit)),
+            )
+            return [{"at": _iso(r[0]), "status": r[1], "matches": r[2]} for r in cur.fetchall()]
+    except Exception as exc:
+        log.warning(f"recent_digest_sends failed: {exc}")
+        return []
+
+
+def get_history(oc_uid: str, limit: int = 25):
+    """The caller's own past analyses, newest first, each with its matches.
+    cv_text is deliberately not selected: the panel never needs it, and not
+    reading it is cheaper and safer than reading it and dropping it."""
+    if not oc_uid:
+        return []
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return []
+            cur.execute(
+                """
+                select a.id, a.created_at, a.is_cv, a.profile, a.evidence_level, a.field,
+                       (a.cv_text = '[reused previous profile]') as reused,
+                       (select rf.filename from raw_files rf where rf.analysis_id = a.id
+                        order by rf.created_at desc limit 1) as filename
+                from analyses a
+                where a.oc_uid = %s
+                order by a.created_at desc limit %s
+                """,
+                (oc_uid, int(limit)),
+            )
+            runs = []
+            for r in cur.fetchall():
+                profile = r[3]
+                if isinstance(profile, str):
+                    try:
+                        profile = json.loads(profile)
+                    except Exception:
+                        profile = None
+                runs.append({"id": r[0], "at": _iso(r[1]), "is_cv": r[2], "profile": profile,
+                             "evidence_level": r[4], "field": r[5], "reused": bool(r[6]),
+                             "filename": r[7], "matches": []})
+            ids = [a["id"] for a in runs]
+            if ids:
+                cur.execute(
+                    """
+                    select id, analysis_id, event_id, title, category, fit_score,
+                           why, why_now, prepare, benefit
+                    from recommendations where analysis_id = any(%s)
+                    order by fit_score desc nulls last
+                    """,
+                    (ids,),
+                )
+                by_id = {a["id"]: a for a in runs}
+                for r in cur.fetchall():
+                    by_id[r[1]]["matches"].append(
+                        {"recommendation_id": r[0], "event_id": r[2], "title": r[3],
+                         "category": r[4], "fit_score": r[5], "why": r[6],
+                         "why_now": r[7], "prepare": r[8], "benefit": r[9]})
+            return runs
+    except Exception as exc:
+        log.warning(f"get_history failed: {exc}")
+        return []
+
+
+def clear_history(oc_uid: str):
+    """Clears the match history without touching the profile or the stored CV.
+
+    Three things hang off an analysis row - its matches, the profile the
+    digest scores against, and (by cascade) the uploaded CV file - and only
+    the first is "history". So: every match goes; a run is deleted outright
+    only if it is neither the newest profile nor the owner of a stored file.
+    Deleting the rows wholesale would silently take the CV and stop the
+    person's email, which is what 'Delete my data' is for, said out loud.
+    Returns the number of matches removed, or None on failure."""
+    if not oc_uid:
+        return None
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute(
+                "delete from recommendations where analysis_id in "
+                "(select id from analyses where oc_uid = %s)", (oc_uid,))
+            removed = cur.rowcount
+            cur.execute(
+                """
+                delete from analyses a
+                where a.oc_uid = %s
+                  and a.id is distinct from (
+                    select id from analyses where oc_uid = %s and is_cv = true
+                    order by created_at desc limit 1)
+                  and not exists (select 1 from raw_files rf where rf.analysis_id = a.id)
+                """,
+                (oc_uid, oc_uid),
+            )
+            return removed
+    except Exception as exc:
+        log.warning(f"clear_history failed: {exc}")
+        return None
+
+
+def get_account_meta(account_id) -> dict:
+    """How this account signs in, and its calendar-feed token if it has one."""
+    out = {"google_linked": False, "last_login_at": None, "cal_token": None}
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return out
+            cur.execute("select google_sub is not null, last_login_at from accounts where id = %s",
+                        (account_id,))
+            row = cur.fetchone()
+            if row:
+                out["google_linked"], out["last_login_at"] = bool(row[0]), _iso(row[1])
+    except Exception as exc:
+        log.warning(f"get_account_meta failed: {exc}")
+        return out
+    try:                                    # separate: cal_token is a 0013 column
+        with _cursor() as cur:
+            cur.execute("select cal_token from accounts where id = %s", (account_id,))
+            row = cur.fetchone()
+            out["cal_token"] = row[0] if row else None
+    except Exception as exc:
+        log.warning(f"get_account_meta (cal_token) failed: {exc}")
+    return out
+
+
+def set_cal_token(account_id, token) -> bool:
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute("update accounts set cal_token = %s where id = %s", (token, account_id))
+            return cur.rowcount == 1
+    except Exception as exc:
+        log.warning(f"set_cal_token failed: {exc}")
+        return False
+
+
+def account_id_by_cal_token(token: str):
+    if not token:
+        return None
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute("select id from accounts where cal_token = %s", (token,))
+            row = cur.fetchone()
+            return row[0] if row else None
+    except Exception as exc:
+        log.warning(f"account_id_by_cal_token failed: {exc}")
+        return None

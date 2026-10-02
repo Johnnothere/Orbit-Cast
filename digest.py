@@ -42,6 +42,14 @@ DEFAULT_TZ = "Europe/London"
 SCHEDULER_TICK_SECONDS = 300          # 5 minutes; sends are hour-granular
 EMPTY_DIGEST_COOLDOWN_DAYS = 7        # don't send "nothing this week" daily
 MAX_PER_TICK = 50                     # bound the work one tick can do
+MAX_SNOOZE_DAYS = 90
+
+# The catalogue's categories. A digest can be narrowed to some of them; an
+# empty selection means all, which is also what every subscriber who has
+# never touched the setting gets.
+CATEGORIES = ("Intelligence & Security", "Defence & Geopolitics", "Cyber & Infosec",
+              "Tech & AI", "Education & Research", "Builder & Tech Community",
+              "Business & Networking", "Hackathons")
 
 
 def _tz(name):
@@ -127,6 +135,37 @@ def validate_prefs(data: dict):
             "paused": bool(data.get("paused", False))}, None
 
 
+def clean_categories(raw):
+    """A browser-supplied category list reduced to the ones that exist. All
+    of them selected is stored as none selected: both mean 'everything', and
+    storing the explicit list would silently exclude a category added later."""
+    if not isinstance(raw, (list, tuple)):
+        return []
+    picked = [c for c in CATEGORIES if c in set(raw)]
+    return [] if len(picked) == len(CATEGORIES) else picked
+
+
+def snooze_until_from(days, now: datetime = None):
+    """None for 'not snoozed'. Clamped: a snooze is a break, not a way to
+    park a subscription indefinitely - that is what the off switch is for."""
+    try:
+        days = int(days or 0)
+    except (TypeError, ValueError):
+        return None
+    if days <= 0:
+        return None
+    return (now or datetime.now(timezone.utc)) + timedelta(days=min(days, MAX_SNOOZE_DAYS))
+
+
+def next_send_for(prefs: dict, snooze_until=None) -> datetime:
+    """compute_next_send(), but never before a snooze ends."""
+    now = datetime.now(timezone.utc)
+    if snooze_until and snooze_until.tzinfo is None:
+        snooze_until = snooze_until.replace(tzinfo=timezone.utc)
+    after = snooze_until if (snooze_until and snooze_until > now) else now
+    return compute_next_send(prefs, after=after)
+
+
 # ─────────────────────────────────────────────
 # Building and sending one digest
 # ─────────────────────────────────────────────
@@ -143,6 +182,7 @@ def build_digest(account, prefs, catalog_events, score_fn):
 
     already = db.recently_sent_event_ids(account["id"], days=45)
     fresh = [e for e in (catalog_events or []) if e.get("id") not in already]
+    fresh = _apply_account_filters(account["id"], fresh)
     if not fresh:
         return [], []
 
@@ -150,6 +190,46 @@ def build_digest(account, prefs, catalog_events, score_fn):
                       stored.get("field") or "", fresh)
     recs = (scored or {}).get("recommendations") or []
     return recs, [r.get("event_id") for r in recs if r.get("event_id")]
+
+
+def _apply_account_filters(account_id, events):
+    """The person's own narrowing: categories they chose, events they muted.
+
+    Applied BEFORE scoring, not after. Filtering afterwards would spend the
+    model call on events that can never be sent, and would let a muted event
+    take one of the few slots a real match could have had."""
+    cats = set((db.get_digest_extras(account_id) or {}).get("categories") or [])
+    if cats:
+        events = [e for e in events if e.get("category") in cats]
+    muted = {d["id"] for d in db.list_dismissed(account_id)}
+    if muted:
+        events = [e for e in events if e.get("id") not in muted]
+    return events
+
+
+def send_preview(account, prefs, catalog_events, score_fn) -> str:
+    """'Send me one now'. The same email the schedule would send, right away.
+
+    Deliberately records nothing: no period is claimed and no event ids are
+    written, so a preview neither uses up the next scheduled send nor retires
+    the events in it. The price is that the next real digest may repeat what
+    the preview showed, which is the right way round for a test."""
+    unsub = f"{mailer.PUBLIC_URL}/unsubscribe?t={prefs['unsub_token']}"
+    settings = f"{mailer.PUBLIC_URL}/?settings=alerts"
+    stored = db.get_latest_analysis(account["oc_uid"])
+    if not stored:
+        return "no_profile"
+    events = _apply_account_filters(account["id"], list(catalog_events or []))
+    recs = []
+    if events:
+        scored = score_fn(stored["profile"], stored.get("evidence_level") or "rich",
+                          stored.get("field") or "", events)
+        recs = (scored or {}).get("recommendations") or []
+    if recs:
+        ok = mailer.send_digest(account["email"], recs, unsub, settings)
+    else:
+        ok = mailer.send_empty_digest(account["email"], unsub, settings)
+    return ("sent" if recs else "sent_empty") if ok else "send_failed"
 
 
 def send_one(account, prefs, catalog_events, score_fn) -> str:
@@ -225,6 +305,11 @@ def run_due(catalog_fn, score_fn, limit: int = MAX_PER_TICK) -> dict:
         # send errored must not stay permanently due, re-running every tick
         # and burning the API budget on the same broken row.
         db.set_next_send_at(prefs["account_id"], compute_next_send(prefs))
+        # A snooze that has run its course is cleared, so the panel stops
+        # saying "snoozed until" about a date that is already behind us.
+        extras = db.get_digest_extras(prefs["account_id"]) or {}
+        if extras.get("snooze_until"):
+            db.set_digest_extras(prefs["account_id"], extras.get("categories"), None)
     if stats:
         log.info("digest run: %s", stats)
     return stats

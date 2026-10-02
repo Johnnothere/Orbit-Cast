@@ -5,13 +5,14 @@ Run with: python app.py
 """
 
 import os
+import re
 import json
 import threading
 import time
 import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from flask import Flask, jsonify, make_response, redirect, render_template, request
 from markupsafe import escape
@@ -589,13 +590,23 @@ def api_me():
     # re-issued as this browser's cookie - so this is the same stored CV on
     # every device the person signs in on, without a second id to carry.
     cv = db.get_cv_status(account["oc_uid"]) or {}
+    extras = db.get_digest_extras(account["id"]) or {}
+    meta = db.get_account_meta(account["id"])
+    snooze = extras.get("snooze_until")
+    if snooze and snooze <= datetime.now(timezone.utc):
+        snooze = None
     return jsonify({
         "signed_in": True,
         "google_enabled": auth.google_enabled(),
         "email": account["email"],
         "name": account.get("name"),
         "avatar_url": account.get("avatar_url"),
+        "member_since": account.get("created_at"),
+        # How this person gets in, said plainly: there is no password to
+        # forget, and knowing that is the answer to "how do I reset it".
+        "signin_method": "google" if meta.get("google_linked") else "email_link",
         "has_profile": has_profile,
+        "calendar_feed": _feed_urls(meta.get("cal_token")),
         "cv": {
             # Text-only submissions have no file, so "on file" must mean
             # either - reporting only the upload would tell someone who typed
@@ -616,6 +627,9 @@ def api_me():
             "timezone": prefs.get("timezone", digest.DEFAULT_TZ),
             "paused": prefs.get("paused", True),
             "next_send_at": prefs["next_send_at"].isoformat() if prefs.get("next_send_at") else None,
+            "categories": extras.get("categories") or [],
+            "snooze_until": snooze.isoformat() if snooze else None,
+            "recent": db.recent_digest_sends(account["id"]),
         },
     })
 
@@ -667,9 +681,20 @@ def api_digest_prefs():
     if err:
         return jsonify({"error": err}), 400
 
+    data = request.get_json(silent=True) or {}
     existing = db.get_digest_prefs(account["id"])
     unsub = existing["unsub_token"] if existing else uuid.uuid4().hex
-    next_at = None if clean["paused"] else digest.compute_next_send(clean)
+
+    # Categories and snooze are only touched when the request names them, so
+    # an older client that sends neither cannot wipe a choice made elsewhere.
+    extras = db.get_digest_extras(account["id"]) or {}
+    categories = (digest.clean_categories(data["categories"]) if "categories" in data
+                  else extras.get("categories") or [])
+    snooze_until = (digest.snooze_until_from(data.get("snooze_days")) if "snooze_days" in data
+                    else extras.get("snooze_until"))
+    if clean["paused"]:
+        snooze_until = None                 # off is off; a snooze under it is noise
+    next_at = None if clean["paused"] else digest.next_send_for(clean, snooze_until)
 
     if not clean["paused"] and db.get_consent(account["oc_uid"]) is not True:
         db.set_consent(account["oc_uid"], True)
@@ -679,9 +704,351 @@ def api_digest_prefs():
                                     clean["paused"], next_at, unsub)
     if not saved:
         return jsonify({"error": "Could not save that."}), 503
+    db.set_digest_extras(account["id"], categories, snooze_until)
+    still_snoozed = bool(snooze_until and snooze_until > datetime.now(timezone.utc))
     return jsonify({"ok": True,
                      "next_send_at": next_at.isoformat() if next_at else None,
-                     "paused": clean["paused"]})
+                     "paused": clean["paused"],
+                     "categories": categories,
+                     "snooze_until": snooze_until.isoformat() if still_snoozed else None})
+
+
+# ─────────────────────────────────────────────
+# ACCOUNT PANEL
+# ─────────────────────────────────────────────
+# Everything the "Your account" panel reads or changes beyond /api/me. All of
+# it is keyed on the signed-in ACCOUNT, never on a cookie or an id the
+# browser supplies, so none of these can be pointed at someone else's data.
+
+def _account_or_401():
+    account = auth.current_account()
+    if not account:
+        return None, (jsonify({"error": "Sign in first.", "reason": "auth_required"}), 401)
+    return account, None
+
+
+def _feed_urls(token):
+    if not token:
+        return None
+    https = f"{mailer.PUBLIC_URL}/cal/{token}.ics"
+    return {"https": https, "webcal": "webcal://" + https.split("://", 1)[1]}
+
+
+def _catalog_by_id():
+    return {e.get("id"): e for e in load_events_cache().get("events", []) if e.get("id")}
+
+
+def _clip(value, n):
+    return (str(value).strip()[:n] or None) if value not in (None, "") else None
+
+
+@app.route("/api/me/history", methods=["GET", "DELETE"])
+@auth.login_required
+@limiter.limit("120 per hour")
+def api_my_runs():
+    """Past analyses and what each one matched.
+
+    Each match is joined to the LIVE catalogue at read time: recommendations
+    store the title and the reasoning, not the date or the link, and an event
+    that has left the catalogue is reported as such rather than hidden - the
+    reasoning is still the person's, and a list that quietly loses rows reads
+    as a bug."""
+    account, err = _account_or_401()
+    if err:
+        return err
+
+    if request.method == "DELETE":
+        removed = db.clear_history(account["oc_uid"])
+        if removed is None:
+            return jsonify({"error": "Could not clear that — nothing was removed."}), 503
+        return jsonify({"ok": True, "matches_removed": removed})
+
+    catalog = _catalog_by_id()
+    muted = {d["id"] for d in db.list_dismissed(account["id"])}
+    runs = db.get_history(account["oc_uid"])
+    for run in runs:
+        profile = run.pop("profile", None) or {}
+        run["summary"] = profile.get("summary") or ""
+        for m in run["matches"]:
+            ev = catalog.get(m.get("event_id"))
+            m["listed"] = bool(ev)
+            m["dismissed"] = m.get("event_id") in muted
+            if ev:
+                m.update({"date": ev.get("date"), "time": ev.get("time"), "url": ev.get("url"),
+                          "location": ev.get("location"), "is_online": ev.get("is_online")})
+    latest = db.get_latest_analysis(account["oc_uid"]) or {}
+    return jsonify({"runs": runs, "profile": latest.get("profile"),
+                     "evidence_level": latest.get("evidence_level"),
+                     "field": latest.get("field")})
+
+
+@app.route("/api/me/saved", methods=["GET", "POST"])
+@auth.login_required
+@limiter.limit("600 per hour")
+def api_my_saved():
+    """Saved events, stored on the account so they follow the person.
+
+    POST takes {"events": [{id, title, url, ...}]}. Where the id is in the
+    live catalogue the snapshot is taken from THERE, not from the request, so
+    a browser cannot write arbitrary text into its own saved list and have it
+    come back looking like catalogue data in a calendar feed."""
+    account, err = _account_or_401()
+    if err:
+        return err
+
+    if request.method == "POST":
+        incoming = (request.get_json(silent=True) or {}).get("events") or []
+        if not isinstance(incoming, list):
+            return jsonify({"error": "events must be a list"}), 400
+        catalog = _catalog_by_id()
+        rows = []
+        for item in incoming[:300]:
+            if not isinstance(item, dict):
+                continue
+            eid = _clip(item.get("id"), 200)
+            if not eid:
+                continue
+            ev = catalog.get(eid)
+            if ev:
+                rows.append({"id": eid, "title": ev.get("title") or "", "url": ev.get("url"),
+                             "category": ev.get("category"), "date": ev.get("date"),
+                             "time": ev.get("time"), "location": ev.get("location"),
+                             "is_online": ev.get("is_online")})
+                continue
+            title, url = _clip(item.get("title"), 300), _clip(item.get("url"), 1000)
+            if not title or not url or not url.lower().startswith(("http://", "https://")):
+                continue                     # not in the catalogue and not describable
+            rows.append({"id": eid, "title": title, "url": url,
+                         "category": _clip(item.get("category"), 80),
+                         "date": _clip(item.get("date"), 80), "time": _clip(item.get("time"), 40),
+                         "location": _clip(item.get("location"), 200),
+                         "is_online": bool(item.get("is_online")) if item.get("is_online") is not None else None})
+        db.upsert_saved_events(account["id"], rows)
+
+    saved = db.list_saved_events(account["id"])
+    if saved is None:
+        return jsonify({"error": "Saved events are not available right now.",
+                         "reason": "unavailable"}), 503
+    return jsonify({"events": saved})
+
+
+@app.route("/api/me/saved/<path:event_id>", methods=["DELETE"])
+@auth.login_required
+@limiter.limit("600 per hour")
+def api_my_saved_delete(event_id):
+    account, err = _account_or_401()
+    if err:
+        return err
+    db.delete_saved_event(account["id"], event_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/me/dismissed", methods=["POST"])
+@auth.login_required
+@limiter.limit("300 per hour")
+def api_my_dismissed():
+    """'Not for me' on a match. The event is never emailed to this account
+    again. It does not change scoring and the panel does not claim it does."""
+    account, err = _account_or_401()
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    eid = _clip(data.get("event_id"), 200)
+    if not eid:
+        return jsonify({"error": "event_id is required"}), 400
+    ok = db.set_dismissed(account["id"], eid, _clip(data.get("title"), 300),
+                          bool(data.get("dismissed", True)))
+    if not ok:
+        return jsonify({"error": "Could not save that."}), 503
+    return jsonify({"ok": True, "dismissed": bool(data.get("dismissed", True))})
+
+
+@app.route("/api/me/digest/test", methods=["POST"])
+@auth.login_required
+@limiter.limit("3 per hour")
+def api_my_digest_test():
+    """Sends the digest now, to the account's own address.
+
+    Scoring takes the better part of a minute, so it runs in the background
+    and this returns at once. Tightly rate-limited: every call is a real
+    model run and a real email."""
+    account, err = _account_or_401()
+    if err:
+        return err
+    if not db.get_latest_analysis(account["oc_uid"]):
+        return jsonify({"error": "Run an analysis first — the digest matches against your profile."}), 400
+    if not mailer.is_configured():
+        return jsonify({"error": "Email is not set up on the server right now."}), 503
+    prefs = db.get_digest_prefs(account["id"])
+    if not prefs:
+        # No schedule saved yet. Create a paused one so the email has a
+        # working unsubscribe link without opting the person into anything.
+        prefs = db.upsert_digest_prefs(account["id"], "weekly", 3, 0, 8, digest.DEFAULT_TZ,
+                                        True, None, uuid.uuid4().hex)
+        if not prefs:
+            return jsonify({"error": "Could not prepare that."}), 503
+    events = list(load_events_cache().get("events", []))
+
+    def run():
+        try:
+            status = digest.send_preview(
+                account, prefs, events,
+                lambda profile, level, field, evs: ai_engine.score_and_enrich(profile, level, field, evs))
+            log.info("digest preview for account %s: %s", account["id"], status)
+        except Exception as exc:
+            log.warning("digest preview failed for account %s: %s", account["id"], exc)
+
+    threading.Thread(target=run, daemon=True, name="digest-preview").start()
+    return jsonify({"ok": True, "to": account["email"]}), 202
+
+
+@app.route("/api/me/calendar-feed", methods=["POST"])
+@auth.login_required
+@limiter.limit("30 per hour")
+def api_my_calendar_feed():
+    """Creates, rotates or revokes the private calendar-feed URL.
+
+    'create' is idempotent - it returns the existing URL if there is one, so
+    opening the panel twice cannot invalidate a feed a calendar app is
+    already subscribed to. Only an explicit 'rotate' or 'revoke' does."""
+    account, err = _account_or_401()
+    if err:
+        return err
+    action = ((request.get_json(silent=True) or {}).get("action") or "create").strip()
+    current = db.get_account_meta(account["id"]).get("cal_token")
+    if action == "revoke":
+        token = None
+    elif action == "rotate" or not current:
+        token = uuid.uuid4().hex + uuid.uuid4().hex
+    else:
+        return jsonify({"ok": True, "calendar_feed": _feed_urls(current)})
+    if not db.set_cal_token(account["id"], token):
+        return jsonify({"error": "Calendar feeds are not available right now."}), 503
+    return jsonify({"ok": True, "calendar_feed": _feed_urls(token)})
+
+
+def _ics_escape(text):
+    return (str(text or "").replace("\\", "\\\\").replace(";", "\\;")
+            .replace(",", "\\,").replace("\r", "").replace("\n", "\\n"))
+
+
+def _ics_fold(line):
+    # RFC 5545: 75 octets per line. Folding by character count at 72 stays
+    # under that for the mostly-ASCII text this carries.
+    return "\r\n ".join(line[i:i + 72] for i in range(0, len(line), 72)) or line
+
+
+_ICS_TIME = re.compile(r"(\d{1,2})[:.](\d{2})\s*(a\.?m\.?|p\.?m\.?)?", re.I)
+
+
+def _ics_times(raw):
+    out = []
+    for h, m, mer in _ICS_TIME.findall(raw or ""):
+        h, m = int(h), int(m)
+        mer = (mer or "").lower().replace(".", "")
+        if mer.startswith("p") and h < 12:
+            h += 12
+        if mer.startswith("a") and h == 12:
+            h = 0
+        if h <= 23 and m <= 59:
+            out.append((h, m))
+        if len(out) == 2:
+            break
+    return out
+
+
+def _saved_ics(saved):
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//OrbitCast//Saved events//EN",
+             "CALSCALE:GREGORIAN", "METHOD:PUBLISH", "X-WR-CALNAME:OrbitCast saved events",
+             "REFRESH-INTERVAL;VALUE=DURATION:PT6H", "X-PUBLISHED-TTL:PT6H"]
+    for e in saved:
+        day = ai_engine.parse_event_date(e.get("date"))
+        if not day:
+            continue                         # an undated event has no place on a calendar
+        times = _ics_times(e.get("time") or "")
+        if times and times[0] == (0, 0):
+            times = []                       # midnight from a source means "no time given"
+        loc = "Online" if e.get("is_online") else (e.get("location") or "London")
+        lines += ["BEGIN:VEVENT", f"UID:{e['id']}@orbitcast.up.railway.app", f"DTSTAMP:{stamp}"]
+        if times:
+            sh, sm = times[0]
+            eh, em = times[1] if len(times) > 1 and times[1] > times[0] else (min(sh + 1, 23), sm)
+            d = day.strftime("%Y%m%d")
+            lines += [f"DTSTART;TZID=Europe/London:{d}T{sh:02d}{sm:02d}00",
+                      f"DTEND;TZID=Europe/London:{d}T{eh:02d}{em:02d}00"]
+        else:
+            lines += [f"DTSTART;VALUE=DATE:{day.strftime('%Y%m%d')}",
+                      f"DTEND;VALUE=DATE:{(day + timedelta(days=1)).strftime('%Y%m%d')}"]
+        lines += [f"SUMMARY:{_ics_escape(e.get('title'))}", f"LOCATION:{_ics_escape(loc)}"]
+        if e.get("url"):
+            lines += [f"URL:{e['url']}", f"DESCRIPTION:{_ics_escape('Details: ' + e['url'])}"]
+        lines.append("END:VEVENT")
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(_ics_fold(l) for l in lines) + "\r\n"
+
+
+@app.route("/cal/<token>.ics")
+@limiter.limit("240 per hour")
+def calendar_feed(token):
+    """The private feed a calendar app subscribes to. No login: the token in
+    the URL is the credential. An unknown token is a plain 404, identical to
+    a revoked one, so the route cannot be used to test which tokens exist."""
+    account_id = db.account_id_by_cal_token(token) if len(token) >= 32 else None
+    if not account_id:
+        return ("Not found", 404, {"Content-Type": "text/plain; charset=utf-8"})
+    resp = make_response(_saved_ics(db.list_saved_events(account_id) or []))
+    resp.headers["Content-Type"] = "text/calendar; charset=utf-8"
+    resp.headers["Cache-Control"] = "private, max-age=900"
+    resp.headers["X-Robots-Tag"] = "noindex"
+    return resp
+
+
+@app.route("/api/me/export", methods=["GET"])
+@auth.login_required
+@limiter.limit("12 per hour")
+def api_my_export():
+    """Everything held about this account, as one readable JSON file.
+
+    Tokens are left out on purpose: the unsubscribe token and the calendar
+    token are credentials, and a data export is a file people forward."""
+    account, err = _account_or_401()
+    if err:
+        return err
+    activity = db.get_user_activity(account["oc_uid"]) or {}
+    prefs = db.get_digest_prefs(account["id"]) or {}
+    extras = db.get_digest_extras(account["id"]) or {}
+    meta = db.get_account_meta(account["id"])
+    for run in activity.get("analyses", []):
+        run.pop("raw_file_size_bytes", None)
+    payload = {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "account": {"email": account["email"], "name": account.get("name"),
+                    "created_at": account.get("created_at"),
+                    "last_login_at": meta.get("last_login_at"),
+                    "signin_method": "google" if meta.get("google_linked") else "email_link"},
+        "consent": activity.get("consent"),
+        "stored_cv": db.get_cv_status(account["oc_uid"]) or {},
+        "analyses": activity.get("analyses", []),
+        "event_clicks": activity.get("interactions", []),
+        "locations": activity.get("locations", []),
+        "saved_events": db.list_saved_events(account["id"]) or [],
+        "dismissed_events": db.list_dismissed(account["id"]),
+        "digest": {"configured": bool(prefs), "frequency": prefs.get("frequency"),
+                   "interval_days": prefs.get("interval_days"), "weekday": prefs.get("weekday"),
+                   "send_hour": prefs.get("send_hour"), "timezone": prefs.get("timezone"),
+                   "paused": prefs.get("paused"),
+                   "next_send_at": prefs["next_send_at"].isoformat() if prefs.get("next_send_at") else None,
+                   "categories": extras.get("categories") or [],
+                   "snooze_until": extras["snooze_until"].isoformat() if extras.get("snooze_until") else None,
+                   "recent_sends": db.recent_digest_sends(account["id"], limit=200)},
+    }
+    resp = make_response(json.dumps(payload, indent=2, default=str, ensure_ascii=False))
+    resp.headers["Content-Type"] = "application/json; charset=utf-8"
+    resp.headers["Content-Disposition"] = (
+        f'attachment; filename="orbitcast-data-{datetime.now(timezone.utc):%Y-%m-%d}.json"')
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.route("/unsubscribe", methods=["GET", "POST"])
