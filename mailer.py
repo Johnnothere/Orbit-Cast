@@ -241,7 +241,9 @@ def _send_smtp(to: str, subject: str, html_body: str, text_body: str,
                 try:
                     server.starttls(context=ssl.create_default_context())
                 except smtplib.SMTPNotSupportedError:
-                    log.warning("SMTP server %s does not support STARTTLS", SMTP_HOST)
+                    # Never send the password in the clear. No TLS, no mail.
+                    return _fail(f"SMTP server {SMTP_HOST} does not offer STARTTLS - refusing to "
+                                 "authenticate over plaintext; email not sent")
             if SMTP_USER:
                 server.login(SMTP_USER, SMTP_PASS)
             server.send_message(msg)
@@ -270,22 +272,6 @@ def _shell(inner: str, footer: str = "") -> str:
   font-size:15px;line-height:1.6;">{inner}</td></tr>
 <tr><td style="padding:18px 4px;color:{BRAND_MUTED};font-size:12px;line-height:1.6;">{footer}</td></tr>
 </table></td></tr></table></body></html>"""
-
-
-def send_login_link(to: str, raw_token: str, is_known: bool = True) -> bool:
-    link = f"{PUBLIC_URL}/auth/verify?token={raw_token}"
-    inner = f"""
-      <p style="margin:0 0 16px 0;">Here is your sign-in link for OrbitCast.</p>
-      <p style="margin:0 0 24px 0;">
-        <a href="{link}" style="display:inline-block;background:{BRAND_ACCENT};color:#06101f;
-          text-decoration:none;font-weight:600;padding:12px 22px;border-radius:9px;">Sign in</a>
-      </p>
-      <p style="margin:0;color:{BRAND_MUTED};font-size:13px;">
-        The link works once and expires in 20 minutes. If you did not ask for it,
-        ignore this email - nobody can sign in without it.</p>"""
-    text = (f"Sign in to OrbitCast:\n{link}\n\n"
-            "Works once, expires in 20 minutes. If you didn't request it, ignore this email.")
-    return send(to, "Your OrbitCast sign-in link", _shell(inner), text)
 
 
 def _event_row(ev: dict) -> str:

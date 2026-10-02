@@ -133,15 +133,65 @@ HEADERS = {
 # UTILITIES
 # ─────────────────────────────────────────────
 
-def fetch(url, json_mode=False, timeout=15):
+# Hard ceilings on anything this process pulls from the network. A source
+# that accepts the connection and never answers, or answers with gigabytes,
+# used to pin a scraper thread (or the whole 10-thread pool) indefinitely -
+# `_scraping` then stayed True and the catalogue never refreshed again until
+# a redeploy.
+FETCH_TIMEOUT = (6, 20)                 # (connect, read) seconds
+FETCH_MAX_BYTES = 6 * 1024 * 1024       # 6 MB per response
+
+
+def _is_public_host(url: str) -> bool:
+    """False for anything that resolves to loopback, link-local, RFC1918,
+    cloud-metadata or otherwise non-public addresses. Sources are URLs an
+    operator typed in (admin "add by link") or that a scraped page linked to;
+    neither should be able to point this server at its own network."""
+    import ipaddress, socket
+    from urllib.parse import urlparse
     try:
+        p = urlparse(url)
+        if p.scheme not in ("http", "https") or not p.hostname:
+            return False
+        host = p.hostname.lower()
+        if host in ("localhost",) or host.endswith((".local", ".internal", ".railway.internal")):
+            return False
+        for info in socket.getaddrinfo(host, None):
+            ip = ipaddress.ip_address(info[4][0])
+            if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
+                    or ip.is_reserved or ip.is_unspecified):
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def _read_capped(r, cap=FETCH_MAX_BYTES) -> bytes:
+    buf = bytearray()
+    for chunk in r.iter_content(64 * 1024):
+        buf.extend(chunk)
+        if len(buf) > cap:
+            raise ValueError(f"response over {cap} bytes")
+    return bytes(buf)
+
+
+def fetch(url, json_mode=False, timeout=None):
+    try:
+        if not _is_public_host(url):
+            log.warning(f"Fetch refused (non-public host): {url[:120]}")
+            return None
         h = dict(HEADERS)
         if json_mode:
             h["Accept"] = "application/json"
-        r = requests.get(url, headers=h, timeout=timeout, allow_redirects=True)
+        r = requests.get(url, headers=h, timeout=timeout or FETCH_TIMEOUT,
+                         allow_redirects=True, stream=True)
         r.raise_for_status()
+        if not _is_public_host(r.url):          # a redirect can point inward too
+            log.warning(f"Fetch refused after redirect (non-public host): {r.url[:120]}")
+            return None
+        body = _read_capped(r)
         if json_mode:
-            return r.json()
+            return json.loads(body.decode(r.encoding or "utf-8", errors="replace"))
         # r.content, not r.text, deliberately.
         #
         # requests only trusts the charset in the Content-Type header, and when
@@ -155,7 +205,7 @@ def fetch(url, json_mode=False, timeout=15):
         # Handing the raw bytes to BeautifulSoup lets it read the document's
         # own <meta charset> / BOM, which is the declaration that actually
         # matters, and fall back to sniffing when there isn't one.
-        return BeautifulSoup(r.content, "lxml")
+        return BeautifulSoup(body, "lxml")
     except Exception as e:
         log.warning(f"Fetch failed {url}: {e}")
         return None

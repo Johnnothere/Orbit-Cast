@@ -28,8 +28,11 @@ def init_security(app):
     limiter = Limiter(
         app=app,
         key_func=get_remote_address,
-        default_limits=[],          # no global limit; apply per-route
-        storage_uri="memory://",    # swap for "redis://..." in production
+        # A ceiling on every route that has no limit of its own. Per-route
+        # limits below are stricter where it matters. Keyed on the real client
+        # address: app.py wraps the WSGI app in ProxyFix before this runs.
+        default_limits=["600 per hour", "60 per minute"],
+        storage_uri="memory://",    # single worker; swap for redis:// if workers > 1
     )
 
     # ── Security response headers ─────────────────────────────────────────────
@@ -53,6 +56,11 @@ def init_security(app):
         # whatever it set for itself.
         if response.mimetype in ("text/html", "application/json"):
             response.headers.setdefault("Cache-Control", "no-cache, must-revalidate")
+        # Browsers remember to use HTTPS for a year, so a stripped first
+        # request cannot downgrade the session. Only sent over HTTPS, as the
+        # spec requires; harmless on localhost.
+        if request.is_secure or request.headers.get("X-Forwarded-Proto") == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         # Prevent clickjacking
         response.headers["X-Frame-Options"] = "DENY"
         # Prevent MIME sniffing
@@ -85,6 +93,7 @@ def init_security(app):
             "frame-ancestors 'none';"
         )
         # Remove server fingerprinting (hides "Werkzeug/x.x.x Python/x.x.x")
+        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
         response.headers.pop("Server", None)
         response.headers.pop("X-Powered-By", None)
         return response

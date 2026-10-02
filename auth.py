@@ -1,30 +1,30 @@
 """
-ORBITCAST — passwordless accounts.
+ORBITCAST — accounts. Google Sign-In only.
 
-WHY MAGIC LINKS AND NOT PASSWORDS
-No password is ever stored, so none can leak, be reused across sites, or need
-a reset flow. The email sender is required for the digests anyway, so the
-login channel costs no extra infrastructure. Nothing new to configure beyond
-what the digests already need.
+WHY GOOGLE ONLY
+Magic-link email login was removed (Oct 2026). One front door means one
+code path to audit, one identity provider doing the verification, and no
+"request a link" endpoint to abuse. Google asserts the address is verified;
+we refuse any identity where it does not.
+
+The cost, stated plainly: there is no account recovery. Lose the Google
+account, lose the OrbitCast account. The sign-in screen says so.
 
 WHY A SIGNED COOKIE AND NOT A SESSION TABLE
 A session row per login is a table to grow, index and clean up. An HMAC-signed
 cookie is self-verifying: the server trusts it only because the signature
 matches a secret the browser never sees. Logout clears the cookie.
 
-The trade-off, stated honestly: a signed cookie cannot be revoked server-side
-before it expires. For a 30-day event-recommendation session that is an
-acceptable exchange for having no session store. If this ever guards anything
-worth stealing, add a session table and check it - don't stretch this.
+The trade-off: a signed cookie cannot be revoked server-side before it
+expires. Mitigations here: a 7-day lifetime (was 30), and the cookie is bound
+to the browser's User-Agent so a copied cookie fails from a different browser.
+If this ever guards anything worth stealing, add a session table - don't
+stretch this.
 
-TWO FRONT DOORS, ONE SESSION
-Google Sign-In was added alongside the magic link, not instead of it. Both
-paths end at the same place - db account row, set_session_cookie() - so
-current_account(), login_required and the digest scheduler neither know nor
-care which door someone came through. Magic links stay because the audience
-includes defence, government and corporate addresses that are not Google
-accounts, and because removing them would lock out every account already
-created that way.
+SECRETS ARE REQUIRED
+SESSION_SECRET must be set. A missing secret used to become a random per-boot
+one; now the process refuses to start. Booting half-configured is how a
+security control gets silently skipped in production.
 """
 
 import base64
@@ -34,8 +34,8 @@ import json
 import logging
 import os
 import secrets
+import sys
 import time
-from datetime import datetime, timedelta, timezone
 from functools import wraps
 
 from flask import jsonify, request
@@ -45,51 +45,16 @@ import db
 log = logging.getLogger("orbitcast.auth")
 
 SESSION_COOKIE = "oc_session"
-SESSION_MAX_AGE = 60 * 60 * 24 * 30          # 30 days
-TOKEN_TTL_MINUTES = 20                        # magic link lifetime
+SESSION_MAX_AGE = 60 * 60 * 24 * 7           # 7 days
 
-# A missing secret must not silently become a known one. A random secret per
-# boot means sessions do not survive a restart - visibly annoying, which is
-# the point: it gets noticed and fixed, whereas a hardcoded fallback would
-# quietly let anyone who read this file forge a session for any account.
 _SECRET = os.environ.get("SESSION_SECRET", "")
-if not _SECRET:
-    _SECRET = secrets.token_urlsafe(48)
-    log.warning("SESSION_SECRET is not set - using a random per-boot secret, "
-                "so every deploy signs everyone out. Set it in Railway.")
+if len(_SECRET) < 32:
+    # Fail closed. A short or missing secret is a forgeable session for every
+    # account; nothing in this app is worth running in that state.
+    log.error("SESSION_SECRET is missing or shorter than 32 characters. Refusing to start. "
+              "Generate one: python3 -c \"import secrets; print(secrets.token_urlsafe(48))\"")
+    sys.exit(1)
 _SECRET_BYTES = _SECRET.encode("utf-8")
-
-
-# ─────────────────────────────────────────────
-# Magic-link tokens
-# ─────────────────────────────────────────────
-
-def _hash_token(raw: str) -> str:
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
-def issue_login_token(email: str):
-    """Returns the raw token to put in the emailed link, or None if the
-    database is unavailable. Only its hash is stored."""
-    raw = secrets.token_urlsafe(32)
-    expires = datetime.now(timezone.utc) + timedelta(minutes=TOKEN_TTL_MINUTES)
-    if not db.create_auth_token(email, _hash_token(raw), expires):
-        return None
-    return raw
-
-
-def redeem_login_token(raw: str, current_oc_uid: str):
-    """Spends the token and returns the account dict, or None.
-
-    `current_oc_uid` is the browser's existing anonymous id - on a first-ever
-    signup the account adopts it, so the analyses already stored under it
-    become the new account's history instead of being orphaned."""
-    if not raw:
-        return None
-    email = db.consume_auth_token(_hash_token(raw))
-    if not email:
-        return None
-    return db.get_or_create_account(email, current_oc_uid)
 
 
 # ─────────────────────────────────────────────
@@ -104,20 +69,33 @@ def _unb64(text: str) -> bytes:
     return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
 
 
-def _sign(payload: bytes) -> str:
-    return _b64(hmac.new(_SECRET_BYTES, payload, hashlib.sha256).digest())
+def _sign(payload: bytes, purpose: bytes = b"session") -> str:
+    # Domain-separated: a session signature can never be replayed as an
+    # unsubscribe token or vice versa.
+    return _b64(hmac.new(_SECRET_BYTES, purpose + b"\x00" + payload, hashlib.sha256).digest())
+
+
+def _browser_fingerprint() -> str:
+    """Coarse binding of the session to the browser that created it. A cookie
+    copied to another browser (different User-Agent) stops working. It is
+    deliberately coarse - a browser update changes the UA and signs the
+    person out, which is an acceptable cost for a 7-day session."""
+    ua = request.user_agent.string or ""
+    return hashlib.sha256(ua.encode("utf-8")).hexdigest()[:16]
 
 
 def make_session(account) -> str:
     body = json.dumps({"aid": account["id"], "uid": account["oc_uid"],
-                       "exp": int(time.time()) + SESSION_MAX_AGE},
+                       "exp": int(time.time()) + SESSION_MAX_AGE,
+                       "fp": _browser_fingerprint()},
                       separators=(",", ":")).encode("utf-8")
     return f"{_b64(body)}.{_sign(body)}"
 
 
 def read_session(cookie_value):
-    """Returns {"aid", "uid"} for a valid unexpired cookie, else None."""
-    if not cookie_value or "." not in cookie_value:
+    """Returns {"aid", "uid"} for a valid, unexpired cookie from the same
+    browser, else None."""
+    if not cookie_value or "." not in cookie_value or len(cookie_value) > 1024:
         return None
     encoded, sig = cookie_value.rsplit(".", 1)
     try:
@@ -134,28 +112,34 @@ def read_session(cookie_value):
         return None
     if int(data.get("exp", 0)) < time.time():
         return None
+    if data.get("fp") != _browser_fingerprint():
+        log.info("Session presented from a different browser; refused.")
+        return None
     return {"aid": data.get("aid"), "uid": data.get("uid")}
 
 
 def set_session_cookie(resp, account):
     resp.set_cookie(SESSION_COOKIE, make_session(account), max_age=SESSION_MAX_AGE,
-                    httponly=True, samesite="Lax", secure=_secure_cookies())
+                    httponly=True, samesite="Lax", secure=secure_cookies(), path="/")
     # The account's oc_uid becomes this browser's oc_uid, which is what makes
     # the person's existing history follow them onto any device they log in on.
-    resp.set_cookie("oc_uid", account["oc_uid"], max_age=60 * 60 * 24 * 365 * 2,
-                    httponly=True, samesite="Lax", secure=_secure_cookies())
+    # Same flags as the session - this id is itself a credential for the
+    # anonymous-path routes.
+    resp.set_cookie("oc_uid", account["oc_uid"], max_age=60 * 60 * 24 * 90,
+                    httponly=True, samesite="Lax", secure=secure_cookies(), path="/")
     return resp
 
 
 def clear_session_cookie(resp):
-    resp.delete_cookie(SESSION_COOKIE)
+    resp.delete_cookie(SESSION_COOKIE, path="/")
     return resp
 
 
-def _secure_cookies() -> bool:
+def secure_cookies() -> bool:
     """Secure in production, off on plain-HTTP localhost - otherwise the
     cookie is set and silently never sent back, which looks exactly like a
-    broken login."""
+    broken login. With ProxyFix installed (app.py) request.is_secure is
+    already correct behind Railway's proxy."""
     return request.is_secure or request.headers.get("X-Forwarded-Proto") == "https"
 
 
@@ -186,20 +170,37 @@ def login_required(fn):
     return wrapper
 
 
-def normalise_email(raw: str):
-    """Light validation only. The magic link is the real check: an address
-    that cannot receive mail never completes a login, whatever it looks like."""
-    email = (raw or "").strip().lower()
-    if len(email) < 5 or len(email) > 254:
+def client_ip() -> str:
+    """Real client address. Correct only because app.py wraps the WSGI app in
+    ProxyFix(x_for=1); without that this is Railway's proxy for everyone."""
+    return request.remote_addr or ""
+
+
+# ─────────────────────────────────────────────
+# Unsubscribe tokens - derived, not stored
+# ─────────────────────────────────────────────
+# An unsubscribe link needs a secret a mail client can present without
+# logging in. Storing a random one per account means a database dump hands
+# out working links. Deriving it with HMAC from the account id means nothing
+# is stored at all: the link is "<account_id>.<signature>", and verification
+# recomputes the signature. Rotating SESSION_SECRET invalidates old links,
+# which is the correct behaviour on a suspected leak.
+
+def unsub_token(account_id) -> str:
+    payload = str(int(account_id)).encode("ascii")
+    return f"{payload.decode()}.{_sign(payload, b'unsub')}"
+
+
+def verify_unsub_token(token: str):
+    """Returns the account id the token was minted for, or None."""
+    if not token or "." not in token or len(token) > 128:
         return None
-    if email.count("@") != 1:
+    aid, _, sig = token.partition(".")
+    if not aid.isdigit():
         return None
-    local, _, domain = email.partition("@")
-    if not local or "." not in domain or domain.startswith(".") or domain.endswith("."):
+    if not hmac.compare_digest(_sign(aid.encode("ascii"), b"unsub"), sig):
         return None
-    if any(c.isspace() for c in email):
-        return None
-    return email
+    return int(aid)
 
 
 # ─────────────────────────────────────────────
@@ -215,12 +216,7 @@ GOOGLE_DISCOVERY = "https://accounts.google.com/.well-known/openid-configuration
 NONCE_SESSION_KEY = "oc_oauth_nonce"
 
 # The redirect URI is configuration, not something to derive from the request.
-# url_for(_external=True) would be the obvious choice and is a trap here:
-# Railway terminates TLS at its proxy and forwards plain HTTP, so Flask - which
-# does not trust X-Forwarded-Proto unless told to - would build
-# "http://orbitcast.up.railway.app/auth/callback". Google compares the
-# redirect_uri byte-for-byte against the registered value and rejects it with
-# redirect_uri_mismatch, which reads like a credentials problem and is not one.
+# url_for(_external=True) is a trap behind Railway's TLS-terminating proxy.
 GOOGLE_REDIRECT_URI = os.environ.get(
     "GOOGLE_REDIRECT_URI", "https://orbitcast.up.railway.app/auth/callback")
 
@@ -231,45 +227,46 @@ _google = None
 
 
 def google_enabled() -> bool:
-    """False when the credentials are absent, so the frontend can hide the
-    button instead of offering one that dead-ends in an error page."""
     return _google is not None
 
 
 def init_google(app):
-    """Wires Authlib onto the app. Safe to call with no credentials set - it
-    logs and leaves Google disabled rather than raising at import time, which
-    would take the whole site down over an optional login method."""
+    """Wires Authlib onto the app. Google is the ONLY way in, so missing
+    credentials are a fatal misconfiguration, not a degraded mode."""
     global _google
 
     # Authlib keeps the OAuth state and nonce in Flask's own session cookie
-    # between the redirect out and the callback back. Flask refuses to use
-    # `session` at all without a secret key, and nothing else in this app had
-    # ever needed one. Reusing SESSION_SECRET keeps it to a single secret to
-    # configure; it is the same trust boundary either way.
+    # between the redirect out and the callback back. Same trust boundary as
+    # the session secret, so the same secret.
     if not app.secret_key:
         app.secret_key = _SECRET
+    app.config.update(
+        SESSION_COOKIE_NAME="oc_oauth",
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        # Secure unless explicitly running on plain-HTTP localhost.
+        SESSION_COOKIE_SECURE=os.environ.get("OC_INSECURE_DEV", "") != "1",
+        PERMANENT_SESSION_LIFETIME=600,       # the OAuth round trip, not a login
+    )
 
     if not _GOOGLE_CLIENT_ID or not _GOOGLE_CLIENT_SECRET:
-        log.warning("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are not set - "
-                    "Google Sign-In is disabled; magic links still work.")
-        return None
+        if os.environ.get("OC_ALLOW_NO_GOOGLE", "") == "1":
+            # Local development and tests only. Never set this on Railway.
+            log.warning("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET unset; running with sign-in "
+                        "DISABLED because OC_ALLOW_NO_GOOGLE=1.")
+            return None
+        log.error("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET must be set - Google is the only "
+                  "sign-in method. Refusing to start.")
+        sys.exit(1)
 
-    try:
-        from authlib.integrations.flask_client import OAuth
-    except ImportError:
-        log.warning("Authlib is not installed - Google Sign-In is disabled.")
-        return None
-
+    from authlib.integrations.flask_client import OAuth
     oauth = OAuth(app)
     _google = oauth.register(
         name="google",
         client_id=_GOOGLE_CLIENT_ID,
         client_secret=_GOOGLE_CLIENT_SECRET,
         server_metadata_url=GOOGLE_DISCOVERY,
-        # `openid email profile` and nothing more. Scope creep on a consent
-        # screen costs conversions and, for this audience, trust - there is no
-        # reason to ask for a calendar to sign somebody in.
+        # `openid email profile` and nothing more.
         client_kwargs={"scope": "openid email profile"},
     )
     log.info("Google Sign-In enabled.")
@@ -277,16 +274,11 @@ def init_google(app):
 
 
 def google_redirect():
-    """Sends the browser to Google's consent screen. Returns None if Google
-    is not configured, so the caller can answer honestly rather than 500."""
+    """Sends the browser to Google's consent screen, or None if unconfigured."""
     if not _google:
         return None
     from flask import session
     nonce = secrets.token_urlsafe(24)
-    # Kept for the fallback path below. Authlib binds the nonce into its own
-    # state record too and validates it on the way back; this copy exists only
-    # so parse_id_token() can be called explicitly if a version of Authlib
-    # does not hand back a pre-verified userinfo.
     session[NONCE_SESSION_KEY] = nonce
     return _google.authorize_redirect(GOOGLE_REDIRECT_URI, nonce=nonce)
 
@@ -297,8 +289,7 @@ def google_identity():
 
     Every failure returns None rather than raising: a cancelled consent
     screen, an expired state, a burnt code and a genuine token-endpoint error
-    all arrive here as exceptions, and all of them mean the same thing to the
-    person - they are not signed in."""
+    all mean the same thing to the person - they are not signed in."""
     if not _google:
         return None
     from flask import session
@@ -306,7 +297,7 @@ def google_identity():
     try:
         token = _google.authorize_access_token()
     except Exception as exc:
-        log.warning(f"Google token exchange failed: {exc}")
+        log.warning(f"Google token exchange failed: {type(exc).__name__}")
         return None
 
     claims = token.get("userinfo")
@@ -314,7 +305,7 @@ def google_identity():
         try:
             claims = _google.parse_id_token(token, nonce=nonce)
         except Exception as exc:
-            log.warning(f"Google id_token could not be verified: {exc}")
+            log.warning(f"Google id_token could not be verified: {type(exc).__name__}")
             return None
     if not claims:
         return None
@@ -322,17 +313,13 @@ def google_identity():
     sub = claims.get("sub")
     email = (claims.get("email") or "").strip().lower()
     if not sub or not email:
-        # Both are required. An id_token without them is not something to
-        # guess around - refuse the login.
         log.warning("Google returned an identity with no sub or no email.")
         return None
 
     return {
         "sub": sub,
         "email": email,
-        # Passed through rather than assumed true. db.get_or_create_account_by_google
-        # will only merge into an existing magic-link account when this is set.
         "email_verified": bool(claims.get("email_verified")),
-        "name": (claims.get("name") or "").strip() or None,
-        "picture": (claims.get("picture") or "").strip() or None,
+        "name": (claims.get("name") or "").strip()[:120] or None,
+        "picture": (claims.get("picture") or "").strip()[:500] or None,
     }

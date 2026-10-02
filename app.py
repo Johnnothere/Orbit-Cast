@@ -7,14 +7,18 @@ Run with: python app.py
 import os
 import re
 import json
+import hmac
+import sys
 import threading
 import time
 import logging
 import uuid
+import secrets
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from flask import Flask, jsonify, make_response, redirect, render_template, request
+from werkzeug.middleware.proxy_fix import ProxyFix
 from markupsafe import escape
 from security import init_security
 import ai_engine
@@ -27,6 +31,14 @@ import rag
 log = logging.getLogger("orbitcast.web")
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 12 * 1024 * 1024  # headroom for admin example-doc uploads
+
+# Railway terminates TLS at its proxy and forwards plain HTTP with
+# X-Forwarded-For / X-Forwarded-Proto. Without this, request.remote_addr is
+# the proxy for EVERY visitor - which made every rate limit in this app one
+# bucket shared by the whole internet, and request.is_secure False. Trust
+# exactly one hop; a client that sends its own X-Forwarded-For is ignored.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
 limiter = init_security(app)
 
 # Registers the Google OIDC client and gives Flask a secret_key, which Authlib
@@ -36,7 +48,21 @@ limiter = init_security(app)
 auth.init_google(app)
 
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
-OC_UID_MAX_AGE = 60 * 60 * 24 * 365 * 2  # 2 years
+OC_UID_MAX_AGE = 60 * 60 * 24 * 90      # 90 days (was 2 years)
+
+
+def _secure():
+    return auth.secure_cookies()
+
+
+def _audit(action, account=None, resource=None, detail=None):
+    """Audit trail for anything that reads or changes a person's data.
+    Account may be None for anonymous-path actions (then oc_uid goes in detail)."""
+    try:
+        db.audit(account["id"] if account else None, action, resource, detail,
+                 ip=auth.client_ip(), user_agent=request.user_agent.string)
+    except Exception:
+        pass
 
 
 def ensure_oc_uid(resp):
@@ -47,7 +73,8 @@ def ensure_oc_uid(resp):
     oc_uid = request.cookies.get("oc_uid")
     if not oc_uid:
         oc_uid = uuid.uuid4().hex
-        resp.set_cookie("oc_uid", oc_uid, max_age=OC_UID_MAX_AGE, httponly=True, samesite="Lax")
+        resp.set_cookie("oc_uid", oc_uid, max_age=OC_UID_MAX_AGE, httponly=True,
+                        samesite="Lax", secure=_secure(), path="/")
     return oc_uid
 
 SEEN_FILE   = Path("seen_events.json")
@@ -325,7 +352,15 @@ _PRIVATE_EVENT_FIELDS = ("source", "emoji")
 
 
 def _public_event(ev):
-    return {k: v for k, v in ev.items() if k not in _PRIVATE_EVENT_FIELDS}
+    out = {k: v for k, v in ev.items() if k not in _PRIVATE_EVENT_FIELDS}
+    # Scraped sources are only semi-trusted. The browser escapes text, but an
+    # href is a URL: anything that is not http(s) is dropped rather than
+    # rendered as a link.
+    url = out.get("url")
+    if url is not None and not (isinstance(url, str) and url.lower().startswith(("http://", "https://"))
+                                and "\r" not in url and "\n" not in url):
+        out["url"] = None
+    return out
 
 
 def _public_result(result):
@@ -366,6 +401,11 @@ def api_summary():
 @app.route("/api/refresh", methods=["POST"])
 @limiter.limit("6 per hour")
 def api_refresh():
+    """Admin-only. The public button was removed in the redesign; the route
+    had stayed open, and with the proxy bug every anonymous caller shared one
+    6/hour bucket for a full 40-source scrape."""
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
     t = threading.Thread(target=run_scrape_background, daemon=True)
     t.start()
     return jsonify({"status": "started", "message": "Scraping in background..."})
@@ -405,37 +445,6 @@ def not_found(_e):
 # devices instead of a cookie that dies with the browser.
 
 
-@app.route("/api/auth/request", methods=["POST"])
-@limiter.limit("10 per hour")
-def api_auth_request():
-    """Emails a magic link. The response is deliberately identical whether or
-    not the address has an account - anything else turns this endpoint into a
-    way to test who has signed up."""
-    email = auth.normalise_email((request.get_json(silent=True) or {}).get("email"))
-    generic = {"ok": True, "message": "Check your email for a sign-in link."}
-    if not email:
-        return jsonify({"error": "That does not look like an email address."}), 400
-    if not db.is_configured():
-        return jsonify({"error": "Accounts are not available right now."}), 503
-
-    raw = auth.issue_login_token(email)
-    if not raw:
-        # The token could not be stored - a database problem, not an unknown
-        # address. Saying "check your email" here would be a lie that looks
-        # identical to success, which is the exact failure mode that cost an
-        # afternoon of debugging. The generic response protects who HAS an
-        # account; it should never paper over the service being broken.
-        return jsonify({"error": "We could not start sign-in just now. "
-                                  "Try again in a moment."}), 503
-
-    sent = mailer.send_login_link(email, raw)
-    if not sent:
-        log.warning("Sign-in link for %s was not delivered: %s",
-                    email, mailer.last_error() or "no provider configured")
-    return jsonify(generic)
-
-
-
 # ─────────────────────────────────────────────
 # BRANDED UTILITY PAGES
 # ─────────────────────────────────────────────
@@ -472,45 +481,6 @@ def _page(heading: str, sub: str = "", extra: str = "", back: bool = True, statu
         + "</main></body></html>"
     )
     return html, status
-
-@app.route("/auth/verify", methods=["GET", "POST"])
-@limiter.limit("30 per hour")
-def auth_verify():
-    """The magic-link target. GET confirms, POST signs in.
-
-    The interstitial is not ceremony. Enterprise mail security rewrites and
-    PRE-FETCHES every link in an incoming email (Outlook Safe Links, Proofpoint
-    URL Defense, Mimecast). The token here is single-use by design, so a
-    scanner that fetches it first BURNS it - and the person clicks their own
-    sign-in link and is told it has expired. That failure is silent, blames
-    the user, and is close to impossible to diagnose from support emails.
-
-    This matters more than usual for this audience: government, defence and
-    security organisations are exactly where aggressive link scanning is
-    standard. A scanner cannot submit the form, so the token survives until a
-    human clicks.
-
-    The token is never rendered into readable page text or a link - only into
-    the form action - so it does not leak by referrer or over someone's
-    shoulder in a screenshot."""
-    token = request.args.get("token", "") or (request.form.get("token", "") if request.form else "")
-    if not token:
-        return redirect("/?signin=expired")
-
-    if request.method == "GET":
-        form = (f"<form method='post' action='/auth/verify'>"
-                f"<input type='hidden' name='token' value='{escape(token)}'>"
-                f"<button class='btn' type='submit'>Sign in</button></form>")
-        return _page("Sign in to OrbitCast", "One more click and you are in.", form, back=False)
-
-    oc_uid = request.cookies.get("oc_uid") or uuid.uuid4().hex
-    account = auth.redeem_login_token(token, oc_uid)
-    if not account:
-        return redirect("/?signin=expired")
-    resp = make_response(redirect("/?signin=ok"))
-    auth.set_session_cookie(resp, account)
-    return resp
-
 
 @app.route("/auth/login")
 @limiter.limit("30 per hour")
@@ -562,9 +532,16 @@ def auth_google_callback():
         identity["picture"], oc_uid, identity["email_verified"])
     if not account:
         return redirect("/?signin=unavailable")
+    if account.get("refused"):
+        # Unverified address, or not on the allow-list. One generic page for
+        # both: which one it was is not the caller's business.
+        log.warning("Sign-in refused (%s) from %s", account["refused"], auth.client_ip())
+        _audit("signin_refused", None, detail={"reason": account["refused"]})
+        return redirect("/?signin=not_allowed")
 
     resp = make_response(redirect("/?signin=ok"))
     auth.set_session_cookie(resp, account)
+    _audit("signin", account, detail={"new": bool(account.get("is_new"))})
     return resp
 
 
@@ -576,11 +553,12 @@ def api_auth_logout():
     # sign-in, so leaving it behind let the next person on a shared browser
     # read the previous user's profile summary and location. Signing back in
     # restores it from the account; a fresh visitor gets a fresh id.
-    resp.set_cookie("oc_uid", "", expires=0)
+    resp.delete_cookie("oc_uid", path="/")
     return resp
 
 
 @app.route("/api/me")
+@limiter.limit("240 per hour")
 def api_me():
     """One call for the whole signed-in state: who, and what alerts they get."""
     account = auth.current_account()
@@ -588,7 +566,8 @@ def api_me():
         # google_enabled is reported signed-out as well as signed-in: it is
         # what decides whether the sign-in panel renders the Google button,
         # and that decision is needed precisely when nobody is signed in.
-        return jsonify({"signed_in": False, "google_enabled": auth.google_enabled()})
+        return jsonify({"signed_in": False, "google_enabled": auth.google_enabled(),
+                        "invite_only": db.signup_gated()})
     prefs = db.get_digest_prefs(account["id"]) or {}
     has_profile = bool(db.get_latest_analysis(account["oc_uid"]))
     # Keyed on the account's oc_uid, which set_session_cookie() has already
@@ -611,7 +590,9 @@ def api_me():
         # forget, and knowing that is the answer to "how do I reset it".
         "signin_method": "google" if meta.get("google_linked") else "email_link",
         "has_profile": has_profile,
-        "calendar_feed": _feed_urls(meta.get("cal_token")),
+        # Presence only. The feed URL is shown once, at create/rotate - the
+        # token is stored hashed and cannot be recovered.
+        "calendar_feed": {"active": bool(meta.get("cal_feed_active"))} if meta.get("cal_feed_active") else None,
         "cv": {
             # Text-only submissions have no file, so "on file" must mean
             # either - reporting only the upload would tell someone who typed
@@ -663,6 +644,7 @@ def api_delete_my_cv():
     result = db.delete_stored_cv(account["oc_uid"])
     if result is None:
         return jsonify({"error": "Could not delete that — nothing was removed."}), 503
+    _audit("cv_deleted", account, detail=result)
     return jsonify({"ok": True,
                      "files_deleted": result["files_deleted"],
                      "texts_cleared": result["texts_cleared"]})
@@ -766,6 +748,7 @@ def api_my_runs():
         removed = db.clear_history(account["oc_uid"])
         if removed is None:
             return jsonify({"error": "Could not clear that — nothing was removed."}), 503
+        _audit("history_cleared", account, detail={"matches_removed": removed})
         return jsonify({"ok": True, "matches_removed": removed})
 
     catalog = _catalog_by_id()
@@ -920,16 +903,21 @@ def api_my_calendar_feed():
     if err:
         return err
     action = ((request.get_json(silent=True) or {}).get("action") or "create").strip()
-    current = db.get_account_meta(account["id"]).get("cal_token")
+    active = db.get_account_meta(account["id"]).get("cal_feed_active")
     if action == "revoke":
         token = None
-    elif action == "rotate" or not current:
-        token = uuid.uuid4().hex + uuid.uuid4().hex
+    elif action == "rotate" or not active:
+        token = secrets.token_urlsafe(48)
     else:
-        return jsonify({"ok": True, "calendar_feed": _feed_urls(current)})
+        # Already have one. The token is stored hashed, so it cannot be shown
+        # again - the panel offers "rotate" to get a fresh URL.
+        return jsonify({"ok": True, "calendar_feed": {"active": True}})
     if not db.set_cal_token(account["id"], token):
         return jsonify({"error": "Calendar feeds are not available right now."}), 503
-    return jsonify({"ok": True, "calendar_feed": _feed_urls(token)})
+    _audit("calendar_feed_" + ("revoked" if token is None else "issued"), account)
+    if token is None:
+        return jsonify({"ok": True, "calendar_feed": None})
+    return jsonify({"ok": True, "calendar_feed": {"active": True, **_feed_urls(token)}})
 
 
 def _ics_escape(text):
@@ -987,7 +975,9 @@ def _saved_ics(saved):
                       f"DTEND;VALUE=DATE:{(day + timedelta(days=1)).strftime('%Y%m%d')}"]
         lines += [f"SUMMARY:{_ics_escape(e.get('title'))}", f"LOCATION:{_ics_escape(loc)}"]
         if e.get("url"):
-            lines += [f"URL:{e['url']}", f"DESCRIPTION:{_ics_escape('Details: ' + e['url'])}"]
+            u = str(e["url"]).replace("\r", "").replace("\n", "")
+            if u.lower().startswith(("http://", "https://")):
+                lines += [f"URL:{u}", f"DESCRIPTION:{_ics_escape('Details: ' + u)}"]
         lines.append("END:VEVENT")
     lines.append("END:VCALENDAR")
     return "\r\n".join(_ics_fold(l) for l in lines) + "\r\n"
@@ -1048,6 +1038,7 @@ def api_my_export():
                    "snooze_until": extras["snooze_until"].isoformat() if extras.get("snooze_until") else None,
                    "recent_sends": db.recent_digest_sends(account["id"], limit=200)},
     }
+    _audit("data_export", account)
     resp = make_response(json.dumps(payload, indent=2, default=str, ensure_ascii=False))
     resp.headers["Content-Type"] = "application/json; charset=utf-8"
     resp.headers["Content-Disposition"] = (
@@ -1081,7 +1072,8 @@ def unsubscribe():
                            "One click and we stop emailing you. You can turn them back on "
                            "any time from your account.", form)
 
-    email = db.pause_digest_by_token(token)
+    aid = auth.verify_unsub_token(token)
+    email = db.pause_digest_by_account(aid) if aid else db.pause_digest_by_token(token)
     if not email:
         return _page("That unsubscribe link is not valid.",
                            "It may already have been used.")
@@ -1134,7 +1126,10 @@ def api_analyze():
     # location this browser already granted, so recommendations can carry a
     # distance + directions link. None on any first visit or decline; the
     # analysis runs identically either way.
-    _existing_oc_uid = request.cookies.get("oc_uid")
+    # The route is login-gated, so the identity is the ACCOUNT's oc_uid - never
+    # a cookie the browser could have carried in from somewhere else.
+    _acct = auth.current_account()
+    _existing_oc_uid = _acct["oc_uid"] if _acct else None
     user_location = None
     if _existing_oc_uid and db.get_location_consent(_existing_oc_uid):
         user_location = db.get_latest_location(_existing_oc_uid)
@@ -1142,7 +1137,9 @@ def api_analyze():
     result = ai_engine.analyze_upload(file_text, events, user_location=user_location)
 
     resp = jsonify(_public_result(result))
-    oc_uid = ensure_oc_uid(resp)
+    oc_uid = _existing_oc_uid or ensure_oc_uid(resp)
+    _audit("analysis_run", _acct, detail={"stored": bool(db.get_consent(oc_uid)),
+                                          "file": bool(file and file.filename)})
     # Consent is the hinge: no recorded "yes" for this browser means nothing
     # gets written, and the response the user sees is identical either way.
     if db.get_consent(oc_uid):
@@ -1228,17 +1225,29 @@ def api_analyze_reuse():
 # CONSENT + TRACKING + GDPR
 # ─────────────────────────────────────────────
 
+def _effective_oc_uid():
+    """The signed-in account's oc_uid when there is a valid session, else the
+    anonymous cookie. A stale or planted oc_uid cookie can no longer speak for
+    an account on the anonymous-path routes below."""
+    acct = auth.current_account()
+    if acct:
+        return acct["oc_uid"], acct
+    return request.cookies.get("oc_uid"), None
+
+
 @app.route("/api/consent", methods=["GET", "POST"])
+@limiter.limit("120 per hour")
 def api_consent():
     if request.method == "GET":
-        oc_uid = request.cookies.get("oc_uid")
+        oc_uid, _ = _effective_oc_uid()
         decision = db.get_consent(oc_uid) if oc_uid else None
         return jsonify({"decision": decision})
 
     data = request.get_json(silent=True) or {}
     accepted = bool(data.get("accepted"))
     resp = jsonify({"ok": True, "decision": accepted})
-    oc_uid = ensure_oc_uid(resp)
+    oc_uid, _acct = _effective_oc_uid()
+    oc_uid = oc_uid or ensure_oc_uid(resp)
     # Traffic source can only come from the client - document.referrer and
     # any ?utm_* params are properties of the ORIGINAL page load, not of
     # this fetch() call (whose own Referer header would just be this same
@@ -1254,9 +1263,14 @@ def api_consent():
     return resp
 
 @app.route("/api/location", methods=["GET", "POST"])
+@limiter.limit("120 per hour")
 def api_location():
     if request.method == "GET":
-        oc_uid = request.cookies.get("oc_uid")
+        oc_uid, _acct = _effective_oc_uid()
+        if request.cookies.get(auth.SESSION_COOKIE) and not _acct:
+            # A session cookie was presented but is invalid: do not fall back
+            # to the anonymous id - that is how a stale cookie read a location.
+            return jsonify({"decision": None, "lat": None, "lng": None})
         decision = db.get_location_consent(oc_uid) if oc_uid else None
         # On a returning visit where location was already granted, hand back
         # the last known fix so the page doesn't have to re-prompt the OS
@@ -1268,7 +1282,8 @@ def api_location():
     data = request.get_json(silent=True) or {}
     accepted = bool(data.get("accepted"))
     resp = jsonify({"ok": True, "decision": accepted})
-    oc_uid = ensure_oc_uid(resp)
+    oc_uid, _acct = _effective_oc_uid()
+    oc_uid = oc_uid or ensure_oc_uid(resp)
     # location_consented lives on the consent row, so that row must exist
     # first - it does by the time this can fire, since the location prompt
     # only ever appears after the general consent banner has been answered.
@@ -1277,18 +1292,25 @@ def api_location():
     db.set_location_consent(oc_uid, accepted)
     if accepted:
         lat, lng = data.get("lat"), data.get("lng")
-        if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
-            db.save_user_location(oc_uid, lat, lng, data.get("accuracy"))
+        if (isinstance(lat, (int, float)) and isinstance(lng, (int, float))
+                and not isinstance(lat, bool) and -90 <= lat <= 90 and -180 <= lng <= 180):
+            # Rounded to ~100 m: enough for distance and directions, not a
+            # doorstep.
+            db.save_user_location(oc_uid, round(float(lat), 3), round(float(lng), 3), data.get("accuracy"))
     return resp
 
 
 @app.route("/api/track", methods=["POST"])
 @limiter.limit("200 per hour")
 def api_track():
-    oc_uid = request.cookies.get("oc_uid")
+    oc_uid, _ = _effective_oc_uid()
     data = request.get_json(silent=True) or {}
-    if oc_uid and db.get_consent(oc_uid):
-        db.log_interaction(oc_uid, data.get("recommendation_id"), data.get("event_type", "view_event"))
+    rec_id = data.get("recommendation_id")
+    if oc_uid and isinstance(rec_id, int) and rec_id > 0 and db.get_consent(oc_uid):
+        # Only a recommendation that belongs to this person's own analyses -
+        # ids are sequential, and anyone could log clicks against others'.
+        if db.recommendation_belongs_to(rec_id, oc_uid):
+            db.log_interaction(oc_uid, rec_id, "view_event")
     return jsonify({"ok": True})
 
 @app.route("/api/forget", methods=["POST"])
@@ -1298,12 +1320,22 @@ def api_forget():
     schedule and the send log - otherwise someone who asked to be forgotten
     would keep receiving email, which is the version of this bug that gets
     reported to a regulator rather than to us."""
-    oc_uid = request.cookies.get("oc_uid")
+    oc_uid, acct = _effective_oc_uid()
+    if request.cookies.get(auth.SESSION_COOKIE) and not acct:
+        # Invalid session presented: refuse rather than delete whatever the
+        # anonymous cookie points at.
+        return jsonify({"error": "Sign in first.", "reason": "auth_required"}), 401
+    if oc_uid and not acct and db.account_exists_for_oc_uid(oc_uid):
+        # The anonymous cookie names an ACCOUNT's id but there is no session
+        # for it. Deleting an account must come from a signed-in session.
+        return jsonify({"error": "Sign in first.", "reason": "auth_required"}), 401
     if oc_uid:
+        _audit("account_deleted" if acct else "anonymous_data_deleted", acct,
+               detail={} if acct else {"oc_uid": oc_uid})
         db.delete_account(oc_uid)
         db.forget(oc_uid)
     resp = jsonify({"ok": True})
-    resp.set_cookie("oc_uid", "", expires=0)
+    resp.delete_cookie("oc_uid", path="/")
     auth.clear_session_cookie(resp)
     return resp
 
@@ -1312,7 +1344,10 @@ def api_forget():
 # ─────────────────────────────────────────────
 
 def _admin_authorized() -> bool:
-    return bool(ADMIN_SECRET) and request.headers.get("X-Admin-Secret") == ADMIN_SECRET
+    if not ADMIN_SECRET or len(ADMIN_SECRET) < 24:
+        return False                      # fail closed on a missing or weak secret
+    given = request.headers.get("X-Admin-Secret", "")
+    return hmac.compare_digest(given.encode("utf-8"), ADMIN_SECRET.encode("utf-8"))
 
 
 @app.route("/admin")
@@ -1320,7 +1355,9 @@ def admin_dashboard():
     # The page itself carries no secret data - it just prompts for the admin
     # secret client-side and attaches it as a header on every API call below.
     # Every route that actually reads/writes anything re-checks that header.
-    return render_template("admin.html")
+    resp = make_response(render_template("admin.html"))
+    resp.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return resp
 
 
 @app.route("/api/admin/ingest", methods=["POST"])
@@ -1771,8 +1808,11 @@ def api_admin_download_raw(analysis_id):
     if raw is None:
         return jsonify({"error": "No original file stored for this analysis - it may have been a "
                                   "pasted-text submission, or predates this feature."}), 404
+    _audit("admin_raw_cv_download", None, resource=str(analysis_id))
     resp = make_response(raw["file_bytes"])
-    resp.headers["Content-Type"] = raw["content_type"] or "application/octet-stream"
+    # Always a download, never rendered: the stored content_type is whatever
+    # the uploader's browser claimed.
+    resp.headers["Content-Type"] = "application/octet-stream"
     safe_name = (raw["filename"] or "resume").replace('"', "")
     resp.headers["Content-Disposition"] = f'attachment; filename="{safe_name}"'
     return resp

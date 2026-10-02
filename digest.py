@@ -32,6 +32,7 @@ try:
 except ImportError:                                   # pragma: no cover
     ZoneInfo = None
 
+import auth
 import db
 import mailer
 
@@ -214,7 +215,7 @@ def send_preview(account, prefs, catalog_events, score_fn) -> str:
     written, so a preview neither uses up the next scheduled send nor retires
     the events in it. The price is that the next real digest may repeat what
     the preview showed, which is the right way round for a test."""
-    unsub = f"{mailer.PUBLIC_URL}/unsubscribe?t={prefs['unsub_token']}"
+    unsub = f"{mailer.PUBLIC_URL}/unsubscribe?t={auth.unsub_token(account['id'])}"
     settings = f"{mailer.PUBLIC_URL}/?settings=alerts"
     stored = db.get_latest_analysis(account["oc_uid"])
     if not stored:
@@ -241,7 +242,7 @@ def send_one(account, prefs, catalog_events, score_fn) -> str:
     if not db.claim_digest_period(account["id"], key):
         return "already_claimed"
 
-    unsub = f"{mailer.PUBLIC_URL}/unsubscribe?t={prefs['unsub_token']}"
+    unsub = f"{mailer.PUBLIC_URL}/unsubscribe?t={auth.unsub_token(account['id'])}"
     settings = f"{mailer.PUBLIC_URL}/?settings=alerts"
 
     try:

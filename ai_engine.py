@@ -126,20 +126,56 @@ def _call(system, user_content, max_tokens=1500, model=None):
 MIN_PDF_TEXT_CHARS = 40
 
 
+# A CV is a few pages. These caps exist because this runs on the single
+# Gunicorn worker that serves everyone: a 5 MB PDF with ten thousand pages,
+# or a 5 MB DOCX that inflates to gigabytes, used to pin that worker until
+# Gunicorn killed it - every user got 502s and the in-memory catalogue was
+# lost. Anything past the caps is simply not read.
+MAX_PDF_PAGES = 30
+MAX_DOCX_INFLATED_BYTES = 40 * 1024 * 1024
+EXTRACT_TIMEOUT_S = 25
+
+
 def _extract_pdf_pdfplumber(file_bytes: bytes) -> str:
     import pdfplumber
     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-        return "\n".join((page.extract_text() or "") for page in pdf.pages)
+        return "\n".join((page.extract_text() or "") for page in pdf.pages[:MAX_PDF_PAGES])
 
 
 def _extract_pdf_pypdf(file_bytes: bytes) -> str:
     from pypdf import PdfReader
     reader = PdfReader(io.BytesIO(file_bytes))
-    return "\n".join((page.extract_text() or "") for page in reader.pages)
+    return "\n".join((page.extract_text() or "") for page in reader.pages[:MAX_PDF_PAGES])
+
+
+def _check_docx_size(file_bytes: bytes):
+    """Refuse a DOCX whose declared uncompressed size is absurd for a CV
+    before python-docx inflates it."""
+    import zipfile
+    with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
+        total = sum(i.file_size for i in z.infolist())
+        if total > MAX_DOCX_INFLATED_BYTES or len(z.infolist()) > 2000:
+            raise ValueError("That document is far larger inside than a CV should be. "
+                             "Try a PDF or paste the text.")
 
 
 def extract_text(file_bytes: bytes, filename: str) -> str:
-    return _strip_nul(_extract_text_raw(file_bytes, filename))
+    """Runs the extractor under a hard time limit. The thread cannot be killed
+    if it overruns, but the request returns and the limiter still applies;
+    the leaked thread ends when the parser does. ValueError messages are
+    user-facing and surface unchanged."""
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as _Timeout
+    ex = ThreadPoolExecutor(max_workers=1)
+    try:
+        fut = ex.submit(_extract_text_raw, file_bytes, filename)
+        try:
+            text = fut.result(timeout=EXTRACT_TIMEOUT_S)
+        except _Timeout:
+            raise ValueError("That file took too long to read. Try a smaller PDF, "
+                             "or paste your CV as text.")
+    finally:
+        ex.shutdown(wait=False)
+    return _strip_nul(text)
 
 
 def _strip_nul(text: str) -> str:
@@ -177,6 +213,7 @@ def _extract_text_raw(file_bytes: bytes, filename: str) -> str:
 
     if name.endswith(".docx"):
         import docx
+        _check_docx_size(file_bytes)
         document = docx.Document(io.BytesIO(file_bytes))
         return "\n".join(p.text for p in document.paragraphs)
 

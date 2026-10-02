@@ -1604,7 +1604,7 @@ function renderHome(){
 function syncRun(){
   const both=S.file&&$('#aiText').value.trim().length>=10;
   const using=both?(S.pane==='txt'?' Using your written description, not the file.':' Using your CV, not the written description.'):'';
-  $('#runNote').textContent=(ME.signed_in?'Only events scoring 65 or more are shown. Often that is none.':'Sign-in needed to run: one click with Google or an email link, no password.')+using;
+  $('#runNote').textContent=(ME.signed_in?'Only events scoring 65 or more are shown. Often that is none.':'Sign in with Google to run. No password.')+using;
   $('#runBtn').innerHTML=(ME.signed_in?(S.result?'Run again':'Run the analysis'):'Sign in and run')+' '+ic('arrow-right','s16');
   const first=(ME.name||'').trim().split(/\s+/)[0]||'Account';
   const av=ME.avatar_url?'<img class="nav-avatar" src="'+esc(ME.avatar_url)+'" alt="" referrerpolicy="no-referrer">':'<span class="avatar">'+esc(first.charAt(0).toUpperCase()||'A')+'</span>';
@@ -1910,23 +1910,10 @@ function openSignin(gate){
   if(gate){saveDraft();store.set('oc_pending',1);}
   const g=ME.google_enabled!==false;
   modal('<div class="mo-hd"><h2 id="moTitle">'+(gate?'Sign in to run your analysis':'Sign in')+'</h2><button class="icon-btn" data-act="mclose" aria-label="Close">'+ic('x')+'</button></div>'
-   +'<div class="mo-body"><p>'+(gate?'What you entered stays on this page while you sign in, and the analysis starts as soon as you are in.':'Your account keeps your CV and results, and can email you new matches on a schedule you choose.')+' No password.</p>'
-   +(g?'<a class="btn btn-secondary lg block" href="/auth/login" data-act="google">'+GLOGO+'Continue with Google</a><div class="or">or</div>':'')
-   +'<label class="field"><span>Email</span><input class="input" id="siEmail" type="email" autocomplete="email" placeholder="you@example.com"></label>'
-   +'<button class="btn btn-primary lg block" data-act="emaillink" id="siBtn">Email me a sign-in link</button>'
+   +'<div class="mo-body"><p>'+(gate?'What you entered stays on this page while you sign in, and the analysis starts as soon as you are in.':'Your account keeps your CV and results, and can email you new matches on a schedule you choose.')+'</p>'
+   +(g?'<a class="btn btn-primary lg block" href="/auth/login" data-act="google">'+GLOGO+'Continue with Google</a>':'<p class="status err">Sign-in is not available right now.</p>')
+   +'<p class="muted" style="margin-top:14px">Google is the only way to sign in. There is no password and no email link, so there is also no account recovery: if you lose access to that Google account, you lose this one. Export your data from the account panel whenever you like.'+(ME.invite_only?' Access is currently by invitation.':'')+'</p>'
    +'<p class="status" id="siStatus" aria-live="polite"></p></div>');
-  const inp=$('#siEmail');inp.addEventListener('keydown',ev=>{if(ev.key==='Enter'){ev.preventDefault();sendLink();}});
-}
-async function sendLink(){
-  const v=($('#siEmail').value||'').trim(),st=$('#siStatus'),b=$('#siBtn');
-  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)){st.className='status err';st.textContent='That doesn’t look like an email address.';return;}
-  st.className='status';st.textContent='Sending…';b.disabled=true;
-  try{
-    const r=await postJSON('/api/auth/request',{email:v});const d=await r.json().catch(()=>({}));
-    if(!r.ok){st.className='status err';st.textContent=d.error||'Could not send that. Try again in a moment.';}
-    else{st.className='status ok';st.innerHTML='<b>Check your inbox.</b> We sent a link to '+esc(v)+'. Open it on this device to keep what you’ve entered here.';}
-  }catch(e){st.className='status err';st.textContent='Network error. Try again.';}
-  b.disabled=false;
 }
 async function loadMe(){
   try{const r=await fetch('/api/me',{cache:'no-store'});ME=await r.json();}catch(e){ME={signed_in:false,google_enabled:true};}
@@ -1939,6 +1926,9 @@ async function signOut(){
   /* An account's saved list must not stay behind on a shared browser. */
   if(SAVED_SRV){saved.clear();store.set('oc_saved',[]);}
   SAVED_SRV=null;savedSyncedFor=null;ACCT.hist=null;
+  /* Nor must a CV. The draft text and file were restored on every load so
+     the next person at a shared machine saw the previous person's CV. */
+  clearFile();clearDraft();$('#aiText').value='';updCount();
   $('#results').hidden=true;$('#results').innerHTML='';$('#returning').hidden=true;
   closeModal();syncRun();if(S.view!=='home')render();
   toast('Signed out');
@@ -2099,7 +2089,9 @@ function feedHTML(){
   const f=ME.calendar_feed;
   if(!f)return'<section class="ac-card"><div class="ac-card-hd"><div><h3>Keep your calendar in step</h3><p class="sub">A private link for Google Calendar, Apple Calendar or Outlook. Save an event here and it shows up there, with its time and venue. Remove it here and it goes.</p></div></div><div class="row-btns"><button class="btn btn-secondary sm" data-act="ac-feed" data-do="create">'+ic('calendar-plus','s16')+'Create my calendar link</button></div></section>';
   if(ACCT.confirm==='feed')return'<section class="ac-card"><div class="confirm"><b>Turn the calendar link off?</b><span>Calendar apps subscribed to it stop updating. You can create a new link later; it will be a different address.</span><div class="row-btns"><button class="btn btn-danger sm" data-act="ac-feed" data-do="revoke">Turn it off</button><button class="btn btn-ghost sm" data-act="ac-cancel">Cancel</button></div></div></section>';
-  return'<section class="ac-card"><div class="ac-card-hd"><div><h3>Your calendar link</h3><p class="sub">Subscribed calendars refresh every few hours. Anyone with this link can see your saved events, so reset it if it gets shared by mistake.</p></div></div>'
+  if(!f.https)return'<section class="ac-card"><div class="ac-card-hd"><div><h3>Your calendar link is active</h3><p class="sub">The link is only shown once, when it is created - it is stored in a form that cannot be read back, so a copy of the database cannot reveal it. Lost it? Reset to get a new one and re-subscribe your calendar.</p></div></div>'
+    +'<div class="row-btns"><button class="btn btn-secondary sm" data-act="ac-feed" data-do="rotate">Reset link</button><button class="btn btn-ghost sm" data-act="ac-ask" data-what="feed">Turn off</button></div></section>';
+  return'<section class="ac-card"><div class="ac-card-hd"><div><h3>Your calendar link</h3><p class="sub">Copy it now - it is shown only this once. Subscribed calendars refresh every few hours. Anyone with this link can see your saved events, so reset it if it gets shared by mistake.</p></div></div>'
     +'<div class="copy-row"><input class="input" id="feedUrl" readonly value="'+esc(f.https)+'" aria-label="Calendar link"><button class="btn btn-secondary sm" data-act="ac-copy">Copy</button></div>'
     +'<div class="row-btns"><a class="btn btn-primary sm" href="'+esc(f.webcal)+'">'+ic('calendar-plus','s16')+'Open in my calendar app</a><button class="btn btn-ghost sm" data-act="ac-feed" data-do="rotate">Reset link</button><button class="btn btn-ghost sm" data-act="ac-ask" data-what="feed">Turn off</button></div></section>';
 }
@@ -2140,7 +2132,7 @@ function tabDigest(){
   h+='<section class="ac-card"><div class="set-row"><div><b>See one now</b><span>Sends today’s digest to '+esc(ME.email||'your address')+', scored exactly like the scheduled one. It takes about a minute and does not use up your next email.</span></div><button class="btn btn-secondary sm" data-act="ac-test"'+(ME.has_profile&&ACCT.busy!=='test'?'':' disabled')+'>'+(ACCT.busy==='test'?'<span class="sp"></span>Sending':'Send it')+'</button></div></section>';
   const rec=(g.recent||[]);
   h+='<section class="ac-sec"><h3>What you’ve been sent</h3>'+(rec.length?'<ul class="sends">'+rec.map(s=>'<li><b>'+esc(dayText(s.at))+'</b><span>'+esc((DG_STATUS[s.status]||(()=>s.status))(s.matches||0))+'</span></li>').join('')+'</ul>':'<p class="muted">Nothing yet.</p>')
-    +'<p class="muted">This is the only email OrbitCast sends, apart from the sign-in link you ask for. Every one has a link that turns it off in one click, without signing in.</p></section>';
+    +'<p class="muted">This is the only email OrbitCast sends. Every one has a link that turns it off in one click, without signing in.</p></section>';
   return h;
 }
 async function saveDigest(over){
@@ -2403,8 +2395,7 @@ document.addEventListener('click',ev=>{
     case'rerun':rerun();break;
     case'qopt':{const on=t.getAttribute('aria-pressed')!=='true';$$('.chip',t.parentElement).forEach(c=>c.setAttribute('aria-pressed','false'));t.setAttribute('aria-pressed',String(on));break;}
     case'mclose':closeModal();break;
-    case'google':saveDraft();if(S.pendingRun)store.set('oc_pending',1);break; /* real navigation to /auth/login */
-    case'emaillink':sendLink();break;
+    case'google':saveDraft();store.set('oc_keep_draft',1);if(S.pendingRun)store.set('oc_pending',1);break; /* real navigation to /auth/login */
     case'signout':signOut();break;
     case'dg-on':saveDigest({paused:t.getAttribute('aria-checked')==='true'});break;
     case'keep2':setKeep(!S.keep);postJSON('/api/consent',Object.assign({accepted:S.keep},TRAFFIC)).catch(()=>{});flash();break;
@@ -2477,10 +2468,15 @@ go(fromHash(),{push:false,scroll:false});
   if(signin||settings)history.replaceState({},'',location.pathname+location.hash);
   loadEvents(true);
   setInterval(()=>loadEvents(false),30*60*1000);
-  await Promise.all([loadConsent(),restoreDraft()]);
-  await loadMe();
+  await Promise.all([loadConsent(),loadMe()]);
+  /* A draft is restored for a signed-in person, or across the Google round
+     trip (oc_keep_draft is set when the Google button is clicked). Anyone
+     else arriving signed out gets a clean console: a CV left in this
+     browser's storage must not greet the next person at a shared machine. */
+  const keepDraft=!!store.get('oc_keep_draft',0);store.del('oc_keep_draft');
+  if(ME.signed_in||keepDraft)await restoreDraft();else{clearDraft();syncRun();}
   if(signin){
-    const msg={ok:'Signed in',expired:'That sign-in link has expired. Request another.',failed:'That sign-in did not complete. Try again.',google_off:'Google sign-in is not set up yet. Use the email link.',unavailable:'Accounts are unavailable right now. Try again shortly.'}[signin];
+    const msg={ok:'Signed in',failed:'That sign-in did not complete. Try again.',google_off:'Sign-in is not available right now.',unavailable:'Accounts are unavailable right now. Try again shortly.',not_allowed:'That Google account cannot sign in here. Access is by invitation, and the address must be verified by Google.'}[signin];
     if(msg)setTimeout(()=>toast(msg),300);
     if(signin==='ok'&&ME.signed_in&&store.get('oc_after_signin',null)){const tab=store.get('oc_after_signin',null);store.del('oc_after_signin');setTimeout(()=>openAccount(tab),350);}
     if(signin==='ok'&&ME.signed_in&&store.get('oc_pending',0)){

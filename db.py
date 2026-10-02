@@ -12,6 +12,7 @@ returns None/[]/False instead of raising, so the app runs exactly as it did
 before this module existed if no database is wired up.
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -1463,132 +1464,74 @@ def set_luma_source_status(identifier: str, status: str) -> bool:
 
 
 # --------------------------------------------------------------------------
-# Accounts + passwordless login
+# Accounts (Google Sign-In only)
 # --------------------------------------------------------------------------
 # An account OWNS an oc_uid rather than replacing it - see the design note at
-# the top of supabase/migrations/009_accounts_and_digests.sql. Everything in
+# the top of supabase/migrations/0011_accounts_and_digests.sql. Everything in
 # this file already keys on oc_uid, so signing up keeps the person's existing
-# analyses instead of orphaning them.
+# anonymous analyses instead of orphaning them.
+#
+# Magic-link email login was removed (migration 0014 drops auth_tokens). The
+# only way in is a verified Google identity.
 
-def create_auth_token(email: str, token_hash: str, expires_at) -> bool:
-    """Stores the SHA-256 of a magic-link token. The raw token exists only in
-    the email that was just sent."""
-    try:
-        with _cursor() as cur:
-            if cur is None:
-                return False
-            cur.execute(
-                "insert into auth_tokens (token_hash, email, expires_at) values (%s, %s, %s)",
-                (token_hash, email.strip().lower(), expires_at),
-            )
-            return True
-    except Exception as exc:
-        log.warning(f"create_auth_token failed: {exc}")
-        return False
+import uuid as _uuid
+
+# Who may CREATE an account. Both empty = anyone with a verified Google
+# address. Set either in Railway to run invite-only: a comma-separated list of
+# full addresses, and/or of domains ("reichman.ac.il,gre.ac.uk"). Existing
+# accounts are never affected - this gates creation, not login.
+ALLOWED_EMAILS = {e.strip().lower() for e in os.environ.get("ALLOWED_EMAILS", "").split(",") if e.strip()}
+ALLOWED_EMAIL_DOMAINS = {d.strip().lower().lstrip("@") for d in os.environ.get("ALLOWED_EMAIL_DOMAINS", "").split(",") if d.strip()}
 
 
-def consume_auth_token(token_hash: str):
-    """Single use: marks the token used and returns its email, or None if it
-    is unknown, expired, or already spent. The update's own where-clause is
-    what makes it single-use - checking then updating would race."""
-    try:
-        with _cursor() as cur:
-            if cur is None:
-                return None
-            cur.execute(
-                """
-                update auth_tokens set used_at = now()
-                where token_hash = %s and used_at is null and expires_at > now()
-                returning email
-                """,
-                (token_hash,),
-            )
-            row = cur.fetchone()
-            return row[0] if row else None
-    except Exception as exc:
-        log.warning(f"consume_auth_token failed: {exc}")
-        return None
-
-
-def purge_expired_auth_tokens() -> int:
-    try:
-        with _cursor() as cur:
-            if cur is None:
-                return 0
-            cur.execute("delete from auth_tokens where expires_at < now() - interval '1 day'")
-            return cur.rowcount or 0
-    except Exception as exc:
-        log.warning(f"purge_expired_auth_tokens failed: {exc}")
-        return 0
-
-
-def get_or_create_account(email: str, oc_uid: str):
-    """Returns the account for `email`, creating it against the CALLER'S
-    current oc_uid if it does not exist.
-
-    That oc_uid argument is the whole point: a first-time signup adopts the
-    browser's existing anonymous id, so the analyses already sitting under it
-    become the account's history. A returning login ignores it and returns the
-    stored one, which the caller then re-issues as the cookie."""
+def signup_allowed(email: str) -> bool:
+    """True when this address may create a NEW account under the allow-list.
+    With no allow-list configured, everyone may."""
     email = (email or "").strip().lower()
-    if not email or not oc_uid:
-        return None
-    try:
-        with _cursor() as cur:
-            if cur is None:
-                return None
-            cur.execute(
-                "select id, email, oc_uid, created_at from accounts where lower(email) = %s",
-                (email,),
-            )
-            row = cur.fetchone()
-            if row:
-                cur.execute("update accounts set last_login_at = now() where id = %s", (row[0],))
-                return {"id": row[0], "email": row[1], "oc_uid": row[2], "is_new": False}
-            cur.execute(
-                """
-                insert into accounts (email, oc_uid, last_login_at)
-                values (%s, %s, now())
-                on conflict (oc_uid) do update set email = excluded.email,
-                                                   last_login_at = now()
-                returning id, email, oc_uid
-                """,
-                (email, oc_uid),
-            )
-            new = cur.fetchone()
-            return {"id": new[0], "email": new[1], "oc_uid": new[2], "is_new": True}
-    except Exception as exc:
-        log.warning(f"get_or_create_account failed: {exc}")
-        return None
+    if not ALLOWED_EMAILS and not ALLOWED_EMAIL_DOMAINS:
+        return True
+    if email in ALLOWED_EMAILS:
+        return True
+    domain = email.rpartition("@")[2]
+    return bool(domain) and domain in ALLOWED_EMAIL_DOMAINS
+
+
+def signup_gated() -> bool:
+    return bool(ALLOWED_EMAILS or ALLOWED_EMAIL_DOMAINS)
 
 
 def get_or_create_account_by_google(google_sub: str, email: str, name: str,
                                     avatar_url: str, oc_uid: str,
                                     email_verified: bool = False):
-    """Resolves a Google identity to an account. Returns the account dict, or
-    None if the database is unavailable.
+    """Resolves a Google identity to an account. Returns the account dict,
+    {"refused": "..."} when the allow-list or verification refuses a new
+    signup, or None if the database is unavailable.
 
     Three cases, in this order, and the order is the security-relevant part:
 
     1. google_sub already known - the normal returning login. Refresh the
-       profile fields (people change their Google name and photo) and return
-       the STORED oc_uid, which the caller re-issues as the cookie so history
-       follows them onto this device.
+       profile fields and return the STORED oc_uid, which the caller
+       re-issues as the cookie so history follows them onto this device.
 
-    2. google_sub unknown but the email matches an existing account - someone
-       who signed up by magic link and is now using the Google button. Link
-       the two rather than creating a second account, which the unique index
-       on lower(email) would reject anyway.
+    2. google_sub unknown but the email matches an existing account (created
+       before Google was the only door, or whose Google sub changed). Link the
+       two. Only when Google says the address is verified - otherwise anyone
+       able to mint a Google identity asserting an address could claim the
+       account for it.
 
-       This is only safe when Google says the address is verified. Without
-       that check, anyone able to create a Google identity asserting an
-       address they do not own could claim the existing OrbitCast account for
-       it - a straightforward account takeover. Unverified addresses fall
-       through to case 3 and get their own separate account instead.
+    3. Neither matches - a genuinely new person. Requires a verified address
+       and, if an allow-list is configured, a listed one.
 
-    3. Neither matches - a genuinely new person. The account adopts the
-       browser's current oc_uid, exactly as a magic-link signup does, so the
-       analyses already stored anonymously become this account's history.
+       The account adopts the browser's anonymous oc_uid ONLY IF NO ACCOUNT
+       OWNS IT. The previous version did
+       `on conflict (oc_uid) do update set email = ..., google_sub = ...`,
+       which meant that signing in with a never-seen Google account while
+       holding somebody else's oc_uid cookie (a shared laptop where they had
+       not signed out, or a stolen cookie) OVERWROTE their account row with
+       the new identity: their profile, CV files, history, saved events and
+       calendar feed changed hands and they were locked out. Now an owned
+       oc_uid is never adopted - the new account gets a fresh id, and the
+       other account is untouched.
     """
     google_sub = (google_sub or "").strip()
     email = (email or "").strip().lower()
@@ -1620,49 +1563,102 @@ def get_or_create_account_by_google(google_sub: str, email: str, name: str,
                 return {"id": row[0], "email": email, "oc_uid": row[2],
                         "name": name, "avatar_url": avatar_url, "is_new": False}
 
-            # 2. existing magic-link account for a Google-verified address
-            if email_verified:
-                cur.execute(
-                    "select id, oc_uid from accounts where lower(email) = %s",
-                    (email,),
-                )
-                row = cur.fetchone()
-                if row:
-                    cur.execute(
-                        """
-                        update accounts
-                           set google_sub    = %s,
-                               name          = coalesce(%s, name),
-                               avatar_url    = coalesce(%s, avatar_url),
-                               last_login_at = now()
-                         where id = %s
-                        """,
-                        (google_sub, name or None, avatar_url or None, row[0]),
-                    )
-                    return {"id": row[0], "email": email, "oc_uid": row[1],
-                            "name": name, "avatar_url": avatar_url, "is_new": False}
+            # Everything below creates or links an account: a verified address
+            # is non-negotiable for both.
+            if not email_verified:
+                log.warning("Google identity with unverified email refused.")
+                return {"refused": "email_not_verified"}
 
-            # 3. new account, adopting this browser's anonymous id
+            # 2. existing account for this verified address
+            cur.execute(
+                "select id, oc_uid from accounts where lower(email) = %s",
+                (email,),
+            )
+            row = cur.fetchone()
+            if row:
+                cur.execute(
+                    """
+                    update accounts
+                       set google_sub    = %s,
+                           name          = coalesce(%s, name),
+                           avatar_url    = coalesce(%s, avatar_url),
+                           last_login_at = now()
+                     where id = %s
+                    """,
+                    (google_sub, name or None, avatar_url or None, row[0]),
+                )
+                return {"id": row[0], "email": email, "oc_uid": row[1],
+                        "name": name, "avatar_url": avatar_url, "is_new": False}
+
+            # 3. new account
+            if not signup_allowed(email):
+                log.warning("Signup refused by allow-list.")
+                return {"refused": "not_invited"}
+
+            # Never adopt an oc_uid that already belongs to an account.
+            cur.execute("select 1 from accounts where oc_uid = %s", (oc_uid,))
+            if cur.fetchone():
+                oc_uid = _uuid.uuid4().hex
+
             cur.execute(
                 """
                 insert into accounts (email, oc_uid, google_sub, name, avatar_url, last_login_at)
                 values (%s, %s, %s, %s, %s, now())
-                on conflict (oc_uid) do update
-                        set email         = excluded.email,
-                            google_sub    = excluded.google_sub,
-                            name          = excluded.name,
-                            avatar_url    = excluded.avatar_url,
-                            last_login_at = now()
+                on conflict (oc_uid) do nothing
                 returning id, email, oc_uid
                 """,
                 (email, oc_uid, google_sub, name or None, avatar_url or None),
             )
             new = cur.fetchone()
+            if not new:
+                # Lost a race for that oc_uid between the check and the insert.
+                # Retry once with an id nobody can already hold.
+                cur.execute(
+                    """
+                    insert into accounts (email, oc_uid, google_sub, name, avatar_url, last_login_at)
+                    values (%s, %s, %s, %s, %s, now())
+                    returning id, email, oc_uid
+                    """,
+                    (email, _uuid.uuid4().hex, google_sub, name or None, avatar_url or None),
+                )
+                new = cur.fetchone()
             return {"id": new[0], "email": new[1], "oc_uid": new[2],
                     "name": name, "avatar_url": avatar_url, "is_new": True}
     except Exception as exc:
         log.warning(f"get_or_create_account_by_google failed: {exc}")
         return None
+
+
+def account_exists_for_oc_uid(oc_uid: str) -> bool:
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute("select 1 from accounts where oc_uid = %s", (oc_uid,))
+            return cur.fetchone() is not None
+    except Exception as exc:
+        log.warning(f"account_exists_for_oc_uid failed: {exc}")
+        return False
+
+
+def recommendation_belongs_to(recommendation_id, oc_uid: str) -> bool:
+    """True when this recommendation came out of one of oc_uid's own analyses."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                """
+                select 1 from recommendations r
+                join analyses a on a.id = r.analysis_id
+                where r.id = %s and a.oc_uid = %s
+                """,
+                (recommendation_id, oc_uid),
+            )
+            return cur.fetchone() is not None
+    except Exception as exc:
+        log.warning(f"recommendation_belongs_to failed: {exc}")
+        return False
 
 
 def get_account(account_id):
@@ -1803,8 +1799,34 @@ def due_digests(limit: int = 200):
         return []
 
 
+def pause_digest_by_account(account_id):
+    """One-click unsubscribe for an HMAC-derived token (auth.unsub_token).
+    Returns the email it paused, or None."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute(
+                """
+                update digest_prefs d set paused = true, updated_at = now()
+                from accounts a
+                where a.id = d.account_id and d.account_id = %s
+                returning a.email
+                """,
+                (account_id,),
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
+    except Exception as exc:
+        log.warning(f"pause_digest_by_account failed: {exc}")
+        return None
+
+
 def pause_digest_by_token(unsub_token: str):
-    """One-click unsubscribe. Returns the email it paused, or None."""
+    """Legacy path for links in emails sent before tokens were HMAC-derived.
+    The stored column is a random id with no other power than this."""
+    if not unsub_token or len(unsub_token) != 32:
+        return None
     try:
         with _cursor() as cur:
             if cur is None:
@@ -2175,36 +2197,40 @@ def clear_history(oc_uid: str):
 
 
 def get_account_meta(account_id) -> dict:
-    """How this account signs in, and its calendar-feed token if it has one."""
-    out = {"google_linked": False, "last_login_at": None, "cal_token": None}
+    """How this account signs in, and whether it has a calendar feed. The
+    feed token itself is never returned: only its hash is stored (migration
+    0014), so the URL can be shown exactly once, when it is created or
+    rotated - the same model as an API key."""
+    out = {"google_linked": False, "last_login_at": None, "cal_feed_active": False}
     try:
         with _cursor() as cur:
             if cur is None:
                 return out
-            cur.execute("select google_sub is not null, last_login_at from accounts where id = %s",
+            cur.execute("select google_sub is not null, last_login_at, "
+                        "cal_token_hash is not null from accounts where id = %s",
                         (account_id,))
             row = cur.fetchone()
             if row:
                 out["google_linked"], out["last_login_at"] = bool(row[0]), _iso(row[1])
+                out["cal_feed_active"] = bool(row[2])
     except Exception as exc:
         log.warning(f"get_account_meta failed: {exc}")
-        return out
-    try:                                    # separate: cal_token is a 0013 column
-        with _cursor() as cur:
-            cur.execute("select cal_token from accounts where id = %s", (account_id,))
-            row = cur.fetchone()
-            out["cal_token"] = row[0] if row else None
-    except Exception as exc:
-        log.warning(f"get_account_meta (cal_token) failed: {exc}")
     return out
 
 
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def set_cal_token(account_id, token) -> bool:
+    """Stores the SHA-256 of the feed token (or clears it). A database dump
+    therefore does not hand anyone a working feed URL."""
     try:
         with _cursor() as cur:
             if cur is None:
                 return False
-            cur.execute("update accounts set cal_token = %s where id = %s", (token, account_id))
+            cur.execute("update accounts set cal_token_hash = %s, cal_token = null where id = %s",
+                        (_sha256(token) if token else None, account_id))
             return cur.rowcount == 1
     except Exception as exc:
         log.warning(f"set_cal_token failed: {exc}")
@@ -2212,15 +2238,41 @@ def set_cal_token(account_id, token) -> bool:
 
 
 def account_id_by_cal_token(token: str):
-    if not token:
+    if not token or len(token) < 32 or len(token) > 128:
         return None
     try:
         with _cursor() as cur:
             if cur is None:
                 return None
-            cur.execute("select id from accounts where cal_token = %s", (token,))
+            cur.execute("select id from accounts where cal_token_hash = %s", (_sha256(token),))
             row = cur.fetchone()
             return row[0] if row else None
     except Exception as exc:
         log.warning(f"account_id_by_cal_token failed: {exc}")
         return None
+
+
+# --------------------------------------------------------------------------
+# Audit log (migration 0014)
+# --------------------------------------------------------------------------
+def audit(account_id, action: str, resource: str = None, detail: dict = None,
+          ip: str = None, user_agent: str = None) -> bool:
+    """Records who did what to sensitive data. Never raises; a failed audit
+    write is logged but must not block the action it describes."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                """
+                insert into audit_log (account_id, action, resource, detail, ip_address, user_agent)
+                values (%s, %s, %s, %s::jsonb, %s, %s)
+                """,
+                (account_id, (action or "")[:64], (resource or None),
+                 json.dumps(detail or {}, default=str)[:4000],
+                 (ip or None), (user_agent or "")[:300] or None),
+            )
+            return True
+    except Exception as exc:
+        log.warning(f"audit failed: {exc}")
+        return False
