@@ -23,8 +23,10 @@ wrong version that looks correct until it is live:
 """
 
 import logging
+import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 try:
@@ -42,7 +44,13 @@ FREQUENCIES = ("daily", "every_n_days", "weekly")
 DEFAULT_TZ = "Europe/London"
 SCHEDULER_TICK_SECONDS = 300          # 5 minutes; sends are hour-granular
 EMPTY_DIGEST_COOLDOWN_DAYS = 7        # don't send "nothing this week" daily
-MAX_PER_TICK = 50                     # bound the work one tick can do
+MAX_PER_TICK = 200                    # bound the work one tick can do
+# Digests are scored a few at a time. One at a time, each taking ~30s of model
+# calls, capped delivery at roughly a hundred an hour - a Monday-morning batch
+# for a few thousand subscribers would have arrived over a day and a half.
+# Kept small so people using the site right now are not waiting behind email:
+# every model call still passes through ai_engine's shared in-flight gate.
+DIGEST_CONCURRENCY = max(1, int(os.environ.get("DIGEST_CONCURRENCY", "4")))
 MAX_SNOOZE_DAYS = 90
 
 # The catalogue's categories. A digest can be narrowed to some of them; an
@@ -293,7 +301,8 @@ def run_due(catalog_fn, score_fn, limit: int = MAX_PER_TICK) -> dict:
     if not due:
         return stats
     events = catalog_fn() or []
-    for prefs in due:
+
+    def one(prefs):
         account = {"id": prefs["account_id"], "email": prefs["email"],
                    "oc_uid": prefs["oc_uid"]}
         try:
@@ -301,16 +310,24 @@ def run_due(catalog_fn, score_fn, limit: int = MAX_PER_TICK) -> dict:
         except Exception as exc:
             log.warning("digest failed for account %s: %s", prefs["account_id"], exc)
             status = "error"
-        stats[status] = stats.get(status, 0) + 1
         # Always roll the clock forward, even on failure. A subscriber whose
         # send errored must not stay permanently due, re-running every tick
         # and burning the API budget on the same broken row.
-        db.set_next_send_at(prefs["account_id"], compute_next_send(prefs))
-        # A snooze that has run its course is cleared, so the panel stops
-        # saying "snoozed until" about a date that is already behind us.
-        extras = db.get_digest_extras(prefs["account_id"]) or {}
-        if extras.get("snooze_until"):
-            db.set_digest_extras(prefs["account_id"], extras.get("categories"), None)
+        try:
+            db.set_next_send_at(prefs["account_id"], compute_next_send(prefs))
+            # A snooze that has run its course is cleared, so the panel stops
+            # saying "snoozed until" about a date that is already behind us.
+            extras = db.get_digest_extras(prefs["account_id"]) or {}
+            if extras.get("snooze_until"):
+                db.set_digest_extras(prefs["account_id"], extras.get("categories"), None)
+        except Exception as exc:
+            log.warning("digest bookkeeping failed for account %s: %s", prefs["account_id"], exc)
+        return status
+
+    with ThreadPoolExecutor(max_workers=DIGEST_CONCURRENCY,
+                            thread_name_prefix="digest") as pool:
+        for status in pool.map(one, due):
+            stats[status] = stats.get(status, 0) + 1
     if stats:
         log.info("digest run: %s", stats)
     return stats
@@ -331,8 +348,10 @@ def start_scheduler(catalog_fn, score_fn):
         time.sleep(60)
         while True:
             try:
+                # (purge_expired_auth_tokens was called here; the magic-link
+                # table and that function went with the Google-only change,
+                # so every tick logged an AttributeError as a "failed" tick.)
                 run_due(catalog_fn, score_fn)
-                db.purge_expired_auth_tokens()
             except Exception as exc:
                 log.warning("digest scheduler tick failed: %s", exc)
             time.sleep(SCHEDULER_TICK_SECONDS)
