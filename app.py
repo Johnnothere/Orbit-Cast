@@ -913,6 +913,7 @@ def api_me():
     cv = db.get_cv_status(account["oc_uid"]) or {}
     extras = db.get_digest_extras(account["id"]) or {}
     meta = db.get_account_meta(account["id"])
+    pc = db.get_postcode(account["id"])
     snooze = extras.get("snooze_until")
     if snooze and snooze <= datetime.now(timezone.utc):
         snooze = None
@@ -921,6 +922,11 @@ def api_me():
         "google_enabled": auth.google_enabled(),
         "email_signin_enabled": auth.email_signin_enabled(),
         "email": account["email"],
+        # Home postcode: just the display string + lat/lng. The lat/lng
+        # travels to the browser so OC_USER_LOC can light up on load
+        # without a geolocation prompt.
+        "home": ({"postcode": pc["postcode"], "lat": pc["lat"], "lng": pc["lng"],
+                  "set_at": pc["set_at"]} if pc else None),
         "name": account.get("name"),
         "avatar_url": account.get("avatar_url"),
         "member_since": account.get("created_at"),
@@ -962,6 +968,118 @@ def api_me():
             "recent": db.recent_digest_sends(account["id"]),
         },
     })
+
+
+# ─────────────────────────────────────────────
+# Home postcode: durable per-account location
+# ─────────────────────────────────────────────
+# POST saves the postcode after validating it with postcodes.io (free, no
+# key, UK-wide). DELETE clears it. The result is the postcode plus whether
+# it's inside Greater London (an administrative-district probe) so the UI
+# can soft-warn out-of-London users that transit distances won't be useful.
+# Geocoding and validation live together: nothing is stored unless
+# postcodes.io both found the postcode and returned coordinates.
+
+_POSTCODE_RE = re.compile(
+    r"^[A-PR-UWYZ]([0-9]{1,2}|[A-HK-Y][0-9]|[A-HK-Y][0-9]"
+    r"[ABEHMNPRVWXY]|[0-9][A-HJKPSTUW])\s*[0-9][ABD-HJLNP-UW-Z]{2}$",
+    re.IGNORECASE,
+)
+
+
+def _normalise_postcode(raw: str) -> str:
+    """Upper-case, single-space separated outcode/incode. Accepts input with
+    missing or wrong spacing. Returns '' if the shape isn't a UK postcode."""
+    s = re.sub(r"\s+", "", (raw or "").strip().upper())
+    if len(s) < 5 or len(s) > 8:
+        return ""
+    normalised = f"{s[:-3]} {s[-3:]}"
+    return normalised if _POSTCODE_RE.match(s) else ""
+
+
+def _lookup_postcode(normalised: str):
+    """Resolves a validated postcode to lat/lng via postcodes.io.
+    Returns {"postcode", "lat", "lng", "district", "region", "in_london"}
+    or None. postcodes.io is a free, no-key, UK-government-adjacent service
+    - its 404 is a definitive 'does not exist', not a transient failure."""
+    import requests
+    try:
+        r = requests.get(
+            "https://api.postcodes.io/postcodes/" + normalised.replace(" ", ""),
+            timeout=5,
+            headers={"User-Agent": "OrbitCast/1.0 (orbitcast.up.railway.app)"},
+        )
+    except Exception as exc:
+        log.warning(f"postcodes.io unreachable: {exc}")
+        return None
+    if r.status_code == 404:
+        return {"not_found": True}
+    if r.status_code >= 300:
+        log.warning(f"postcodes.io HTTP {r.status_code} for {normalised}: {r.text[:200]}")
+        return None
+    data = (r.json() or {}).get("result") or {}
+    if "latitude" not in data or "longitude" not in data:
+        return None
+    district = (data.get("admin_district") or "").strip()
+    region   = (data.get("region") or "").strip()
+    # Rough "inside Greater London" check: the admin_district for the 33
+    # London boroughs always sits under region "London". That's what
+    # postcodes.io actually reports; nothing else here guesses.
+    in_london = region.lower() == "london"
+    return {"postcode": data.get("postcode") or normalised,
+            "lat": float(data["latitude"]),
+            "lng": float(data["longitude"]),
+            "district": district,
+            "region": region,
+            "in_london": in_london}
+
+
+@app.route("/api/me/postcode", methods=["POST", "DELETE"])
+@auth.login_required
+@limiter.limit("30 per hour;10 per minute")
+def api_me_postcode():
+    """POST {"postcode": "SW1A 1AA"} saves it after validating via
+    postcodes.io. DELETE clears it. GET isn't needed; /api/me returns
+    the active value."""
+    account = auth.current_account()
+    if not account:
+        return jsonify({"error": "Sign in first."}), 401
+    if not db.is_configured():
+        return jsonify({"error": "Accounts are not available right now."}), 503
+
+    if request.method == "DELETE":
+        ok = db.clear_postcode(account["id"])
+        if ok:
+            _audit("postcode_cleared", account)
+        return jsonify({"ok": bool(ok), "home": None}), (200 if ok else 503)
+
+    data = request.get_json(silent=True) or request.form or {}
+    normalised = _normalise_postcode(data.get("postcode") or "")
+    if not normalised:
+        return jsonify({"error": "That doesn't look like a UK postcode.",
+                        "reason": "bad_format"}), 400
+
+    result = _lookup_postcode(normalised)
+    if result is None:
+        return jsonify({"error": "We couldn't check that postcode right now. "
+                                 "Try again in a moment.",
+                        "reason": "lookup_unavailable"}), 502
+    if result.get("not_found"):
+        return jsonify({"error": "No postcode matches that.",
+                        "reason": "not_found"}), 404
+
+    saved = db.set_postcode(account["id"], result["postcode"],
+                            result["lat"], result["lng"])
+    if not saved:
+        return jsonify({"error": "Could not save that right now."}), 503
+    _audit("postcode_set", account,
+           detail={"district": result.get("district"),
+                   "in_london": bool(result.get("in_london"))})
+    return jsonify({"ok": True,
+                    "home": {"postcode": result["postcode"],
+                             "district": result.get("district"),
+                             "region":   result.get("region"),
+                             "in_london": bool(result.get("in_london"))}}), 200
 
 
 @app.route("/api/me/cv", methods=["DELETE"])
@@ -1534,10 +1652,19 @@ def _run_analysis_job(account_id, oc_uid, consent, file_bytes, filename, mimetyp
     if not events:
         return 503, {"error": "The event catalogue is still loading. Try again in a minute."}
 
-    # Location only when this account granted it - used for a distance and a
-    # directions link on each match. The analysis runs identically without it.
+    # Location for distance + directions on each match. Two sources, in
+    # order of preference:
+    #   1. The signed-in account's saved postcode (durable, device-independent,
+    #      no in-the-moment consent needed - the person entered it themselves).
+    #   2. The latest HTML5-geolocation ping for this oc_uid, iff location
+    #      consent was granted for this browser.
+    # The analysis runs identically with no location at all.
     user_location = None
-    if oc_uid and db.get_location_consent(oc_uid):
+    if account_id:
+        pc = db.get_postcode(account_id)
+        if pc:
+            user_location = {"lat": pc["lat"], "lng": pc["lng"]}
+    if user_location is None and oc_uid and db.get_location_consent(oc_uid):
         user_location = db.get_latest_location(oc_uid)
 
     # One account, one person: the gate runs inside analyze_upload, after the

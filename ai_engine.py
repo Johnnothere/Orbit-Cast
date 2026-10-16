@@ -1128,6 +1128,24 @@ def directions_url(origin_lat, origin_lng, dest_lat, dest_lng) -> str:
     )
 
 
+def citymapper_url(origin_lat, origin_lng, dest_lat, dest_lng,
+                   start_name: str = None, end_name: str = None) -> str:
+    """Citymapper directions deep link. On mobile this opens the Citymapper
+    app directly (via universal link); on desktop it opens the web preview.
+    Why we offer it alongside Google Maps: in London specifically, Citymapper
+    beats Google at transit routing - it knows the Tube line statuses, bus
+    routes, Overground vs Elizabeth line preferences, and gives a reliable
+    fare quote. Free, no key, same shape as the Google URL."""
+    import urllib.parse as _u
+    params = [("startcoord", f"{origin_lat},{origin_lng}"),
+              ("endcoord",   f"{dest_lat},{dest_lng}")]
+    if start_name:
+        params.append(("startname", start_name))
+    if end_name:
+        params.append(("endname", end_name))
+    return "https://citymapper.com/directions?" + _u.urlencode(params)
+
+
 # --------------------------------------------------------------------------
 # 6. Orchestration - the single entry point the route calls
 # --------------------------------------------------------------------------
@@ -1291,6 +1309,9 @@ def score_and_enrich(profile: dict, evidence_level: str, field: str,
                                   geo["lat"], geo["lng"]), 1)
                 row["directions_url"] = directions_url(
                     user_location["lat"], user_location["lng"], geo["lat"], geo["lng"])
+                row["citymapper_url"] = citymapper_url(
+                    user_location["lat"], user_location["lng"], geo["lat"], geo["lng"],
+                    start_name="Home", end_name=location)
         enriched.append(row)
 
     result["recommendations"] = enriched

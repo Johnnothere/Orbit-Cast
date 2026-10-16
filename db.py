@@ -2099,6 +2099,84 @@ def get_or_create_account_by_email(email: str, oc_uid: str):
         return None
 
 
+# ─────────────────────────────────────────────
+# Home postcode - durable per-account alternative to HTML5 geolocation
+# ─────────────────────────────────────────────
+# Stored on accounts (0019). The geocode is done by the caller before this
+# function sees anything - a bad coordinate is worse than none, so a failed
+# geocode never writes.
+
+def set_postcode(account_id, postcode: str, lat: float, lng: float) -> bool:
+    """Replaces (or sets) this account's home postcode and its lat/lng.
+    Returns True on success. All three fields move together: a half-written
+    row (postcode text present, lat/lng missing) is the one state the
+    downstream code can't degrade from gracefully."""
+    if account_id is None:
+        return False
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                """
+                update accounts
+                   set postcode        = %s,
+                       postcode_lat    = %s,
+                       postcode_lng    = %s,
+                       postcode_set_at = now()
+                 where id = %s
+                """,
+                (postcode, float(lat), float(lng), account_id),
+            )
+            return cur.rowcount > 0
+    except Exception as exc:
+        log.warning(f"set_postcode failed: {exc}")
+        return False
+
+
+def clear_postcode(account_id) -> bool:
+    if account_id is None:
+        return False
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                "update accounts set postcode = null, postcode_lat = null, "
+                "postcode_lng = null, postcode_set_at = null where id = %s",
+                (account_id,),
+            )
+            return cur.rowcount > 0
+    except Exception as exc:
+        log.warning(f"clear_postcode failed: {exc}")
+        return False
+
+
+def get_postcode(account_id):
+    """Returns {"postcode", "lat", "lng", "set_at"} or None when the account
+    hasn't set one. Reads from the pooled read-cursor, no caching here -
+    only the analysis path reads this and it's one query per analysis."""
+    if account_id is None:
+        return None
+    try:
+        with _read_cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute(
+                "select postcode, postcode_lat, postcode_lng, postcode_set_at "
+                "from accounts where id = %s",
+                (account_id,),
+            )
+            row = cur.fetchone()
+            if not row or not row[0] or row[1] is None or row[2] is None:
+                return None
+            return {"postcode": row[0], "lat": float(row[1]), "lng": float(row[2]),
+                    "set_at": _iso(row[3])}
+    except Exception as exc:
+        log.warning(f"get_postcode failed: {exc}")
+        return None
+
+
 def account_exists_for_oc_uid(oc_uid: str) -> bool:
     try:
         with _cursor() as cur:
@@ -3289,4 +3367,6 @@ def _clears_account_cache(fn):
 
 get_or_create_account_by_google = _clears_account_cache(get_or_create_account_by_google)
 get_or_create_account_by_email  = _clears_account_cache(get_or_create_account_by_email)
+set_postcode   = _clears_account_cache(set_postcode)
+clear_postcode = _clears_account_cache(clear_postcode)
 forget = _clears_account_cache(forget)

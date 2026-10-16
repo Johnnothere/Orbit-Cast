@@ -909,6 +909,20 @@ details.past[open]>summary .i{transform:rotate(180deg)}
    renders. */
 .mc-weakness{font-size:12.5px;line-height:1.5;color:var(--tx-3);padding:8px 10px;border-left:2px solid var(--line-2);background:var(--s2);border-radius:0 8px 8px 0;margin-top:2px}
 .mc-wk-label{font-weight:500;color:var(--tx-2);letter-spacing:-.005em}
+/* Commute line: distance from the user's home base + live-times deep
+   links (Citymapper first, Google Maps as fallback). Only shown when the
+   server computed a distance for this match - never a placeholder. */
+.mc-commute{display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px;font-size:12.5px;color:var(--tx-3);margin-top:4px}
+.mc-commute a{color:var(--tx-2);text-decoration:underline;text-underline-offset:2px;text-decoration-color:var(--line);transition:color .12s}
+.mc-commute a:hover{color:var(--ac);text-decoration-color:currentColor}
+.m-links{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.m-links .btn{height:34px}
+/* Postcode row in the account panel: input + save button, with a clear
+   button that only appears when a postcode is already set. */
+.pc-row{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap}
+.pc-row input.input{flex:1 1 180px;min-width:150px;height:40px;padding:0 14px;border-radius:10px;border:1px solid var(--line-2);background:var(--s2);color:var(--tx);font:400 14px var(--f-body);text-transform:uppercase;letter-spacing:.03em}
+.pc-row input.input:focus{outline:none;border-color:var(--ac);background:var(--s1)}
+.pc-row input.input::placeholder{color:var(--tx-3);text-transform:none;letter-spacing:0}
 .mc-acts{margin-top:auto;display:flex;align-items:center;gap:4px;padding-top:12px;border-top:1px solid var(--line)}
 .mc-acts .btn.sm{height:32px;padding:0 11px}
 .mc-acts .icon-btn.sm{width:32px;height:32px}
@@ -1851,6 +1865,11 @@ function deckHTML(items,key){
        weakness is worse than no weakness. */
     const wk=(m.weakness||'').trim();
     const showWk=wk && wk.toLowerCase().replace(/[.\s]/g,'')!=='nonematerial';
+    /* Commute: only shown on the live-analysis card where the server has
+       already computed distance_km. History cards don't carry venue
+       coordinates, so they stay quiet rather than show a stale number. */
+    const dKm=m.distance_km;
+    const showCommute=typeof dKm==='number'&&(m.citymapper_url||m.directions_url);
     return'<article class="mcard'+(hot?' hot':'')+(m.muted?' muted':'')+'" role="listitem" aria-label="'+esc(e.title)+', '+esc(band)+'">'
       +'<div class="mc-top"><span class="mc-rank">#'+(i+1)+'</span><span class="mc-tier">'+esc(band)+'</span><span class="mc-fit" title="Fit score, 0-100"><b>'+m.fit+'</b><i>/100</i></span></div>'
       +'<div class="meter" aria-hidden="true"><i'+(hot?' class="hot"':'')+' style="width:'+m.fit+'%"></i></div>'
@@ -1859,6 +1878,7 @@ function deckHTML(items,key){
       +'<p class="mc-when">'+ic('calendar','s14')+(e.date?fmtDay(e.date):'Date TBC')+(e.time?' · '+e.time:'')+'<span class="sep">·</span>'+ic(e.online?'globe':'pin','s14')+esc(where)+'</p>'
       +'<p class="mc-why">'+esc(m.why)+'</p>'
       +(showWk?'<p class="mc-weakness"><span class="mc-wk-label">One honest limit</span> — '+esc(wk)+'</p>':'')
+      +(showCommute?'<p class="mc-commute">'+ic('pin','s14')+'~'+dKm+' km from '+(OC_USER_LOC&&OC_USER_LOC.src==='postcode'?esc(OC_USER_LOC.postcode||'home'):'you')+(m.citymapper_url?' · <a href="'+esc(m.citymapper_url)+'" target="_blank" rel="noopener">Citymapper</a>':'')+(m.directions_url?' · <a href="'+esc(m.directions_url)+'" target="_blank" rel="noopener">Maps</a>':'')+'</p>':'')
       +'<div class="mc-acts">'+saveBtn(e.id,'sm')+'<button class="icon-btn sm" data-ics="'+esc(e.id)+'" aria-label="Add to calendar">'+ic('calendar-plus','s16')+'</button>'
       +(m.mutable?'<button class="icon-btn sm" data-act="ac-mute" data-id="'+esc(e.id)+'" data-title="'+esc(e.title)+'" aria-pressed="'+!!m.muted+'" aria-label="'+(m.muted?'Unmute':'Not for me')+'" title="'+(m.muted?'Muted · undo':'Not for me')+'">'+ic('eye-off','s16')+'</button>':'')
       +'<span class="tb-spacer"></span><button class="btn btn-secondary sm" data-open="'+esc(e.id)+'">Details</button><a class="btn btn-primary sm" href="'+esc(e.url)+'" target="_blank" rel="noopener"'+(m.rid?' data-track="'+esc(m.rid)+'"':'')+'>View '+ic('arrow-up-right','s14')+'</a></div>'
@@ -1893,7 +1913,7 @@ function resultsHTML(data){
   const recs=(data.recommendations||[]).map((r,i)=>({r,e:ensureEv(r,i),fit:Math.round(r.fit_score||0)}));
   // Ranked by fit, best first: the deck reads left to right like a shortlist.
   recs.sort((a,b)=>b.fit-a.fit||((a.e.date&&b.e.date)?a.e.date-b.e.date:0));
-  S.matches=Object.fromEntries(recs.map((m,i)=>[m.e.id,{fit:m.fit,band:m.r.band||tierOf(m.fit),rank:i+1,why:m.r.why||'',why_now:m.r.why_now||'',prepare:m.r.prepare||'',benefit:m.r.benefit||'',weakness:m.r.weakness||'',distance_km:m.r.distance_km,directions_url:m.r.directions_url,event_lat:m.r.event_lat,event_lng:m.r.event_lng,recommendation_id:m.r.recommendation_id}]));
+  S.matches=Object.fromEntries(recs.map((m,i)=>[m.e.id,{fit:m.fit,band:m.r.band||tierOf(m.fit),rank:i+1,why:m.r.why||'',why_now:m.r.why_now||'',prepare:m.r.prepare||'',benefit:m.r.benefit||'',weakness:m.r.weakness||'',distance_km:m.r.distance_km,directions_url:m.r.directions_url,citymapper_url:m.r.citymapper_url,event_lat:m.r.event_lat,event_lng:m.r.event_lng,recommendation_id:m.r.recommendation_id}]));
   let h='<div class="res-note">'+ic('info','s16')+'<div>'+(recs.length?'Real, upcoming events, best fit first. They are marked in Events too.':'An honest result, not a failure.')+(S.keep?' Your CV and profile are kept on your account.':' Nothing from this run was stored.')+'</div></div>';
   h+='<div class="res-h"><h2>'+(recs.length?recs.length+' match'+(recs.length===1?'':'es'):'No matches')+'</h2><span>Fit score out of 100 · only 65 and above are shown</span></div>';
   if(!recs.length){
@@ -1990,7 +2010,11 @@ function openEvent(id){
     h+='<div class="dr-match"><div class="top"><b>'+ic('spark','s14')+' '+(m.rank?'Match #'+m.rank:'Matched to your profile')+' · '+esc(bandOf(m))+'</b><span class="sc">'+m.fit+'</span></div><p>'+esc(m.why)+'</p>'
       +(det.length?'<dl class="m-det">'+det.map(([k,v])=>'<div><dt>'+esc(k)+'</dt><dd>'+esc(v)+'</dd></div>').join('')+'</dl>':'')
       +(hasMap?'<div class="match-map" data-user-lat="'+OC_USER_LOC.lat+'" data-user-lng="'+OC_USER_LOC.lng+'" data-ev-lat="'+m.event_lat+'" data-ev-lng="'+m.event_lng+'"></div>':'')
-      +(m.distance_km!=null?'<p class="m-dist">'+m.distance_km+' km from you'+(m.directions_url?' · <a href="'+esc(m.directions_url)+'" target="_blank" rel="noopener">Directions</a>':'')+'</p>':'')+'</div>';
+      +(m.distance_km!=null?'<p class="m-dist">~'+m.distance_km+' km from '+(OC_USER_LOC&&OC_USER_LOC.src==='postcode'?esc(OC_USER_LOC.postcode||'home'):'you')+'</p>'
+       +'<div class="m-links">'
+       +(m.citymapper_url?'<a class="btn btn-secondary sm" href="'+esc(m.citymapper_url)+'" target="_blank" rel="noopener">Citymapper · live times</a>':'')
+       +(m.directions_url?'<a class="btn btn-ghost sm" href="'+esc(m.directions_url)+'" target="_blank" rel="noopener">Google Maps</a>':'')
+       +'</div>':'')+'</div>';
   }
   if(series.length)h+='<div class="dr-block"><h4>Also on</h4><ul>'+series.slice(0,6).map(x=>'<li>'+fmtDay(x.date)+(x.time?' · '+x.time:'')+'</li>').join('')+'</ul></div>';
   if(e.aliases.length)h+='<div class="dr-block"><h4>Also listed as</h4><ul>'+e.aliases.slice(0,3).map(a=>'<li>'+esc(a)+'</li>').join('')+'</ul></div>';
@@ -2072,6 +2096,15 @@ async function onEmailSigninSubmit(ev){
 }
 async function loadMe(){
   try{const r=await fetch('/api/me',{cache:'no-store'});ME=await r.json();}catch(e){ME={signed_in:false,google_enabled:true,email_signin_enabled:false};}
+  /* Postcode-derived home light: when the account has a saved postcode,
+     OC_USER_LOC is populated from the server without ever prompting for
+     location. This is the whole reason the postcode exists - it carries
+     the person across devices without a per-browser consent dance. The
+     HTML5-geolocation flow (S.locOn / /api/location) still works for
+     anyone who hasn't set a postcode. */
+  if(ME.home&&typeof ME.home.lat==='number'&&typeof ME.home.lng==='number'){
+    OC_USER_LOC={lat:ME.home.lat,lng:ME.home.lng,src:'postcode',postcode:ME.home.postcode};
+  }
   syncRun();checkReturning();syncSaved();
   return ME;
 }
@@ -2208,11 +2241,25 @@ function interestsHTML(){
     +CATS.map(c=>'<button class="chip" data-dcat="'+esc(c.key)+'" aria-pressed="'+cats.includes(c.key)+'"><span class="dot" style="--c:var('+c.v+')"></span>'+esc(c.label)+'</button>').join('')
     +'</div></section>';
 }
+function homeBaseHTML(){
+  /* Home postcode: a durable per-account substitute for in-the-moment
+     geolocation. When set, every match card shows commute distance and a
+     deep link into Citymapper (London transit) and Google Maps (fallback).
+     Stored only as a lat/lng + the display string; the lat/lng never
+     surfaces in the UI. */
+  const hm=ME.home||null;
+  const inp='<div class="pc-row"><input id="pcInput" class="input" type="text" inputmode="text" autocomplete="postal-code" spellcheck="false" placeholder="e.g. SW1A 1AA" aria-label="Home postcode" value=""><button class="btn btn-primary sm" data-act="pc-save">'+(hm?'Update':'Save')+'</button>'+(hm?'<button class="btn btn-ghost sm" data-act="pc-clear" aria-label="Clear postcode">Clear</button>':'')+'</div>';
+  const status=hm
+    ?'<p class="muted"><b>'+esc(hm.postcode)+'</b> saved as your home base. Every match now shows commute distance and a live-times link.</p>'
+    :'<p class="muted">Enter your home postcode and every match shows how far it is, with one-tap live times via Citymapper or Google Maps. UK postcodes only. No sign-in prompts, no browser location access, nothing else.</p>';
+  return'<section class="ac-sec"><h3>Home base</h3>'+status+inp+'<p class="status" id="pcStatus" aria-live="polite"></p></section>';
+}
 function tabProfile(){
   const h=ACCT.hist;if(!h)return acSkel+acSkel;
   const p=h.profile;
   if(!p)return acEmpty('user','No profile yet','Run an analysis and the profile the engine builds from your CV appears here: what it found strong, what it found thin, and where it thinks you are headed. Every match is scored against it.','<button class="btn btn-primary sm" data-act="getmatched">Get matched '+ic('arrow-right','s14')+'</button>')
     +interestsHTML()
+    +homeBaseHTML()
     +'<section class="ac-sec"><h3>Stored CV</h3>'+cvCardHTML()+'</section>';
   const src=h.runs.find(r=>!r.reused)||h.runs[0];
   const from=src?(src.filename?'Built from '+src.filename:'Built from what you wrote')+' · '+fmtWhen(src.at):'';
@@ -2227,6 +2274,7 @@ function tabProfile(){
     +'<div class="ac-foot"><p>Every match and every digest is scored against this and nothing else. If it reads wrong, your matches will be wrong, so update it.</p>'
     +'<div class="row-btns"><button class="btn btn-primary sm" data-act="ac-rerun">Run again with this profile</button><button class="btn btn-secondary sm" data-act="replacecv">Update with a new CV</button></div></div></section>'
     +interestsHTML()
+    +homeBaseHTML()
     +'<section class="ac-sec"><h3>Stored CV</h3>'+cvCardHTML()+'</section>';
 }
 
@@ -2609,8 +2657,54 @@ document.addEventListener('click',ev=>{
     case'ac-copy':{const i=$('#feedUrl');if(!i)break;const done=()=>{t.textContent='Copied';setTimeout(()=>{t.textContent='Copy';},1600);};if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(i.value).then(done,()=>{i.select();});else{i.select();try{document.execCommand('copy');done();}catch(e){}}break;}
     case'ac-resume':saveDigest({snooze_days:0});break;
     case'ac-test':testDigest();break;
+    case'pc-save':savePostcode();break;
+    case'pc-clear':clearPostcode();break;
   }
 });
+
+/* Postcode: validate on the server (postcodes.io), store the geocode on
+   the account. We never show the stored lat/lng; the postcode text is the
+   only thing the UI reads back. OC_USER_LOC is updated in place so the
+   next render reflects it without a reload. */
+async function savePostcode(){
+  const inp=$('#pcInput'); if(!inp) return;
+  const raw=(inp.value||'').trim();
+  const st=$('#pcStatus'); if(st){st.className='status';st.textContent='';}
+  if(!raw){if(st){st.className='status err';st.textContent='Enter your postcode first.';}inp.focus();return;}
+  const btn=$('#modalBox [data-act="pc-save"]');if(btn)btn.disabled=true;
+  try{
+    const r=await fetch('/api/me/postcode',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({postcode:raw})});
+    const data=await r.json().catch(()=>({}));
+    if(r.ok&&data.home){
+      ME.home={postcode:data.home.postcode,lat:null,lng:null};
+      /* Reload /api/me to pick up the stored lat/lng (the server deliberately
+         doesn't echo coords in the POST response - the GET is the source of
+         truth, keeping the response payload the same in both routes). */
+      try{const me=await fetch('/api/me',{cache:'no-store'}).then(r=>r.json());ME=me;
+        if(ME.home&&typeof ME.home.lat==='number'&&typeof ME.home.lng==='number'){
+          OC_USER_LOC={lat:ME.home.lat,lng:ME.home.lng,src:'postcode',postcode:ME.home.postcode};
+        }
+      }catch(e){}
+      toast('Home base set to '+data.home.postcode);
+      renderAccount();
+    }else{
+      const msg=(data&&data.error)||'That didn\'t work. Try again.';
+      if(st){st.className='status err';st.textContent=msg;}
+    }
+  }catch(e){
+    if(st){st.className='status err';st.textContent='Could not reach the server. Try again.';}
+  }finally{if(btn)btn.disabled=false;}
+}
+async function clearPostcode(){
+  try{
+    const r=await fetch('/api/me/postcode',{method:'DELETE'});
+    if(r.ok){
+      ME.home=null; OC_USER_LOC=null;
+      toast('Home base cleared');
+      renderAccount();
+    }
+  }catch(e){}
+}
 document.addEventListener('keydown',ev=>{
   const tag=(ev.target.tagName||'').toLowerCase();const typing=tag==='input'||tag==='textarea'||tag==='select'||ev.target.isContentEditable;
   if(ev.key==='Escape'){
