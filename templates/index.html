@@ -886,6 +886,12 @@ details.past[open]>summary .i{transform:rotate(180deg)}
 .mc-when{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font:400 13px var(--f-body);color:var(--tx-2)}
 .mc-when .i{color:var(--tx-3)}
 .mc-why{font-size:14px;line-height:1.5;color:var(--tx-2);display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+/* Weakness line: the one honest limitation. Deliberately quieter than the
+   match reason, with a muted left rule so it reads as self-check, not
+   headline. If the model couldn't name a specific limit, this never
+   renders. */
+.mc-weakness{font-size:12.5px;line-height:1.5;color:var(--tx-3);padding:8px 10px;border-left:2px solid var(--line-2);background:var(--s2);border-radius:0 8px 8px 0;margin-top:2px}
+.mc-wk-label{font-weight:500;color:var(--tx-2);letter-spacing:-.005em}
 .mc-acts{margin-top:auto;display:flex;align-items:center;gap:4px;padding-top:12px;border-top:1px solid var(--line)}
 .mc-acts .btn.sm{height:32px;padding:0 11px}
 .mc-acts .icon-btn.sm{width:32px;height:32px}
@@ -1791,7 +1797,11 @@ async function runAnalysis(opts){
   }catch(e){showErr('The analysis could not run: '+(e.message||'network error'));}
   finally{clearInterval(t);pr.hidden=true;btn.disabled=false;running=false;con.removeAttribute('aria-busy');syncRun();}
 }
-function tierOf(f){return f>=85?'Should attend':f>=75?'Worth attending':'Clears the bar';}
+/* Mirror of ai_engine.band_label(). The server stamps m.band on fresh
+   recommendations; this is the fallback for history rows and for anywhere
+   that forgot to thread the field. Any change here must land in both. */
+function tierOf(f){return f>=85?'Strong fit':f>=75?'Good match':'Worth a look';}
+function bandOf(m){return (m&&m.band)||tierOf(m&&m.fit||0);}
 // Recommendations carry the raw scraped fields. Anchor each to the cleaned
 // catalogue entry when it is still there, so Save / Add to calendar /
 // Details work exactly as they do in the list.
@@ -1809,13 +1819,20 @@ function deckHTML(items,key){
   const cards=items.map((m,i)=>{
     const e=m.e,c=catOf(e.cat),hot=m.fit>=85;
     const where=e.online?'Online':(e.loc.kind==='venue'?e.loc.text:'London');
-    return'<article class="mcard'+(hot?' hot':'')+(m.muted?' muted':'')+'" role="listitem" aria-label="'+esc(e.title)+', fit '+m.fit+'">'
-      +'<div class="mc-top"><span class="mc-rank">#'+(i+1)+'</span><span class="mc-tier">'+tierOf(m.fit)+'</span><span class="mc-fit"><b>'+m.fit+'</b><i>/100</i></span></div>'
+    const band=bandOf(m);
+    /* Weakness: the one honest limit the critique pass surfaces. Hidden
+       when the model couldn't name one ("None material.") - a false
+       weakness is worse than no weakness. */
+    const wk=(m.weakness||'').trim();
+    const showWk=wk && wk.toLowerCase().replace(/[.\s]/g,'')!=='nonematerial';
+    return'<article class="mcard'+(hot?' hot':'')+(m.muted?' muted':'')+'" role="listitem" aria-label="'+esc(e.title)+', '+esc(band)+'">'
+      +'<div class="mc-top"><span class="mc-rank">#'+(i+1)+'</span><span class="mc-tier">'+esc(band)+'</span><span class="mc-fit" title="Fit score, 0-100"><b>'+m.fit+'</b><i>/100</i></span></div>'
       +'<div class="meter" aria-hidden="true"><i'+(hot?' class="hot"':'')+' style="width:'+m.fit+'%"></i></div>'
       +'<p class="mc-meta"><span class="dot" style="--c:var('+c.v+')"></span>'+esc(c.label)+(e.fmt?' · '+esc(e.fmt):'')+'</p>'
       +'<h3 class="mc-title"><button class="row-open" data-open="'+esc(e.id)+'">'+esc(e.title)+'</button></h3>'
       +'<p class="mc-when">'+ic('calendar','s14')+(e.date?fmtDay(e.date):'Date TBC')+(e.time?' · '+e.time:'')+'<span class="sep">·</span>'+ic(e.online?'globe':'pin','s14')+esc(where)+'</p>'
       +'<p class="mc-why">'+esc(m.why)+'</p>'
+      +(showWk?'<p class="mc-weakness"><span class="mc-wk-label">One honest limit</span> — '+esc(wk)+'</p>':'')
       +'<div class="mc-acts">'+saveBtn(e.id,'sm')+'<button class="icon-btn sm" data-ics="'+esc(e.id)+'" aria-label="Add to calendar">'+ic('calendar-plus','s16')+'</button>'
       +(m.mutable?'<button class="icon-btn sm" data-act="ac-mute" data-id="'+esc(e.id)+'" data-title="'+esc(e.title)+'" aria-pressed="'+!!m.muted+'" aria-label="'+(m.muted?'Unmute':'Not for me')+'" title="'+(m.muted?'Muted · undo':'Not for me')+'">'+ic('eye-off','s16')+'</button>':'')
       +'<span class="tb-spacer"></span><button class="btn btn-secondary sm" data-open="'+esc(e.id)+'">Details</button><a class="btn btn-primary sm" href="'+esc(e.url)+'" target="_blank" rel="noopener"'+(m.rid?' data-track="'+esc(m.rid)+'"':'')+'>View '+ic('arrow-up-right','s14')+'</a></div>'
@@ -1850,7 +1867,7 @@ function resultsHTML(data){
   const recs=(data.recommendations||[]).map((r,i)=>({r,e:ensureEv(r,i),fit:Math.round(r.fit_score||0)}));
   // Ranked by fit, best first: the deck reads left to right like a shortlist.
   recs.sort((a,b)=>b.fit-a.fit||((a.e.date&&b.e.date)?a.e.date-b.e.date:0));
-  S.matches=Object.fromEntries(recs.map((m,i)=>[m.e.id,{fit:m.fit,rank:i+1,why:m.r.why||'',why_now:m.r.why_now||'',prepare:m.r.prepare||'',benefit:m.r.benefit||'',distance_km:m.r.distance_km,directions_url:m.r.directions_url,event_lat:m.r.event_lat,event_lng:m.r.event_lng,recommendation_id:m.r.recommendation_id}]));
+  S.matches=Object.fromEntries(recs.map((m,i)=>[m.e.id,{fit:m.fit,band:m.r.band||tierOf(m.fit),rank:i+1,why:m.r.why||'',why_now:m.r.why_now||'',prepare:m.r.prepare||'',benefit:m.r.benefit||'',weakness:m.r.weakness||'',distance_km:m.r.distance_km,directions_url:m.r.directions_url,event_lat:m.r.event_lat,event_lng:m.r.event_lng,recommendation_id:m.r.recommendation_id}]));
   let h='<div class="res-note">'+ic('info','s16')+'<div>'+(recs.length?'Real, upcoming events, best fit first. They are marked in Events too.':'An honest result, not a failure.')+(S.keep?' Your CV and profile are kept on your account.':' Nothing from this run was stored.')+'</div></div>';
   h+='<div class="res-h"><h2>'+(recs.length?recs.length+' match'+(recs.length===1?'':'es'):'No matches')+'</h2><span>Fit score out of 100 · only 65 and above are shown</span></div>';
   if(!recs.length){
@@ -1940,9 +1957,11 @@ function openEvent(id){
    +'<ul class="facts"><li>'+ic('calendar')+'<div><b>'+(e.date?fmtLong(e.date):'Date TBC')+'</b><span>'+esc(timeLine)+'</span></div></li><li>'+ic(where[0])+'<div><b>'+esc(where[1])+'</b><span>'+esc(where[2])+'</span></div></li>'
    +(e.fmt?'<li>'+ic('target')+'<div><b>'+esc(e.fmt)+(e.fmtInf?' <span class="muted">(probably)</span>':'')+'</b><span>'+esc(c.label)+(e.recat?' · filed here from the title, not the source':'')+(e.fmtInf?' · the listing doesn’t say what kind of event it is':'')+'</span></div></li>':'')+'</ul>';
   if(m){
-    const det=[m.why_now?['Why now',m.why_now]:null,m.prepare?['Prepare',m.prepare]:null,m.benefit?['Benefit',m.benefit]:null].filter(Boolean);
+    const wk=(m.weakness||'').trim();
+    const showWk=wk && wk.toLowerCase().replace(/[.\s]/g,'')!=='nonematerial';
+    const det=[m.why_now?['Why now',m.why_now]:null,m.prepare?['Prepare',m.prepare]:null,m.benefit?['Benefit',m.benefit]:null,showWk?['One honest limit',wk]:null].filter(Boolean);
     const hasMap=m.distance_km!=null&&m.event_lat!=null&&m.event_lng!=null&&!!OC_USER_LOC;
-    h+='<div class="dr-match"><div class="top"><b>'+ic('spark','s14')+' '+(m.rank?'Match #'+m.rank:'Matched to your profile')+' · '+tierOf(m.fit)+'</b><span class="sc">'+m.fit+'</span></div><p>'+esc(m.why)+'</p>'
+    h+='<div class="dr-match"><div class="top"><b>'+ic('spark','s14')+' '+(m.rank?'Match #'+m.rank:'Matched to your profile')+' · '+esc(bandOf(m))+'</b><span class="sc">'+m.fit+'</span></div><p>'+esc(m.why)+'</p>'
       +(det.length?'<dl class="m-det">'+det.map(([k,v])=>'<div><dt>'+esc(k)+'</dt><dd>'+esc(v)+'</dd></div>').join('')+'</dl>':'')
       +(hasMap?'<div class="match-map" data-user-lat="'+OC_USER_LOC.lat+'" data-user-lng="'+OC_USER_LOC.lng+'" data-ev-lat="'+m.event_lat+'" data-ev-lng="'+m.event_lng+'"></div>':'')
       +(m.distance_km!=null?'<p class="m-dist">'+m.distance_km+' km from you'+(m.directions_url?' · <a href="'+esc(m.directions_url)+'" target="_blank" rel="noopener">Directions</a>':'')+'</p>':'')+'</div>';
@@ -2202,9 +2221,9 @@ function tabMatches(){
     const items=r.matches.map(m=>({e:matchEv(m),m})).filter(x=>x.e||true).map(x=>{
       const e=x.e||makeEv({id:x.m.event_id,title:x.m.title,url:'#',category:x.m.category,date:null,location:'',time:''},0);
       if(!x.e){e.unlisted=true;BY[e.id]=e;}
-      return{e,fit:Math.round(x.m.fit_score||0),why:x.m.why||'',rid:x.m.recommendation_id,muted:!!x.m.dismissed,mutable:true,url:e.url};
+      return{e,fit:Math.round(x.m.fit_score||0),band:x.m.band,why:x.m.why||'',weakness:x.m.weakness||'',rid:x.m.recommendation_id,muted:!!x.m.dismissed,mutable:true,url:e.url};
     }).sort((a,b)=>b.fit-a.fit);
-    items.forEach(it=>{if(!S.matches)S.matches={};if(!S.matches[it.e.id])S.matches[it.e.id]={fit:it.fit,why:it.why};});
+    items.forEach(it=>{if(!S.matches)S.matches={};if(!S.matches[it.e.id])S.matches[it.e.id]={fit:it.fit,band:it.band,why:it.why,weakness:it.weakness};});
     return'<section class="run'+(idx===0?' latest':'')+'"><header class="run-hd"><b>'+fmtWhen(r.at)+'</b><span>'+label+'</span><span class="n">'+(r.matches.length?r.matches.length+' match'+(r.matches.length===1?'':'es'):'nothing cleared 65')+'</span></header>'
       +(items.length?'<div class="run-body">'+deckHTML(items,'run'+r.id)+'</div>':'')+'</section>';
   };

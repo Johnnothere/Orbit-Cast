@@ -831,6 +831,18 @@ and say so honestly, e.g. "Their background is mostly non-technical, but they've
 started a data analytics course - this is a reasonable stretch event, not a clear \
 fit. Worth attending, but not central to where they're headed."
 
+Every recommendation also gets a "weakness" field - ONE sentence naming the single \
+most honest limitation of this match for THIS person. Not a disclaimer, not a \
+hedge, not "it might be busy" - a specific thing about THIS event vs THIS person \
+that a thoughtful friend would mention when recommending it. Examples:
+GOOD: "The speaker lineup is heavily US-focused, so London regulatory nuance may \
+be thin on the ground." / "This is an advanced-practitioner room; you'll follow \
+~60% without the two years of SOC experience most attendees have." / "The venue \
+is in Zone 4 and the event ends at 10pm - the commute back central is a factor."
+BAD: "You might not know anyone there." / "It could be useful." / Anything that \
+could apply to any event. If you genuinely can't name a specific weakness for \
+this match, write "None material." - do NOT invent one.
+
 WHEN THE PROFILE SAYS evidence_level IS "thin":
 This person told us where they want to go and has little or no track record there \
 yet - a student, a career changer, someone starting out. They are a real user with a \
@@ -863,7 +875,9 @@ Return ONLY valid JSON - no markdown, no backticks, no preamble - in EXACTLY thi
        "why_now": string,          // why this event fits their trajectory right now,
                                     // not just their general topic history
        "prepare": string,          // concrete prep given their actual background
-       "benefit": string           // concrete, specific payoff for them
+       "benefit": string,          // concrete, specific payoff for them
+       "weakness": string          // the ONE honest limit of this match for them,
+                                    // or "None material." - never invented, never generic
      }
   ]
 }"""
@@ -887,6 +901,24 @@ def get_scoring_rules() -> str:
 
 def build_scoring_prompt() -> str:
     return SCORING_HEADER + get_scoring_rules() + SCORING_FOOTER
+
+
+# Band label is a single source of truth for every surface that renders a
+# match. The UI never does the mapping itself: an upgrade here (new band,
+# different cut points, localised strings) deploys to the card, the deck,
+# the digest email and the admin console in one step. Only the integer
+# scores above FIT_THRESHOLD (65) ever reach a card at all; anything lower
+# was dropped before we got here.
+def band_label(score) -> str:
+    try:
+        s = int(score or 0)
+    except (TypeError, ValueError):
+        return "Worth a look"
+    if s >= 85:
+        return "Strong fit"
+    if s >= 75:
+        return "Good match"
+    return "Worth a look"       # 65-74
 
 
 def score_events(profile: dict, compact_events: list) -> list:
@@ -932,6 +964,14 @@ def score_events(profile: dict, compact_events: list) -> list:
     ]
     data = _call(system_blocks, user_content, max_tokens=4096)
     valid_ids = {e["id"] for e in catalog}
+    # Stamp a band derived from the raw score. The server owns this mapping so
+    # the UI never has to - every surface (card, deck, digest email, API)
+    # agrees on the label and a prompt-nudge can't produce a 85 called
+    # "worth a look". Bands are the primary read; the integer remains in the
+    # payload for the few surfaces that still want it (admin, export).
+    for r in data.get("recommendations", []):
+        if isinstance(r, dict):
+            r["band"] = band_label(r.get("fit_score"))
     recs = [
         r for r in data.get("recommendations", [])
         if isinstance(r, dict)

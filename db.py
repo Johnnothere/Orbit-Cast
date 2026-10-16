@@ -628,12 +628,14 @@ def save_recommendations(analysis_id, recommendations: list):
                 cur.execute(
                     """
                     insert into recommendations
-                      (analysis_id, event_id, title, category, fit_score, why, why_now, prepare, benefit)
-                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                      (analysis_id, event_id, title, category, fit_score,
+                       why, why_now, prepare, benefit, weakness)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     returning id
                     """,
                     (analysis_id, r.get("event_id"), r.get("title"), r.get("category"),
-                     r.get("fit_score"), r.get("why"), r.get("why_now"), r.get("prepare"), r.get("benefit")),
+                     r.get("fit_score"), r.get("why"), r.get("why_now"),
+                     r.get("prepare"), r.get("benefit"), r.get("weakness")),
                 )
                 ids.append(cur.fetchone()[0])
             return ids
@@ -1044,7 +1046,7 @@ def get_user_activity(oc_uid: str):
                 cur.execute(
                     """
                     select id, analysis_id, event_id, title, category, fit_score,
-                           why, why_now, prepare, benefit, created_at
+                           why, why_now, prepare, benefit, weakness, created_at
                     from recommendations
                     where analysis_id = any(%s)
                     order by fit_score desc nulls last
@@ -1052,10 +1054,18 @@ def get_user_activity(oc_uid: str):
                     (analysis_ids,),
                 )
                 r_cols = ["id", "analysis_id", "event_id", "title", "category", "fit_score",
-                          "why", "why_now", "prepare", "benefit", "created_at"]
+                          "why", "why_now", "prepare", "benefit", "weakness", "created_at"]
                 for r in cur.fetchall():
                     rec = dict(zip(r_cols, r))
                     rec["created_at"] = _iso(rec["created_at"])
+                    # band is derived, not stored - stamping here keeps the
+                    # server as the single source of truth for how a score
+                    # reads (ai_engine.band_label).
+                    try:
+                        import ai_engine
+                        rec["band"] = ai_engine.band_label(rec.get("fit_score"))
+                    except Exception:
+                        pass
                     recs_by_analysis.setdefault(rec["analysis_id"], []).append(rec)
             for a in analyses:
                 a["recommendations"] = recs_by_analysis.get(a["id"], [])
@@ -2648,18 +2658,24 @@ def get_history(oc_uid: str, limit: int = 25):
                 cur.execute(
                     """
                     select id, analysis_id, event_id, title, category, fit_score,
-                           why, why_now, prepare, benefit
+                           why, why_now, prepare, benefit, weakness
                     from recommendations where analysis_id = any(%s)
                     order by fit_score desc nulls last
                     """,
                     (ids,),
                 )
                 by_id = {a["id"]: a for a in runs}
+                try:
+                    import ai_engine
+                    _band = ai_engine.band_label
+                except Exception:
+                    _band = lambda s: None   # noqa: E731
                 for r in cur.fetchall():
                     by_id[r[1]]["matches"].append(
                         {"recommendation_id": r[0], "event_id": r[2], "title": r[3],
-                         "category": r[4], "fit_score": r[5], "why": r[6],
-                         "why_now": r[7], "prepare": r[8], "benefit": r[9]})
+                         "category": r[4], "fit_score": r[5], "band": _band(r[5]),
+                         "why": r[6], "why_now": r[7], "prepare": r[8],
+                         "benefit": r[9], "weakness": r[10]})
             return runs
     except Exception as exc:
         log.warning(f"get_history failed: {exc}")
