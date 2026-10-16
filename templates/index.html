@@ -721,6 +721,16 @@ details.card .body{margin-top:14px;display:grid;gap:14px;font-size:14.5px;color:
 /* ---------- account panel ---------- */
 .modal.wide{width:min(800px,100%);height:min(740px,calc(100dvh - 48px));max-height:none;display:flex;flex-direction:column;overflow:hidden}
 .ac-hd{display:flex;align-items:center;gap:8px;padding:14px 14px 0 16px}
+.mcardid{flex:1;min-width:0;display:flex;align-items:center;gap:13px;padding:13px 16px;border-radius:16px;border:1px solid var(--line-2);background:linear-gradient(120deg,color-mix(in oklab,var(--ac) 14%,var(--s2)),var(--s2) 55%)}
+.mcardid .avatar,.mcardid .nav-avatar{width:40px;height:40px;font-size:15px;flex:none}
+.mcardid .who{flex:1;min-width:0}
+.mcardid .who b{display:flex;align-items:center;gap:8px;font:600 15.5px/1.25 var(--f-display);letter-spacing:-.01em;overflow:hidden}
+.mcardid .pill.grade{background:var(--ac-soft);color:var(--ac);flex:none;font-family:var(--f-mono);letter-spacing:.02em;text-transform:uppercase;font-size:10px}
+.mcardid .mmeta{display:block;margin-top:3px;font:500 12px/1.4 var(--f-mono);color:var(--tx-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mcardid .mmeta i{font-style:normal;opacity:.5}
+.mcardid .mlock{display:inline-flex;align-items:center;gap:5px;margin-top:5px;font-size:12px;color:var(--tx-2)}
+.mcardid .mlock .i{color:var(--ac)}
+@media (max-width:560px){.mcardid{padding:10px 12px}.mcardid .mmeta{white-space:normal}}
 .ac-hd .acct-id{flex:1;min-width:0;background:none;padding:0 0 0 6px}
 .ac-hd .who b,.ac-hd .who span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ac-hd .saved-flash{flex:none}
@@ -2036,13 +2046,25 @@ function renderAccount(resetScroll){
   const first=(ME.name||'').trim();
   const av=ME.avatar_url?'<img class="nav-avatar" src="'+esc(ME.avatar_url)+'" alt="" referrerpolicy="no-referrer">':'<span class="avatar">'+esc((first||ME.email||'A').charAt(0).toUpperCase())+'</span>';
   const how=ME.signin_method==='google'?'Signs in with Google':'Signs in by emailed link';
+  /* Membership card, not a settings header: who you are, since when, member
+     number, grade. The institutions OrbitCast's audience knows (RUSI, Chatham
+     House) present belonging this way, and it is the frame that makes "one
+     account, one person" read as a membership rule rather than a restriction. */
+  const since=ME.member_since?new Date(ME.member_since):null;
+  const sinceTxt=since&&!isNaN(since)?since.toLocaleDateString(undefined,{month:'long',year:'numeric'}):'';
+  const lockedTo=(ME.cv&&ME.cv.locked_to)||'';
+  const meta=[ME.member_no||'',sinceTxt?'Member since '+sinceTxt:'',how.replace('Signs in','signs in')].filter(Boolean);
   const nMatch=ACCT.hist&&ACCT.hist.runs.length?ACCT.hist.runs.find(r=>r.matches.length):null;
   const counts={matches:nMatch?nMatch.matches.length:'',saved:saved.size||''};
   const body={profile:tabProfile,matches:tabMatches,saved:tabSaved,digest:tabDigest,data:tabData}[ACCT.tab]();
   const note=ACCT.note&&ACCT.note.tab===ACCT.tab?'<p class="ac-note '+ACCT.note.cls+'" role="status">'+esc(ACCT.note.text)+'</p>':'';
   const g=ME.alerts||{};const latest=ACCT.hist&&ACCT.hist.runs.length?ACCT.hist.runs[0]:null;
   const stats=[[latest?String(latest.matches.length):'—','matches, last run'],[saved.size,'saved'],[g.configured&&!g.paused?(g.next_send_at?dayText(g.next_send_at):'on'):'off','next email'],[ME.cv&&ME.cv.on_file?'on file':'none','stored CV']];
-  box.innerHTML='<div class="dr-grab ac-grab"></div><div class="ac-hd"><div class="acct-id">'+av+'<div class="who"><b>'+esc(first||ME.email||'')+'</b><span>'+esc((first?ME.email+' · ':'')+how)+'</span></div></div>'
+  box.innerHTML='<div class="dr-grab ac-grab"></div><div class="ac-hd">'
+    +'<div class="mcardid">'+av+'<div class="who"><b>'+esc(first||ME.email||'')+'<span class="pill grade">Founding member</span></b>'
+    +'<span class="mmeta">'+meta.map(esc).join(' <i>\u00b7</i> ')+'</span>'
+    +(lockedTo?'<span class="mlock">'+ic('user','s14')+'Analyses for '+esc(lockedTo)+' \u00b7 one person per account</span>':'')
+    +'</div></div>'
     +'<span class="saved-flash" id="savedFlash" aria-live="polite">Saved</span>'
     +'<button class="btn btn-ghost sm" data-act="signout">Sign out</button><button class="icon-btn" data-act="mclose" aria-label="Close">'+ic('x')+'</button></div>'
     +'<div class="ac-stats">'+stats.map(([v,l])=>'<div><b>'+esc(String(v))+'</b><span>'+l+'</span></div>').join('')+'</div>'
@@ -2065,10 +2087,22 @@ function cvCardHTML(){
   if(ACCT.confirm==='cv')return'<div class="confirm"><b>Delete your stored CV?</b><span>The uploaded file and its extracted text are removed. The profile built from it stays, so your matches and digest keep working.</span><div class="row-btns"><button class="btn btn-danger sm" data-act="delcv">Delete the CV</button><button class="btn btn-ghost sm" data-act="ac-cancel">Cancel</button></div></div>';
   return'<div class="cv-card">'+ic('file')+'<div class="nm"><b>'+esc(cv.last_filename||'Written description')+'</b><span>'+esc(meta||'Used for your matches and your digest')+'</span></div><button class="btn btn-secondary sm" data-act="replacecv">Replace</button><button class="btn btn-ghost sm" data-act="ac-ask" data-what="cv">Delete</button></div>';
 }
+function interestsHTML(){
+  /* The digest's category filter, promoted to a first-class "interests"
+     statement on the profile - same data, same data-dcat handler, one source
+     of truth. Changing it here changes what the digest sends. */
+  const cats=((ACCT.dg&&ACCT.dg.categories)||(ME.alerts&&ME.alerts.categories)||[]);
+  return'<section class="ac-sec"><h3>Your interests</h3>'
+    +'<p class="muted">What you want OrbitCast to watch for you. This narrows your email digest; the analysis itself always considers everything.</p>'
+    +'<div class="chips"><button class="chip" data-dcat="all" aria-pressed="'+(!cats.length)+'">Everything</button>'
+    +CATS.map(c=>'<button class="chip" data-dcat="'+esc(c.key)+'" aria-pressed="'+cats.includes(c.key)+'"><span class="dot" style="--c:var('+c.v+')"></span>'+esc(c.label)+'</button>').join('')
+    +'</div></section>';
+}
 function tabProfile(){
   const h=ACCT.hist;if(!h)return acSkel+acSkel;
   const p=h.profile;
   if(!p)return acEmpty('user','No profile yet','Run an analysis and the profile the engine builds from your CV appears here: what it found strong, what it found thin, and where it thinks you are headed. Every match is scored against it.','<button class="btn btn-primary sm" data-act="getmatched">Get matched '+ic('arrow-right','s14')+'</button>')
+    +interestsHTML()
     +'<section class="ac-sec"><h3>Stored CV</h3>'+cvCardHTML()+'</section>';
   const src=h.runs.find(r=>!r.reused)||h.runs[0];
   const from=src?(src.filename?'Built from '+src.filename:'Built from what you wrote')+' · '+fmtWhen(src.at):'';
@@ -2082,6 +2116,7 @@ function tabProfile(){
     +(p.trajectory?'<p class="traj"><b>Where you’re headed.</b> '+esc(p.trajectory)+'</p>':'')
     +'<div class="ac-foot"><p>Every match and every digest is scored against this and nothing else. If it reads wrong, your matches will be wrong, so update it.</p>'
     +'<div class="row-btns"><button class="btn btn-primary sm" data-act="ac-rerun">Run again with this profile</button><button class="btn btn-secondary sm" data-act="replacecv">Update with a new CV</button></div></div></section>'
+    +interestsHTML()
     +'<section class="ac-sec"><h3>Stored CV</h3>'+cvCardHTML()+'</section>';
 }
 
@@ -2210,6 +2245,7 @@ function tabData(){
     +item('Match history',h?(runs+' run'+(runs===1?'':'s')+', '+matches+' match'+(matches===1?'':'es')+' with their reasoning.'):'Loading…','<button class="btn btn-ghost sm" data-act="ac-tab" data-tab="matches">View</button>')
     +item('Saved events',saved.size+' saved'+(ME.calendar_feed?', shared with your calendar by private link.':'.'),'<button class="btn btn-ghost sm" data-act="ac-tab" data-tab="saved">View</button>')
     +item('Email schedule',g.configured&&!g.paused?'On. '+(g.next_send_at?'Next '+esc(dayText(g.next_send_at))+'.':''):'Off.','<button class="btn btn-ghost sm" data-act="ac-tab" data-tab="digest">Change</button>')
+    +item('Identity',(ME.cv&&ME.cv.locked_to)?'Analyses are for '+esc(ME.cv.locked_to)+' - one person per account, so the free analyses stay free. It clears only when the account is deleted.':'Set by the first named CV you analyse. One person per account.','')
     +item('Sign-in',how,'')
     +'</ul><p class="muted">Not held: a password, your LinkedIn login, or any tracking beyond the clicks on your own matches. Nothing is sold or shared, and there are no paid placements.</p></section>';
   s+='<section class="ac-card"><div class="set-row"><div><b>Keep my CV and profile</b><span>Needed for the digest and for reusing your profile. Off means the next run stores nothing.</span></div><button class="switch" role="switch" data-act="keep2" aria-checked="'+S.keep+'" aria-label="Keep my CV and profile"></button></div>'

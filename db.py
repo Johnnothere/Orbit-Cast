@@ -1895,6 +1895,46 @@ def get_account(account_id):
         return None
 
 
+def get_cv_identity(account_id):
+    """The name this account's analyses are locked to, or None."""
+    try:
+        with _read_cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute("select cv_identity from accounts where id = %s", (account_id,))
+            row = cur.fetchone()
+            return row[0] if row else None
+    except Exception as exc:
+        log.warning(f"get_cv_identity failed: {exc}")
+        return None
+
+
+def set_cv_identity_if_absent(account_id, name: str):
+    """First named document wins. Atomic: if two uploads race, both get back
+    whichever name actually landed, and the gate judges against that. Returns
+    the locked name, or None when the database is unavailable (the gate then
+    judges against the submitted name alone for this one run)."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute(
+                """
+                update accounts
+                   set cv_identity = %s, cv_identity_set_at = now()
+                 where id = %s and cv_identity is null
+                """,
+                ((name or "").strip()[:120], account_id),
+            )
+        with _read_cursor() as cur:
+            cur.execute("select cv_identity from accounts where id = %s", (account_id,))
+            row = cur.fetchone()
+            return row[0] if row else None
+    except Exception as exc:
+        log.warning(f"set_cv_identity_if_absent failed: {exc}")
+        return None
+
+
 def delete_account(oc_uid: str) -> bool:
     """Part of the GDPR delete. Cascades to digest_prefs and digest_sends."""
     if not oc_uid:

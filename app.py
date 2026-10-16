@@ -27,6 +27,7 @@ import ai_engine
 import auth
 import db
 import digest
+import identity
 import jobs
 import mailer
 import rag
@@ -521,6 +522,7 @@ def api_health():
     out = {"ok": True}
     if _admin_authorized():
         out.update({"jobs": JOBS.stats(), "db_pool": db.pool_stats(),
+                    "ai_usage": ai_engine.USAGE,
                     "ai_max_inflight": ai_engine.AI_MAX_INFLIGHT,
                     "catalog_events": len(load_events_cache().get("events", [])),
                     "threads": threading.active_count()})
@@ -701,6 +703,10 @@ def api_me():
         "name": account.get("name"),
         "avatar_url": account.get("avatar_url"),
         "member_since": account.get("created_at"),
+        # Membership-card number: stable, human-readable, derived - nothing new
+        # stored. Account ids are sequential, which here is a feature: early
+        # members get low numbers.
+        "member_no": f"OC-{int(account['id']):04d}",
         # How this person gets in, said plainly: there is no password to
         # forget, and knowing that is the answer to "how do I reset it".
         "signin_method": "google" if meta.get("google_linked") else "email_link",
@@ -712,6 +718,8 @@ def api_me():
             # Text-only submissions have no file, so "on file" must mean
             # either - reporting only the upload would tell someone who typed
             # their background that nothing of theirs is stored.
+            # locked_to: the one person this account analyses (identity.py).
+            "locked_to": db.get_cv_identity(account["id"]),
             "on_file": bool(cv.get("file_count") or cv.get("last_text_at")),
             "file_count": cv.get("file_count", 0),
             "total_bytes": cv.get("total_bytes", 0),
@@ -1245,7 +1253,7 @@ def _invalidates_owner(fn):
     return run
 
 
-def _run_analysis_job(oc_uid, consent, file_bytes, filename, mimetype, pasted_text):
+def _run_analysis_job(account_id, oc_uid, consent, file_bytes, filename, mimetype, pasted_text):
     """Runs on a queue worker. Returns (http_status, payload)."""
     if file_bytes:
         # PDF/DOCX parsing is CPU work; a handful at a time keeps it from
@@ -1280,7 +1288,16 @@ def _run_analysis_job(oc_uid, consent, file_bytes, filename, mimetype, pasted_te
     if oc_uid and db.get_location_consent(oc_uid):
         user_location = db.get_latest_location(oc_uid)
 
-    result = ai_engine.analyze_upload(file_text, events, user_location=user_location)
+    # One account, one person: the gate runs inside analyze_upload, after the
+    # cheap classification pass and before any scoring spend (see identity.py).
+    gate = identity.make_gate(account_id, db.get_cv_identity(account_id),
+                              db.set_cv_identity_if_absent)
+    result = ai_engine.analyze_upload(file_text, events, user_location=user_location,
+                                      identity_gate=gate)
+    if result.get("identity_refused"):
+        _audit("analysis_identity_refused", {"id": account_id},
+               detail={"file": bool(file_bytes)})
+        return 403, {"error": result.get("message_if_not_cv"), "reason": "identity"}
 
     # Consent is the hinge: no recorded "yes" means nothing gets written, and
     # the result the person sees is identical either way.
@@ -1365,6 +1382,7 @@ def api_analyze():
     consent = bool(oc_uid and db.get_consent(oc_uid))
     try:
         view = JOBS.submit(owner, "analyze", _invalidates_owner(_run_analysis_job), owner,
+                           acct["id"] if acct else None,
                            oc_uid, consent, file_bytes, filename, mimetype, pasted_text)
     except jobs.QueueFull:
         log.warning("Analysis queue full - turning a request away")
