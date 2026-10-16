@@ -250,6 +250,23 @@ def google_enabled() -> bool:
     return _google is not None
 
 
+# ─────────────────────────────────────────────
+# Email sign-in - a second door into the same session cookie
+# ─────────────────────────────────────────────
+# The email path is enabled whenever we have ANY mail provider wired up.
+# Nothing cryptographic sits here: the plaintext token is minted and
+# verified inside db.py (see create_email_signin_token /
+# consume_email_signin_token), the session cookie it ultimately sets is
+# the same one the Google path sets.
+
+def email_signin_enabled() -> bool:
+    try:
+        import mailer
+        return mailer.is_configured()
+    except Exception:
+        return False
+
+
 def init_google(app):
     """Wires Authlib onto the app. Google is the ONLY way in, so missing
     credentials are a fatal misconfiguration, not a degraded mode."""

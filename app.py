@@ -712,6 +712,172 @@ def auth_google_callback():
     return resp
 
 
+# ─────────────────────────────────────────────
+# Email sign-in - the second door
+# ─────────────────────────────────────────────
+# Alongside Google. Universal (any mailbox works), no OAuth consent screen,
+# no corporate SSO reach. The flow:
+#
+#   1. POST /api/auth/email/request {email}  → provider sends a one-time link
+#   2. GET  /auth/email/verify?token=X       → renders a one-click button
+#   3. POST /auth/email/verify {token}       → consumes, signs the person in
+#
+# The two-step verify is for the ubiquitous corporate link-scanners
+# (Microsoft Safe Links, Google click protection, Mimecast and the like)
+# that fetch every URL in incoming mail. A single-step GET would let the
+# scanner's fetch BURN the single-use token before the real person clicked
+# it. The GET here renders a visible button that POSTs the token;
+# scanners rarely POST, so the token survives for the person.
+#
+# The request endpoint always returns {ok: true}: not telling the caller
+# whether the address has an account closes the account-enumeration oracle
+# a plaintext "no such email" response would open.
+
+_EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,255}\.[^@\s]{1,24}$")
+
+def _valid_email(s: str) -> bool:
+    s = (s or "").strip()
+    return 3 < len(s) <= 320 and bool(_EMAIL_RE.match(s))
+
+
+def _email_hash(email: str) -> str:
+    """A short non-reversible identifier for the audit log. Correlates a
+    request with a later verify without putting the plaintext address in a
+    row anyone with database access would see."""
+    import hashlib
+    return hashlib.sha256((email or "").encode("utf-8")).hexdigest()[:12]
+
+
+@app.route("/api/auth/email/request", methods=["POST"])
+@limiter.limit("20 per hour;5 per minute", key_func=auth.client_ip)
+def api_auth_email_request():
+    """Sends a one-time sign-in link to the submitted address. Always 200.
+
+    Flask-Limiter throttles by IP here. db.recent_email_signin_requests adds
+    a per-address cap on top so a request burst from varying IPs cannot
+    still flood one person's inbox."""
+    if not auth.email_signin_enabled() or not db.is_configured():
+        return jsonify({"ok": True}), 200
+
+    data = request.get_json(silent=True) or request.form or {}
+    email = (data.get("email") or "").strip().lower()
+    if not _valid_email(email):
+        return jsonify({"ok": True}), 200
+
+    # Per-address cap: at most 3 outstanding tokens in a 15-minute window.
+    # A fourth request yields a successful HTTP response and no email sent;
+    # the earlier link still works.
+    if db.recent_email_signin_requests(email, within_minutes=15) >= 3:
+        return jsonify({"ok": True}), 200
+
+    oc_cookie = request.cookies.get("oc_uid") or uuid.uuid4().hex
+    plain = db.create_email_signin_token(
+        email,
+        oc_uid_hint=oc_cookie,
+        requested_ip=auth.client_ip(),
+        requested_ua=(request.user_agent.string or "")[:400],
+    )
+    if not plain:
+        return jsonify({"ok": True}), 200
+
+    verify_url = f"{mailer.PUBLIC_URL}/auth/email/verify?token={plain}"
+    subject = "Your OrbitCast sign-in link"
+    text = (
+        "Here's the link you asked for.\n\n"
+        f"{verify_url}\n\n"
+        "It works for 15 minutes and can only be used once.\n\n"
+        "If you didn't ask for this, you can safely ignore this email.\n\n"
+        "— OrbitCast\n"
+    )
+    html = (
+        "<!doctype html><html><body style=\"font-family:ui-sans-serif,system-ui,-apple-system,"
+        "'Segoe UI',Roboto,Arial,sans-serif;background:#f6f7fb;margin:0;padding:32px\">"
+        "<div style=\"max-width:520px;margin:0 auto;background:#fff;border-radius:12px;"
+        "padding:32px;box-shadow:0 1px 2px rgba(0,0,0,.06)\">"
+        "<h2 style=\"margin:0 0 12px;font-size:20px\">Sign in to OrbitCast</h2>"
+        "<p style=\"margin:0 0 20px;color:#444\">Click the button to continue. "
+        "It works for 15 minutes and only once.</p>"
+        f"<p style=\"margin:0 0 20px\"><a href=\"{verify_url}\" style=\"display:inline-block;"
+        "padding:12px 22px;background:#0a66ff;color:#fff;text-decoration:none;"
+        "border-radius:8px;font-weight:600\">Sign me in</a></p>"
+        "<p style=\"margin:0 0 8px;color:#777;font-size:13px\">Or paste this into your browser:</p>"
+        f"<p style=\"margin:0 0 24px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;"
+        f"word-break:break-all;color:#555;font-size:13px\">{verify_url}</p>"
+        "<p style=\"margin:0;color:#999;font-size:12px\">If you didn't ask for this, "
+        "you can safely ignore this email.</p></div></body></html>"
+    )
+    try:
+        mailer.send(email, subject, html, text)
+    except Exception as exc:
+        log.warning(f"email signin send failed: {exc}")
+
+    _audit("email_signin_requested", None, detail={"email_hash": _email_hash(email)})
+    return jsonify({"ok": True}), 200
+
+
+@app.route("/auth/email/verify", methods=["GET"])
+@limiter.limit("1200 per hour;120 per minute")
+def auth_email_verify_get():
+    """The one-click confirmation page. Renders a form that POSTs the token
+    when the person clicks, auto-submitted by a tiny JS for the common
+    case. This is what stops corporate link-scanners from burning the token."""
+    token = (request.args.get("token") or "").strip()
+    if not token or len(token) > 128:
+        return redirect("/?signin=email_bad")
+    html = (
+        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>OrbitCast — Sign in</title>"
+        "<style>body{font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,"
+        "sans-serif;background:#0a1023;color:#f4f6ff;display:grid;place-items:center;"
+        "min-height:100vh;margin:0;padding:24px}form{max-width:400px;text-align:center}"
+        "button{background:#5b8cff;color:#fff;border:0;padding:14px 28px;"
+        "border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;"
+        "box-shadow:0 4px 20px rgba(91,140,255,0.35)}"
+        "h1{font-weight:600;margin:0 0 10px;font-size:22px}"
+        "p{color:#9aa6c7;margin:0 0 24px;line-height:1.5}</style>"
+        "</head><body><form method='POST' action='/auth/email/verify'>"
+        "<h1>Sign in to OrbitCast</h1>"
+        "<p>Click to confirm it's you on this device.</p>"
+        f"<input type='hidden' name='token' value='{escape(token)}'>"
+        "<button type='submit'>Sign in</button>"
+        "</form>"
+        "<script>setTimeout(function(){try{document.forms[0].submit()}catch(e){}},80);</script>"
+        "</body></html>"
+    )
+    return html, 200
+
+
+@app.route("/auth/email/verify", methods=["POST"])
+@limiter.limit("1200 per hour;120 per minute")
+def auth_email_verify_post():
+    """Consumes the token, resolves the account, sets the session cookie."""
+    token = (request.form.get("token") or "").strip()
+    if not db.is_configured():
+        return redirect("/?signin=unavailable")
+
+    consumed = db.consume_email_signin_token(token)
+    if not consumed:
+        return redirect("/?signin=failed")
+
+    oc_uid = consumed.get("oc_uid_hint") or request.cookies.get("oc_uid") or uuid.uuid4().hex
+    account = db.get_or_create_account_by_email(consumed["email"], oc_uid)
+    if not account:
+        return redirect("/?signin=unavailable")
+    if account.get("refused"):
+        log.warning("Email sign-in refused (%s) from %s",
+                    account["refused"], auth.client_ip())
+        _audit("signin_refused", None,
+               detail={"method": "email", "reason": account["refused"]})
+        return redirect("/?signin=not_allowed")
+
+    resp = make_response(redirect("/?signin=ok"))
+    auth.set_session_cookie(resp, account)
+    _audit("signin", account,
+           detail={"method": "email", "new": bool(account.get("is_new"))})
+    return resp
+
+
 @app.route("/api/auth/logout", methods=["POST"])
 def api_auth_logout():
     resp = make_response(jsonify({"ok": True}))
@@ -735,7 +901,9 @@ def api_me():
         # google_enabled is reported signed-out as well as signed-in: it is
         # what decides whether the sign-in panel renders the Google button,
         # and that decision is needed precisely when nobody is signed in.
+        # email_signin_enabled is the equivalent for the email-link button.
         return jsonify({"signed_in": False, "google_enabled": auth.google_enabled(),
+                        "email_signin_enabled": auth.email_signin_enabled(),
                         "invite_only": db.signup_gated()})
     prefs = db.get_digest_prefs(account["id"]) or {}
     has_profile = bool(db.get_latest_analysis(account["oc_uid"]))
@@ -751,6 +919,7 @@ def api_me():
     return jsonify({
         "signed_in": True,
         "google_enabled": auth.google_enabled(),
+        "email_signin_enabled": auth.email_signin_enabled(),
         "email": account["email"],
         "name": account.get("name"),
         "avatar_url": account.get("avatar_url"),
