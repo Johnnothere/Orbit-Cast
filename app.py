@@ -176,6 +176,15 @@ def run_scrape_background():
         all_events, summary_data = [], []
         lock = threading.Lock()
 
+        # Paused sources are skipped entirely. Until now only the 52 Luma
+        # organisers could be paused; the hardcoded sources in scraper.py had
+        # no controls at all, so a source that had been broken for a fortnight
+        # was re-attempted every 30 minutes with nowhere to say "stop".
+        paused = db.paused_sources()
+        active_sources = [s for s in SOURCES if s["name"] not in paused]
+        if paused:
+            log.info(f"Skipping {len(SOURCES) - len(active_sources)} paused source(s)")
+
         def scrape_one(src):
             try:
                 events = src["fn"]()
@@ -206,15 +215,20 @@ def run_scrape_background():
                 # count reflects what actually made it into the catalog, so the
                 # dashboard doesn't claim events that were filtered out
                 summary  = {"source": src["name"], "emoji": src["emoji"],
-                            "category": src["category"], "count": len(enriched)}
+                            "category": src["category"], "count": len(enriched),
+                            "error": None}
                 return enriched, summary
             except Exception as e:
                 log.error(f"Scraper {src['name']} failed: {e}")
+                # The reason is kept, not just the zero. "0 events" and
+                # "0 events because the page 404s" are different problems and
+                # the coverage view could not tell them apart.
                 return [], {"source": src["name"], "emoji": src["emoji"],
-                            "category": src["category"], "count": 0}
+                            "category": src["category"], "count": 0,
+                            "error": str(e)[:300]}
 
         with ThreadPoolExecutor(max_workers=10) as ex:
-            futures = {ex.submit(scrape_one, s): s for s in SOURCES}
+            futures = {ex.submit(scrape_one, s): s for s in active_sources}
             for f in as_completed(futures):
                 evs, summ = f.result()
                 with lock:
@@ -297,7 +311,36 @@ def run_scrape_background():
         dupes = len(all_events) - len(deduped)
         all_events = deduped
 
+        # Events suppressed by hand stay suppressed across scrapes. event_id
+        # is a hash of title+url, so the same listing re-arriving from the
+        # same source keeps the same id and stays out.
+        try:
+            hidden = db.hidden_event_ids()
+            if hidden:
+                before = len(all_events)
+                all_events = [e for e in all_events if e.get("id") not in hidden]
+                log.info(f"Suppressed {before - len(all_events)} manually hidden event(s)")
+        except Exception as e:
+            log.warning(f"Hidden-event filter skipped: {e}")
+
         summary_data.sort(key=lambda x: x["source"])
+        # A paused source still belongs in the coverage view — as paused, not
+        # as a silent disappearance.
+        for s in SOURCES:
+            if s["name"] in paused:
+                summary_data.append({"source": s["name"], "emoji": s["emoji"],
+                                     "category": s["category"], "count": 0,
+                                     "error": None, "paused": True})
+        try:
+            db.record_source_health([
+                {"source": s["source"], "emoji": s.get("emoji"),
+                 "category": s.get("category"), "count": s.get("count") or 0,
+                 "error": s.get("error"), "kind": "builtin"}
+                for s in summary_data if not s.get("paused")
+            ])
+        except Exception as e:
+            log.warning(f"Source health not recorded: {e}")
+
         save_events_cache(all_events, summary_data)
         log.info(f"Scrape done: {len(all_events)} events ({dupes} cross-source duplicates removed)")
 
@@ -317,6 +360,13 @@ def run_scrape_background():
             candidates += [c for c in discover_luma_sources()
                            if c["identifier"] not in seen]
             recorded = db.record_source_candidates(candidates)
+            # Without this the queue only ever grows: 806 unreviewed leads had
+            # built up since August, 530 of them with a single event. A lead
+            # with one event that has not been seen for three weeks is noise,
+            # and one that is already a tracked source is not a decision.
+            tidied = db.auto_ignore_stale_candidates()
+            if tidied:
+                log.info(f"Lead queue: {tidied} stale or duplicate lead(s) retired")
             if candidates:
                 log.info(f"Source discovery: {len(candidates)} untracked host "
                          f"calendars ({recorded} recorded)")
@@ -1380,7 +1430,7 @@ def api_admin_ingest():
 
 
 @app.route("/api/admin/source-candidates", methods=["GET"])
-@limiter.limit("120 per hour")
+@limiter.limit("600 per hour")
 def api_admin_source_candidates():
     """Organisers the scraper found hosting events we ingest but that aren't
     sources yet - i.e. the coverage gaps, which nothing used to report.
@@ -1389,12 +1439,22 @@ def api_admin_source_candidates():
     if not _admin_authorized():
         return jsonify({"error": "Unauthorized"}), 401
     status = request.args.get("status", "new")
-    return jsonify({"candidates": db.list_source_candidates(
-        status=None if status == "all" else status)})
+    rows, total = db.search_source_candidates(
+        status=None if status == "all" else status,
+        limit=request.args.get("limit", type=int) or 25,
+        offset=request.args.get("offset", type=int) or 0,
+        q=(request.args.get("q") or "").strip() or None,
+        via=(request.args.get("via") or "").strip() or None,
+        min_events=request.args.get("min_events", type=int) or 0,
+        fresh=(request.args.get("fresh") or "").strip() or None,
+        sort=(request.args.get("sort") or "events").strip())
+    return jsonify({"candidates": rows, "total": total,
+                     "counts": db.source_candidate_counts(),
+                     "tidy": db.source_candidate_tidy_preview()})
 
 
 @app.route("/api/admin/source-candidates/<identifier>", methods=["POST"])
-@limiter.limit("120 per hour")
+@limiter.limit("600 per hour")
 def api_admin_set_source_candidate(identifier):
     """Accept ('added') or reject ('ignored') a harvested lead. 'ignored'
     persists across re-harvests, so a rejected calendar stays rejected."""
@@ -1863,6 +1923,222 @@ def api_admin_analytics():
     payload.update(db.get_analytics_overview(days=days))
     payload["days"] = days
     return jsonify(payload)
+
+
+# ─────────────────────────────────────────────
+# ADMIN — operability routes (0015)
+# ─────────────────────────────────────────────
+# Everything below existed as a capability with no way to reach it: a scrape
+# could not be triggered, mail could not be checked, the audit table could not
+# be read, accounts were invisible, a bad scraped event could not be touched,
+# and the 806-row lead queue was served 100 at a time with no total.
+
+@app.route("/api/admin/coverage", methods=["GET"])
+@limiter.limit("600 per hour")
+def api_admin_coverage():
+    """The coverage view, with health. The per-source count comes from the
+    last scrape; everything that makes a zero readable — when the source last
+    returned anything, the last error, the empty-run streak, whether it is
+    paused — comes from source_health."""
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    cache = load_events_cache()
+    summary = cache.get("summary", []) or []
+    health = {h["source"]: h for h in db.list_source_health()}
+    luma = {s["identifier"]: s for s in db.list_luma_sources()}
+    luma_names = {s.get("name") for s in luma.values()}
+    rows = []
+    for s in summary:
+        h = health.get(s.get("source"), {})
+        rows.append({
+            "source": s.get("source"), "emoji": s.get("emoji"),
+            "category": s.get("category"), "count": s.get("count") or 0,
+            "error": s.get("error") or h.get("last_error"),
+            "last_error": h.get("last_error"),
+            "last_success_at": h.get("last_success_at"),
+            "last_run": h.get("last_run"),
+            "consecutive_zero": h.get("consecutive_zero") or 0,
+            "paused": bool(s.get("paused") or h.get("paused")),
+            "kind": "luma" if s.get("source") in luma_names else "builtin",
+        })
+    # A source that is paused before it ever appears in a summary still needs
+    # to be listed, or pausing one would make it vanish from the view.
+    seen = {r["source"] for r in rows}
+    for name, h in health.items():
+        if name not in seen and h.get("paused"):
+            rows.append({"source": name, "emoji": h.get("emoji"), "category": h.get("category"),
+                         "count": 0, "error": None, "last_error": h.get("last_error"),
+                         "last_success_at": h.get("last_success_at"), "last_run": h.get("last_run"),
+                         "consecutive_zero": h.get("consecutive_zero") or 0,
+                         "paused": True, "kind": h.get("kind") or "builtin"})
+    return jsonify({"sources": rows, "last_run": cache.get("last_run"),
+                     "total_events": len(cache.get("events", []) or []),
+                     "scraping": _scraping})
+
+
+@app.route("/api/admin/sources/pause", methods=["POST"])
+@limiter.limit("120 per hour")
+def api_admin_pause_source():
+    """Pause or resume ANY source by name, built-in ones included. For a Luma
+    organiser it also flips its luma_sources row, so the two controls cannot
+    disagree about whether something is being scraped."""
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    name = (data.get("source") or "").strip()
+    paused = bool(data.get("paused"))
+    if not name:
+        return jsonify({"error": "Name the source to pause."}), 400
+    kind = "builtin"
+    for s in db.list_luma_sources():
+        if s.get("name") == name or s.get("identifier") == name:
+            kind = "luma"
+            db.set_luma_source_status(s["identifier"], "paused" if paused else "active")
+            break
+    if not db.set_source_paused(name, paused, kind=kind):
+        return jsonify({"error": "Could not record that."}), 500
+    _audit("admin_source_paused" if paused else "admin_source_resumed", None, resource=name)
+    return jsonify({"ok": True, "source": name, "paused": paused})
+
+
+@app.route("/api/admin/catalogue", methods=["GET"])
+@limiter.limit("600 per hour")
+def api_admin_catalogue():
+    """Search the live catalogue. Served from the in-memory catalogue, so it
+    costs nothing and reflects exactly what visitors are being shown."""
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    cache = load_events_cache()
+    events = cache.get("events", []) or []
+    q = (request.args.get("q") or "").strip().lower()
+    if q:
+        def hit(e):
+            return any(q in str(e.get(k) or "").lower()
+                       for k in ("title", "source", "location", "category", "format"))
+        matched = [e for e in events if hit(e)]
+    else:
+        matched = events
+    limit = max(1, min(request.args.get("limit", type=int) or 25, 100))
+    offset = max(0, request.args.get("offset", type=int) or 0)
+    page = matched[offset:offset + limit]
+    keep = ("id", "title", "date", "time", "location", "url", "category", "format",
+            "offtopic", "is_online", "source")
+    return jsonify({"events": [{k: e.get(k) for k in keep} for e in page],
+                     "total": len(matched), "catalogue_size": len(events),
+                     "last_run": cache.get("last_run")})
+
+
+def _drop_from_catalog(event_id: str) -> bool:
+    """Remove one event from the live catalogue in place.
+
+    Hiding has to bite NOW, not at the next scrape — the whole point is that a
+    bad listing is being served right now. last_run is passed through, because
+    editing the catalogue is not a scrape and stamping it as one would tell
+    the dashboard the sources were checked when they were not."""
+    cache = load_events_cache()
+    events = cache.get("events", []) or []
+    kept = [e for e in events if e.get("id") != event_id]
+    if len(kept) == len(events):
+        return False
+    save_events_cache(kept, cache.get("summary", []), last_run=cache.get("last_run"))
+    return True
+
+
+@app.route("/api/admin/events/hide", methods=["POST"])
+@limiter.limit("120 per hour")
+def api_admin_hide_event():
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    eid = (data.get("id") or "").strip()
+    if not eid:
+        return jsonify({"error": "Which event?"}), 400
+    db.hide_event(eid, title=data.get("title"), reason=data.get("reason"), hidden_by="admin")
+    dropped = _drop_from_catalog(eid)
+    _audit("admin_event_hidden", None, resource=eid, detail={"title": data.get("title")})
+    return jsonify({"ok": True, "removed_now": dropped})
+
+
+@app.route("/api/admin/events/unhide", methods=["POST"])
+@limiter.limit("120 per hour")
+def api_admin_unhide_event():
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    eid = ((request.get_json(silent=True) or {}).get("id") or "").strip()
+    if not eid:
+        return jsonify({"error": "Which event?"}), 400
+    ok = db.unhide_event(eid)
+    _audit("admin_event_restored", None, resource=eid)
+    # It comes back on the next scrape rather than being re-inserted by hand:
+    # the catalogue is only ever written by a scrape.
+    return jsonify({"ok": ok})
+
+
+@app.route("/api/admin/events/hidden", methods=["GET"])
+@limiter.limit("600 per hour")
+def api_admin_hidden_events():
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    return jsonify({"hidden": db.list_hidden_events()})
+
+
+@app.route("/api/admin/source-candidates/bulk", methods=["POST"])
+@limiter.limit("600 per hour")
+def api_admin_bulk_candidates():
+    """One request per decision batch. Reviewing the queue one lead at a time
+    cost two requests each against a 120/hour limit, so roughly sixty
+    decisions exhausted the budget and the panel printed a raw 429."""
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    status = data.get("status", "")
+    ids = data.get("identifiers") or []
+    if status not in ("new", "added", "ignored"):
+        return jsonify({"error": "status must be new, added or ignored"}), 400
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"error": "Nothing selected."}), 400
+    n = db.bulk_set_source_candidate_status(ids, status)
+    _audit("admin_leads_bulk", None, resource=status, detail={"count": n})
+    return jsonify({"ok": True, "updated": n})
+
+
+@app.route("/api/admin/source-candidates/tidy", methods=["POST"])
+@limiter.limit("30 per hour")
+def api_admin_tidy_candidates():
+    """The two rules that need no human judgment, applied in one go. Nothing
+    is deleted — the rows move out of 'new' and can be found again."""
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    n = db.tidy_source_candidates()
+    _audit("admin_leads_tidy", None, detail={"count": n})
+    return jsonify({"ok": True, "updated": n})
+
+
+@app.route("/api/admin/accounts", methods=["GET"])
+@limiter.limit("600 per hour")
+def api_admin_accounts():
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    return jsonify({
+        "accounts": db.list_accounts(),
+        "invite": {
+            "invite_only": db.signup_gated(),
+            "allowed_domains": sorted(db.ALLOWED_EMAIL_DOMAINS),
+            "allowed_emails": len(db.ALLOWED_EMAILS),
+        },
+    })
+
+
+@app.route("/api/admin/audit", methods=["GET"])
+@limiter.limit("600 per hour")
+def api_admin_audit():
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    entries, total, actions = db.list_audit(
+        limit=request.args.get("limit", type=int) or 50,
+        offset=request.args.get("offset", type=int) or 0,
+        action=(request.args.get("action") or "").strip() or None)
+    return jsonify({"entries": entries, "total": total, "actions": actions})
 
 
 @app.route("/api/admin/users", methods=["GET"])

@@ -1,212 +1,489 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="auto">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
 <title>ORBITCAST — Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
-<!-- Leaflet: renders a small map under each stored location fix in the
-     Users tab (same library the user-facing recommendation cards use;
-     CSP already allows unpkg.com globally via security.py). -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<!-- Leaflet is NOT loaded here. It is ~150KB for one map in one view, behind
+     a gate most page views never pass. ensureLeaflet() injects the CSS and JS
+     (same SRI hashes) the first time a map is actually about to render. -->
 <style>
+/* ============================================================================
+   ORBITCAST ADMIN — DESIGN SYSTEM
+   One token set, two themes, one spacing scale, one type scale. Every
+   component below is built from the tokens; nothing hardcodes a colour.
+   Theme: follows the OS by default, overridden by data-theme on <html>,
+   which persists to localStorage (oc_admin_theme) — same contract as the
+   public site so the two never disagree about what "dark" means.
+   ========================================================================= */
 :root{
-  --bg:#f3f2ef;--surface:#ffffff;--sf2:#f8f7f5;--border:#e5e4e0;--border2:#cfcec9;
-  --text:#12142a;--t2:#65667a;--t3:#a3a3a3;--blue:#2563eb;--navy:#11133a;--navy2:#1b1f52;--sky:#38bdf8;
-  --ok:#059669;--warn:#d97706;--dead:#dc2626;
+  /* --- neutral ramp (light) --- */
+  --bg:#f4f4f2; --surface:#ffffff; --sf2:#f7f7f5; --sf3:#eeeeea;
+  --border:#e4e4df; --border2:#cdcdc6;
+  --text:#12142a; --t2:#5f6175; --t3:#9a9aa8;
+  /* --- brand --- */
+  --navy:#11133a; --navy2:#1b1f52; --blue:#2563eb; --sky:#38bdf8;
+  --accent-soft:rgba(37,99,235,.10);
+  /* --- status --- */
+  --ok:#047857; --ok-soft:rgba(4,120,87,.12);
+  --warn:#b45309; --warn-soft:rgba(180,83,9,.12);
+  --dead:#dc2626; --dead-soft:rgba(220,38,38,.12);
+  --info-soft:rgba(37,99,235,.08);
+  /* --- elevation --- */
+  --sh1:0 1px 2px rgba(17,19,58,.05);
+  --sh2:0 4px 16px rgba(17,19,58,.08);
+  --sh3:0 16px 48px rgba(17,19,58,.16);
+  /* --- geometry: one scale, used everywhere --- */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:22px; --s6:30px; --s7:44px;
+  --r1:6px; --r2:10px; --r3:14px; --r4:20px; --rp:999px;
+  --tap:44px;                      /* minimum touch target */
+  --nav-h:56px;
+  --ff:'IBM Plex Sans',system-ui,sans-serif;
+  --fm:'IBM Plex Mono',ui-monospace,monospace;
+  --fd:'Space Grotesk',var(--ff);
+  --ease:cubic-bezier(.4,0,.2,1);
 }
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0a0c16; --surface:#111428; --sf2:#171a30; --sf3:#1e2240;
+    --border:#272b47; --border2:#3a3f63;
+    --text:#e9eaf4; --t2:#a7abc6; --t3:#767a96;
+    --navy:#c7d2fe; --navy2:#a5b4fc; --blue:#6b9bff; --sky:#7dd3fc;
+    --accent-soft:rgba(107,155,255,.14);
+    --ok:#34d399; --ok-soft:rgba(52,211,153,.14);
+    --warn:#fbbf24; --warn-soft:rgba(251,191,36,.14);
+    --dead:#f87171; --dead-soft:rgba(248,113,113,.14);
+    --info-soft:rgba(107,155,255,.10);
+    --sh1:0 1px 2px rgba(0,0,0,.4); --sh2:0 4px 16px rgba(0,0,0,.45);
+    --sh3:0 16px 48px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0a0c16; --surface:#111428; --sf2:#171a30; --sf3:#1e2240;
+  --border:#272b47; --border2:#3a3f63;
+  --text:#e9eaf4; --t2:#a7abc6; --t3:#767a96;
+  --navy:#c7d2fe; --navy2:#a5b4fc; --blue:#6b9bff; --sky:#7dd3fc;
+  --accent-soft:rgba(107,155,255,.14);
+  --ok:#34d399; --ok-soft:rgba(52,211,153,.14);
+  --warn:#fbbf24; --warn-soft:rgba(251,191,36,.14);
+  --dead:#f87171; --dead-soft:rgba(248,113,113,.14);
+  --info-soft:rgba(107,155,255,.10);
+  --sh1:0 1px 2px rgba(0,0,0,.4); --sh2:0 4px 16px rgba(0,0,0,.45);
+  --sh3:0 16px 48px rgba(0,0,0,.6);
+}
+
 *{margin:0;padding:0;box-sizing:border-box;}
-html,body{overflow-x:hidden;}
-body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',sans-serif;min-height:100vh;font-size:14px;line-height:1.5;}
-header{background:var(--surface);border-bottom:1px solid var(--border);border-top:3px solid;border-image:linear-gradient(90deg,var(--navy),var(--blue) 55%,var(--sky)) 1;padding:0 24px;height:54px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:100;}
-.logo{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:1rem;color:var(--navy);letter-spacing:-.01em;display:flex;align-items:center;gap:8px;}
-.logo-mark{width:7px;height:7px;border-radius:50%;background:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.15);}
-.hd-tag{font-family:'IBM Plex Mono',monospace;font-size:.62rem;color:var(--t3);background:var(--sf2);border:1px solid var(--border);padding:2px 8px;border-radius:10px;}
-.hd-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
+html{-webkit-text-size-adjust:100%;}
+body{background:var(--bg);color:var(--text);font-family:var(--ff);font-size:14px;
+  line-height:1.5;min-height:100vh;-webkit-font-smoothing:antialiased;}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important;}}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:var(--r1);}
+a{color:var(--blue);}
+.mono{font-family:var(--fm);}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;}
 
-main{max-width:920px;margin:0 auto;padding:28px 24px 80px;}
+/* ---------------------------------------------------------------- GATE -- */
+#gate{max-width:420px;margin:12vh auto;padding:var(--s6);background:var(--surface);
+  border:1px solid var(--border);border-radius:var(--r3);box-shadow:var(--sh2);}
+#gate h1{font-family:var(--fd);font-weight:700;font-size:1.2rem;color:var(--navy);margin-bottom:var(--s2);}
+#gate p{color:var(--t2);font-size:.82rem;margin-bottom:var(--s4);}
+#gate input{width:100%;height:var(--tap);border:1px solid var(--border2);border-radius:var(--r2);
+  padding:0 var(--s3);font-family:var(--fm);font-size:.9rem;background:var(--sf2);color:var(--text);
+  outline:none;margin-bottom:var(--s3);}
+#gate input:focus{border-color:var(--blue);box-shadow:0 0 0 3px var(--accent-soft);}
+#gate .err{color:var(--dead);font-size:.78rem;margin-top:var(--s3);min-height:18px;}
+#gate .gate-note{font-size:.72rem;color:var(--t3);margin-top:var(--s4);line-height:1.6;}
 
-/* GATE */
-#gate{max-width:380px;margin:120px auto;padding:28px;background:var(--surface);border:1px solid var(--border);border-radius:10px;text-align:center;}
-#gate h1{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:1.15rem;color:var(--navy);margin-bottom:6px;}
-#gate p{color:var(--t2);font-size:.8rem;margin-bottom:18px;}
-#gate input{width:100%;height:38px;border:1px solid var(--border2);border-radius:8px;padding:0 12px;font-family:'IBM Plex Mono',monospace;font-size:.85rem;background:var(--sf2);color:var(--text);outline:none;margin-bottom:10px;}
-#gate input:focus{border-color:var(--blue);}
-#gate button{width:100%;height:38px;border:none;border-radius:999px;background:linear-gradient(120deg,var(--navy),var(--blue) 65%,var(--sky));color:#fff;font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:.85rem;cursor:pointer;}
-#gate .err{color:var(--dead);font-size:.75rem;margin-top:10px;min-height:16px;}
+/* ------------------------------------------------------------- CHROME --- */
+header{background:var(--surface);border-bottom:1px solid var(--border);
+  border-top:3px solid;border-image:linear-gradient(90deg,var(--navy2),var(--blue) 55%,var(--sky)) 1;
+  height:var(--nav-h);display:flex;align-items:center;gap:var(--s3);
+  padding:0 var(--s4);position:sticky;top:0;z-index:60;}
+.logo{font-family:var(--fd);font-weight:700;font-size:.98rem;color:var(--navy);
+  display:flex;align-items:center;gap:var(--s2);white-space:nowrap;}
+.logo-mark{width:7px;height:7px;border-radius:50%;background:var(--blue);
+  box-shadow:0 0 0 3px var(--accent-soft);flex-shrink:0;}
+.hd-tag{font-family:var(--fm);font-size:.62rem;color:var(--t3);background:var(--sf2);
+  border:1px solid var(--border);padding:2px var(--s2);border-radius:var(--rp);white-space:nowrap;}
+.hd-right{margin-left:auto;display:flex;align-items:center;gap:var(--s2);}
+.icon-btn{width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;
+  border:1px solid var(--border);background:var(--surface);color:var(--t2);border-radius:var(--r2);
+  cursor:pointer;font-size:.9rem;transition:all .15s var(--ease);}
+.icon-btn:hover{background:var(--sf2);color:var(--text);}
 
-/* TABS */
-.tabs{display:flex;gap:6px;margin-bottom:22px;border-bottom:1px solid var(--border);}
-.tab{font-family:'IBM Plex Mono',monospace;font-size:.72rem;padding:10px 16px;background:none;border:none;border-bottom:2px solid transparent;color:var(--t2);cursor:pointer;transition:all .15s;}
-.tab.active{color:var(--blue);border-bottom-color:var(--blue);}
-.tab:hover:not(.active){color:var(--text);}
-.panel{display:none;}
-.panel.active{display:block;}
+/* top-level sections: scrollable on narrow screens, never clipped.
+   The old build was display:flex with no wrap inside overflow-x:hidden,
+   so on a phone the last four tabs could not be reached at all. */
+nav.sections{background:var(--surface);border-bottom:1px solid var(--border);
+  position:sticky;top:var(--nav-h);z-index:55;}
+.sections-inner{max-width:1240px;margin:0 auto;display:flex;gap:var(--s1);
+  padding:0 var(--s4);overflow-x:auto;scrollbar-width:thin;-webkit-overflow-scrolling:touch;}
+.sections-inner::-webkit-scrollbar{height:3px;}
+.sections-inner::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px;}
+.sec{font-family:var(--fd);font-weight:600;font-size:.8rem;letter-spacing:.01em;
+  padding:0 var(--s4);height:var(--tap);min-height:var(--tap);display:inline-flex;align-items:center;gap:6px;
+  background:none;border:none;border-bottom:2px solid transparent;color:var(--t2);
+  cursor:pointer;white-space:nowrap;flex:0 0 auto;transition:color .15s var(--ease);}
+.sec[aria-selected="true"]{color:var(--blue);border-bottom-color:var(--blue);}
+.sec:hover:not([aria-selected="true"]){color:var(--text);}
+.sec .dot{width:6px;height:6px;border-radius:50%;background:var(--warn);flex-shrink:0;display:none;}
+.sec.has-alert .dot{display:inline-block;}
 
-.card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:16px;}
-.card h2{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:.95rem;color:var(--navy);margin-bottom:4px;}
-.card .hint{color:var(--t2);font-size:.76rem;margin-bottom:16px;}
+main{max-width:1240px;margin:0 auto;padding:var(--s5) var(--s4) 96px;}
+.section{display:none;}
+.section.active{display:block;animation:fade .18s var(--ease);}
+@keyframes fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
 
-/* DROPZONE */
-.drop{border:2px dashed var(--border2);border-radius:12px;padding:28px;text-align:center;cursor:pointer;transition:all .15s;font-size:.8rem;color:var(--t2);}
-.drop.drag{border-color:var(--blue);background:rgba(37,99,235,.04);color:var(--blue);}
-.drop input{display:none;}
+/* second level inside a section */
+.subnav{display:flex;gap:var(--s2);flex-wrap:wrap;margin-bottom:var(--s5);}
+.subtab{font-family:var(--fm);font-size:.72rem;padding:0 var(--s3);height:34px;
+  display:inline-flex;align-items:center;gap:6px;border-radius:var(--rp);
+  border:1px solid var(--border);background:var(--surface);color:var(--t2);cursor:pointer;
+  transition:all .15s var(--ease);}
+.subtab[aria-selected="true"]{background:var(--navy);border-color:var(--navy);color:var(--surface);}
+.subtab .count{font-size:.64rem;opacity:.75;}
+.subpanel{display:none;} .subpanel.active{display:block;}
 
-/* FORM */
-label{display:block;font-family:'IBM Plex Mono',monospace;font-size:.66rem;text-transform:uppercase;letter-spacing:.06em;color:var(--t3);margin:14px 0 5px;}
+/* ----------------------------------------------------------- SURFACES --- */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);
+  padding:var(--s5);margin-bottom:var(--s4);box-shadow:var(--sh1);}
+.card-head{display:flex;align-items:flex-start;gap:var(--s3);flex-wrap:wrap;margin-bottom:var(--s2);}
+.card h2{font-family:var(--fd);font-weight:600;font-size:1rem;color:var(--navy);line-height:1.3;}
+.card h3{font-family:var(--fd);font-weight:600;font-size:.84rem;color:var(--navy);}
+.card .hint{color:var(--t2);font-size:.78rem;margin-bottom:var(--s4);max-width:78ch;line-height:1.6;}
+.card-actions{margin-left:auto;display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;}
+.stamp{font-family:var(--fm);font-size:.64rem;color:var(--t3);white-space:nowrap;}
+.grid-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:var(--s4);}
+
+/* ------------------------------------------------------------ CONTROLS -- */
+.btn{font-family:var(--fd);font-weight:600;font-size:.8rem;min-height:38px;padding:0 var(--s5);
+  border:1px solid transparent;border-radius:var(--rp);cursor:pointer;
+  background:linear-gradient(120deg,var(--navy2),var(--blue) 65%,var(--sky));color:#fff;
+  display:inline-flex;align-items:center;justify-content:center;gap:var(--s2);
+  transition:filter .15s var(--ease),opacity .15s var(--ease);white-space:nowrap;}
+.btn:hover:not(:disabled){filter:brightness(1.08);}
+.btn.secondary{background:var(--surface);color:var(--t2);border-color:var(--border2);}
+.btn.secondary:hover:not(:disabled){background:var(--sf2);color:var(--text);}
+.btn.danger{background:var(--surface);color:var(--dead);border-color:var(--dead);}
+.btn.danger:hover:not(:disabled){background:var(--dead-soft);}
+.btn.ghost{background:none;color:var(--blue);border-color:transparent;padding:0 var(--s2);}
+.btn.sm{min-height:30px;font-size:.7rem;padding:0 var(--s3);}
+.btn.xs{min-height:26px;font-size:.66rem;padding:0 10px;font-family:var(--fm);font-weight:500;}
+.btn:disabled{opacity:.55;cursor:not-allowed;}
+/* busy state: every write button goes through withBusy(), which sets
+   data-busy and locks the control until the request settles. */
+.btn[data-busy]{color:transparent!important;position:relative;pointer-events:none;}
+.btn[data-busy]::after{content:"";position:absolute;width:15px;height:15px;border-radius:50%;
+  border:2px solid currentColor;border-top-color:transparent;
+  color:var(--surface);animation:spin .6s linear infinite;}
+.btn.secondary[data-busy]::after,.btn.danger[data-busy]::after,.btn.ghost[data-busy]::after{color:var(--t2);}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+label{display:block;font-family:var(--fm);font-size:.64rem;text-transform:uppercase;
+  letter-spacing:.07em;color:var(--t3);margin:var(--s4) 0 6px;}
 label:first-child{margin-top:0;}
-textarea,input[type=text],select{width:100%;border:1px solid var(--border2);border-radius:8px;padding:9px 11px;font-family:'IBM Plex Sans',sans-serif;font-size:.83rem;background:var(--sf2);color:var(--text);outline:none;resize:vertical;}
-textarea:focus,input:focus,select:focus{border-color:var(--blue);}
-.rules-box{font-family:'IBM Plex Mono',monospace;font-size:.76rem;min-height:360px;line-height:1.6;}
+textarea,input[type=text],input[type=search],input[type=password],input[type=number],select{
+  width:100%;min-height:38px;border:1px solid var(--border2);border-radius:var(--r2);
+  padding:9px var(--s3);font-family:var(--ff);font-size:.84rem;background:var(--sf2);
+  color:var(--text);outline:none;resize:vertical;}
+textarea:focus,input:focus,select:focus{border-color:var(--blue);box-shadow:0 0 0 3px var(--accent-soft);}
+input::placeholder,textarea::placeholder{color:var(--t3);}
+select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--t3) 50%),linear-gradient(135deg,var(--t3) 50%,transparent 50%);
+  background-position:calc(100% - 16px) 17px,calc(100% - 11px) 17px;background-size:5px 5px;background-repeat:no-repeat;padding-right:32px;}
+.rules-box{font-family:var(--fm);font-size:.78rem;min-height:340px;line-height:1.65;}
+.row-btns{display:flex;gap:var(--s3);margin-top:var(--s4);flex-wrap:wrap;}
+.fld-row{display:grid;grid-template-columns:1fr 1fr;gap:var(--s3);}
+.lookup-row{display:flex;gap:var(--s2);margin-bottom:var(--s4);flex-wrap:wrap;}
+.lookup-row input,.lookup-row select{flex:1;min-width:180px;font-family:var(--fm);}
 
-.btn{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:.8rem;padding:9px 20px;border:none;border-radius:999px;cursor:pointer;background:linear-gradient(120deg,var(--navy),var(--blue) 65%,var(--sky));color:#fff;}
-.btn.secondary{background:var(--sf2);color:var(--t2);border:1px solid var(--border2);}
-.btn.danger{background:#fff;color:var(--dead);border:1px solid rgba(220,38,38,.3);}
-.btn:disabled{opacity:.5;cursor:not-allowed;}
-.row-btns{display:flex;gap:10px;margin-top:16px;}
-.msg{font-family:'IBM Plex Mono',monospace;font-size:.72rem;margin-top:12px;min-height:16px;}
-.msg.ok{color:var(--ok);}
-.msg.err{color:var(--dead);}
+/* toolbar: the filter/sort/search strip above a list */
+.toolbar{display:flex;gap:var(--s2);flex-wrap:wrap;align-items:center;
+  padding:var(--s3);background:var(--sf2);border:1px solid var(--border);
+  border-radius:var(--r2);margin-bottom:var(--s3);}
+.toolbar input,.toolbar select{min-height:34px;flex:0 1 auto;width:auto;min-width:150px;background:var(--surface);}
+.toolbar .spacer{margin-left:auto;}
+.toolbar-count{font-family:var(--fm);font-size:.7rem;color:var(--t2);white-space:nowrap;}
 
-/* ADD BY LINK */
-.checks{margin-top:16px;border-top:1px solid var(--border);}
-.check-row{display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border);}
-.check-mark{font-family:'IBM Plex Mono',monospace;font-size:.6rem;font-weight:600;letter-spacing:.06em;
-  padding:3px 7px;border-radius:4px;flex-shrink:0;min-width:44px;text-align:center;}
-.check-mark.pass{color:var(--ok);background:rgba(5,150,105,.1);}
-.check-mark.fail{color:var(--dead);background:rgba(220,38,38,.1);}
-.check-row b{font-size:.78rem;}
-.check-row p{margin-top:2px;font-size:.72rem;color:var(--t2);line-height:1.5;}
-.note-line{margin-top:14px;font-size:.72rem;color:var(--t2);background:var(--sf2);
-  border-radius:6px;padding:8px 10px;line-height:1.5;}
-.note-line.warn{color:var(--warn);background:rgba(217,119,6,.08);}
-.verdict-fields{margin-top:18px;padding-top:16px;border-top:1px solid var(--border);}
-.verdict-fields label{margin-top:12px;}
-.fld-row{display:flex;gap:12px;}
-.fld-row>div{flex:1;min-width:0;}
-.hint-inline{font-weight:400;color:var(--t2);text-transform:none;letter-spacing:0;}
+.switch{display:inline-flex;align-items:center;gap:var(--s2);font-size:.76rem;color:var(--t2);cursor:pointer;min-height:var(--tap);}
+.switch input{width:auto;min-height:0;accent-color:var(--blue);width:16px;height:16px;cursor:pointer;}
 
-/* USERS */
-.lookup-row{display:flex;gap:8px;margin-bottom:16px;}
-.lookup-row input{flex:1;font-family:'IBM Plex Mono',monospace;}
-.u-table{width:100%;border-collapse:collapse;font-size:.8rem;}
-.u-table th{text-align:left;font-family:'IBM Plex Mono',monospace;font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;color:var(--t3);padding:8px 10px;border-bottom:1px solid var(--border);}
-.u-table td{padding:10px;border-bottom:1px solid var(--border);vertical-align:middle;}
+/* ------------------------------------------------------------- STATES --- */
+/* Loading, empty and error are three different things and must never look
+   the same — the old build rendered all three as the same grey line. */
+.state{display:flex;flex-direction:column;align-items:center;gap:var(--s2);
+  text-align:center;padding:var(--s6) var(--s4);border-radius:var(--r2);font-size:.82rem;}
+.state .state-ico{font-size:1.4rem;line-height:1;}
+.state .state-sub{font-size:.74rem;color:var(--t3);max-width:46ch;line-height:1.6;}
+.state.loading{color:var(--t3);}
+.state.empty{color:var(--t2);background:var(--sf2);border:1px dashed var(--border2);}
+.state.error{color:var(--dead);background:var(--dead-soft);border:1px solid var(--dead);}
+.empty{color:var(--t3);font-size:.8rem;text-align:center;padding:var(--s6) 0;}
+.skel{height:14px;border-radius:var(--r1);margin:var(--s2) 0;
+  background:linear-gradient(90deg,var(--sf2) 25%,var(--sf3) 37%,var(--sf2) 63%);
+  background-size:400% 100%;animation:shim 1.3s ease infinite;}
+@keyframes shim{0%{background-position:100% 50%}100%{background-position:0 50%}}
+
+.msg{font-family:var(--fm);font-size:.73rem;margin-top:var(--s3);min-height:17px;line-height:1.5;}
+.msg.ok{color:var(--ok);} .msg.err{color:var(--dead);}
+.banner{display:flex;gap:var(--s3);align-items:flex-start;padding:var(--s3) var(--s4);
+  border-radius:var(--r2);font-size:.78rem;line-height:1.55;margin-bottom:var(--s4);}
+.banner.warn{background:var(--warn-soft);color:var(--warn);border:1px solid var(--warn);}
+.banner.info{background:var(--info-soft);color:var(--t2);border:1px solid var(--border);}
+.banner.ok{background:var(--ok-soft);color:var(--ok);border:1px solid var(--ok);}
+
+/* toast — replaces alert() */
+#toasts{position:fixed;right:var(--s4);bottom:var(--s4);z-index:200;display:flex;
+  flex-direction:column;gap:var(--s2);max-width:min(380px,calc(100vw - 32px));}
+.toast{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--blue);
+  border-radius:var(--r2);box-shadow:var(--sh3);padding:var(--s3) var(--s4);font-size:.8rem;
+  animation:slidein .2s var(--ease);}
+.toast.ok{border-left-color:var(--ok);} .toast.err{border-left-color:var(--dead);}
+@keyframes slidein{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* confirm — replaces confirm() */
+dialog.sheet{border:none;border-radius:var(--r3);padding:0;max-width:min(440px,92vw);
+  background:var(--surface);color:var(--text);box-shadow:var(--sh3);}
+dialog.sheet::backdrop{background:rgba(6,8,20,.55);backdrop-filter:blur(2px);}
+.sheet-body{padding:var(--s5);}
+.sheet-body h3{margin-bottom:var(--s2);}
+.sheet-body p{font-size:.82rem;color:var(--t2);line-height:1.6;}
+.sheet-foot{display:flex;gap:var(--s2);justify-content:flex-end;padding:var(--s4) var(--s5);
+  border-top:1px solid var(--border);background:var(--sf2);border-radius:0 0 var(--r3) var(--r3);}
+
+/* -------------------------------------------------------------- TABLES -- */
+.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 calc(var(--s5) * -1);padding:0 var(--s5);}
+.u-table{width:100%;border-collapse:collapse;font-size:.8rem;min-width:520px;}
+.u-table th{text-align:left;font-family:var(--fm);font-size:.62rem;text-transform:uppercase;
+  letter-spacing:.06em;color:var(--t3);padding:var(--s2) var(--s3);border-bottom:1px solid var(--border);
+  position:sticky;top:0;background:var(--surface);white-space:nowrap;}
+.u-table td{padding:var(--s3);border-bottom:1px solid var(--border);vertical-align:middle;}
 .u-table tr.clickable{cursor:pointer;}
 .u-table tr.clickable:hover td{background:var(--sf2);}
-.u-id{font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:var(--text);}
-.u-back{font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:var(--blue);background:none;border:none;cursor:pointer;margin-bottom:14px;padding:0;}
+.u-id{font-family:var(--fm);font-size:.72rem;color:var(--t2);word-break:break-all;}
+.num{font-variant-numeric:tabular-nums;text-align:right;}
+.u-back{font-family:var(--fm);font-size:.72rem;color:var(--blue);background:none;border:none;
+  cursor:pointer;margin-bottom:var(--s4);padding:var(--s2) 0;min-height:var(--tap);}
 
-/* summary strip at the top of a user's detail view - the "at a glance"
-   read that was missing entirely before: 23 analyses as a raw scroll of
-   paragraphs told you nothing until you'd read all of them. */
-.u-stats{display:flex;gap:22px;flex-wrap:wrap;margin:14px 0 4px;padding:14px 16px;background:var(--sf2);border-radius:12px;}
-.u-stat b{display:block;font-family:'IBM Plex Mono',monospace;font-size:1.15rem;color:var(--navy);}
-.u-stat span{font-size:.68rem;color:var(--t2);text-transform:uppercase;letter-spacing:.05em;}
+/* a table that becomes a stack of labelled rows on a phone */
+@media (max-width:640px){
+  .table-wrap{margin:0;padding:0;overflow:visible;}
+  table.stacked{min-width:0;display:block;}
+  table.stacked thead{display:none;}
+  table.stacked tbody,table.stacked tr,table.stacked td{display:block;width:100%;}
+  table.stacked tr{border:1px solid var(--border);border-radius:var(--r2);
+    margin-bottom:var(--s2);padding:var(--s2) var(--s3);background:var(--surface);}
+  table.stacked td{border:none;padding:5px 0;display:flex;justify-content:space-between;gap:var(--s3);}
+  table.stacked td::before{content:attr(data-label);font-family:var(--fm);font-size:.62rem;
+    text-transform:uppercase;letter-spacing:.06em;color:var(--t3);flex-shrink:0;}
+  table.stacked td.num{text-align:left;}
+}
 
-/* each analysis is a <details> element, collapsed by default - the fix
-   for "how can I understand anything from this": scan 23 one-line
-   summaries in one screen, open only the ones worth reading in full. */
-.tl-item{border:1px solid var(--border);border-radius:12px;margin-bottom:8px;overflow:hidden;}
+/* -------------------------------------------------------------- PAGER --- */
+.pager{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;margin-top:var(--s4);
+  padding-top:var(--s3);border-top:1px solid var(--border);}
+.pager .pos{font-family:var(--fm);font-size:.7rem;color:var(--t2);}
+.pager .spacer{margin-left:auto;}
+
+/* ------------------------------------------------------- LIST PRIMITIVE - */
+.ex-item,.ex-row{border:1px solid var(--border);border-radius:var(--r2);
+  padding:var(--s3) var(--s4);margin-bottom:var(--s2);background:var(--surface);}
+.ex-item:hover{border-color:var(--border2);}
+.ex-head,.ex-top{display:flex;align-items:center;gap:var(--s2);margin-bottom:6px;flex-wrap:wrap;}
+.ex-src{font-family:var(--fm);font-size:.62rem;color:var(--t3);margin-left:auto;}
+.ex-meta{font-family:var(--fm);font-size:.66rem;color:var(--t3);line-height:1.6;}
+.ex-body p{font-size:.8rem;margin-bottom:4px;}
+.ex-body b{color:var(--t2);font-weight:600;}
+.ex-del{font-family:var(--fm);font-size:.66rem;color:var(--dead);background:none;border:none;
+  cursor:pointer;padding:var(--s2);min-height:34px;}
+.badge{font-family:var(--fm);font-size:.62rem;padding:2px 9px;border-radius:var(--rp);
+  text-transform:uppercase;letter-spacing:.04em;background:var(--sf3);color:var(--t2);white-space:nowrap;}
+.badge.good{background:var(--ok-soft);color:var(--ok);}
+.badge.bad{background:var(--dead-soft);color:var(--dead);}
+.badge.borderline,.badge.warn{background:var(--warn-soft);color:var(--warn);}
+.badge.info{background:var(--accent-soft);color:var(--blue);}
+
+/* leads triage: a selectable row, built for volume */
+.lead{display:grid;grid-template-columns:auto 1fr auto;gap:var(--s3);align-items:center;
+  padding:var(--s3);border:1px solid var(--border);border-radius:var(--r2);
+  margin-bottom:6px;background:var(--surface);transition:border-color .12s var(--ease),opacity .2s var(--ease);}
+.lead:hover{border-color:var(--border2);}
+.lead.sel{border-color:var(--blue);background:var(--accent-soft);}
+.lead.going{opacity:.3;}
+.lead input[type=checkbox]{width:18px;height:18px;accent-color:var(--blue);cursor:pointer;min-height:0;}
+.lead-main{min-width:0;}
+.lead-name{font-weight:600;font-size:.84rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lead-meta{font-family:var(--fm);font-size:.66rem;color:var(--t3);margin-top:2px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lead-acts{display:flex;gap:6px;flex-shrink:0;}
+@media (max-width:640px){
+  .lead{grid-template-columns:auto 1fr;}
+  .lead-acts{grid-column:2;justify-content:flex-end;}
+}
+.bulkbar{position:sticky;bottom:var(--s3);z-index:40;display:flex;align-items:center;gap:var(--s3);
+  flex-wrap:wrap;background:var(--navy);color:#fff;border-radius:var(--rp);
+  padding:var(--s2) var(--s4);box-shadow:var(--sh3);margin-top:var(--s3);}
+:root[data-theme="dark"] .bulkbar{background:var(--sf3);color:var(--text);border:1px solid var(--border2);}
+.bulkbar .btn.secondary{background:transparent;color:inherit;border-color:currentColor;opacity:.9;}
+
+/* coverage: source health */
+.src-row{display:grid;grid-template-columns:1fr auto auto;gap:var(--s3);align-items:center;
+  padding:10px var(--s3);border-bottom:1px solid var(--border);}
+.src-row:last-child{border-bottom:none;}
+.src-name{font-size:.82rem;display:flex;align-items:center;gap:var(--s2);min-width:0;}
+.src-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.src-health{font-family:var(--fm);font-size:.66rem;color:var(--t3);white-space:nowrap;}
+.src-count{font-family:var(--fm);font-size:.78rem;font-variant-numeric:tabular-nums;
+  min-width:34px;text-align:right;}
+.src-count.zero{color:var(--dead);font-weight:600;}
+.src-count.thin{color:var(--warn);}
+.cat-block{border:1px solid var(--border);border-radius:var(--r2);margin-bottom:var(--s3);overflow:hidden;}
+.cat-head{display:flex;align-items:center;gap:var(--s2);padding:10px var(--s3);
+  background:var(--sf2);border-bottom:1px solid var(--border);font-family:var(--fd);
+  font-weight:600;font-size:.8rem;color:var(--navy);}
+@media (max-width:640px){.src-row{grid-template-columns:1fr auto;}.src-health{grid-column:1/-1;}}
+
+/* add-by-link verdict */
+.checks{margin-top:var(--s4);border-top:1px solid var(--border);}
+.check-row{display:flex;gap:var(--s3);align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border);}
+.check-mark{font-family:var(--fm);font-size:.6rem;font-weight:600;letter-spacing:.06em;
+  padding:3px 7px;border-radius:var(--r1);flex-shrink:0;min-width:44px;text-align:center;}
+.check-mark.pass{color:var(--ok);background:var(--ok-soft);}
+.check-mark.fail{color:var(--dead);background:var(--dead-soft);}
+.check-row b{font-size:.78rem;} .check-row p{font-size:.76rem;color:var(--t2);}
+.verdict-fields{margin-top:var(--s4);padding-top:var(--s4);border-top:1px solid var(--border);}
+.note-line{font-size:.76rem;color:var(--t2);background:var(--sf2);border-radius:var(--r2);
+  padding:var(--s2) var(--s3);margin-bottom:var(--s2);}
+.note-line.warn{background:var(--warn-soft);color:var(--warn);}
+.hint-inline{font-family:var(--fm);font-size:.6rem;color:var(--t3);text-transform:none;letter-spacing:0;}
+.drop{border:2px dashed var(--border2);border-radius:var(--r3);padding:var(--s6);text-align:center;
+  cursor:pointer;transition:all .15s var(--ease);font-size:.82rem;color:var(--t2);display:block;}
+.drop:hover,.drop.drag{border-color:var(--blue);background:var(--accent-soft);color:var(--blue);}
+.drop input{display:none;}
+
+/* user detail */
+.u-stats{display:flex;gap:var(--s5);flex-wrap:wrap;margin:var(--s4) 0 var(--s1);
+  padding:var(--s4);background:var(--sf2);border-radius:var(--r3);}
+.u-stat b{display:block;font-family:var(--fm);font-size:1.15rem;color:var(--navy);}
+.u-stat span{font-size:.66rem;color:var(--t2);text-transform:uppercase;letter-spacing:.05em;}
+.tl-item{border:1px solid var(--border);border-radius:var(--r2);margin-bottom:var(--s2);overflow:hidden;background:var(--surface);}
 .tl-item[open]{border-color:var(--border2);}
-.tl-item > summary{list-style:none;cursor:pointer;padding:12px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.tl-item > summary{list-style:none;cursor:pointer;padding:var(--s3) var(--s4);display:flex;
+  align-items:center;gap:10px;flex-wrap:wrap;min-height:var(--tap);}
 .tl-item > summary::-webkit-details-marker{display:none;}
 .tl-item > summary:hover{background:var(--sf2);}
-.tl-caret{font-size:.65rem;color:var(--t3);transition:transform .15s;flex-shrink:0;}
+.tl-caret{font-size:.65rem;color:var(--t3);transition:transform .15s var(--ease);flex-shrink:0;}
 .tl-item[open] .tl-caret{transform:rotate(90deg);}
 .tl-summary-text{flex:1;min-width:0;font-size:.8rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.tl-rec-count{font-family:'IBM Plex Mono',monospace;font-size:.66rem;color:var(--t2);background:var(--sf2);border-radius:10px;padding:2px 8px;flex-shrink:0;}
-.tl-time{font-family:'IBM Plex Mono',monospace;font-size:.62rem;color:var(--t3);flex-shrink:0;}
+.tl-rec-count{font-family:var(--fm);font-size:.66rem;color:var(--t2);background:var(--sf2);
+  border-radius:var(--rp);padding:2px var(--s2);flex-shrink:0;}
+.tl-time{font-family:var(--fm);font-size:.62rem;color:var(--t3);flex-shrink:0;}
 .tl-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
-.loc-map{height:160px;border-radius:10px;overflow:hidden;margin-top:8px;border:1px solid var(--border);}
-
-/* analytics funnel */
-.funnel-row{display:flex;align-items:center;gap:12px;margin-top:14px;}
-.funnel-label{width:150px;flex-shrink:0;font-size:.8rem;color:var(--t2);}
-.funnel-bar-track{flex:1;height:30px;background:var(--sf2);border-radius:8px;overflow:hidden;}
-.funnel-bar-fill{height:100%;min-width:2px;background:linear-gradient(120deg,var(--navy),var(--blue) 65%,var(--sky));
-  border-radius:8px;display:flex;align-items:center;padding:0 10px;color:#fff;font-family:'IBM Plex Mono',monospace;
-  font-size:.72rem;font-weight:600;white-space:nowrap;transition:width .5s ease;}
-.funnel-pct{width:110px;flex-shrink:0;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:var(--t3);}
-
-/* ---------- analytics: charts ----------
-   Charts are hand-rolled SVG on purpose: the admin page has a strict CSP
-   and no build step, so pulling a charting library off a CDN is not an
-   option. SVG also scales crisply and needs no canvas sizing dance. */
-.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:14px;}
-.kpi{background:var(--sf2);border:1px solid var(--border);border-radius:12px;padding:12px 14px;position:relative;overflow:hidden;}
-.kpi::after{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
-  background:linear-gradient(180deg,var(--navy),var(--blue) 60%,var(--sky));}
-.kpi-v{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:1.5rem;color:var(--navy);
-  line-height:1.1;font-variant-numeric:tabular-nums;}
-.kpi-l{font-size:.68rem;color:var(--t2);margin-top:3px;line-height:1.35;}
-.kpi-sub{font-family:'IBM Plex Mono',monospace;font-size:.6rem;color:var(--t3);margin-top:4px;}
-.kpi.good .kpi-v{color:#047857;} .kpi.good::after{background:linear-gradient(180deg,#047857,#34d399);}
-.kpi.warn .kpi-v{color:#b45309;} .kpi.warn::after{background:linear-gradient(180deg,#b45309,#fbbf24);}
-
-.chart-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-top:14px;}
-.chart-box{background:var(--sf2);border:1px solid var(--border);border-radius:12px;padding:14px;}
-.chart-box h3{font-family:'Space Grotesk',sans-serif;font-size:.82rem;font-weight:600;color:var(--navy);margin-bottom:2px;}
-.chart-box .hint{font-size:.68rem;margin-bottom:10px;}
-.chart-box svg{display:block;width:100%;height:auto;overflow:visible;}
-.c-axis{font-family:'IBM Plex Mono',monospace;font-size:8.5px;fill:var(--t3);}
-.c-val{font-family:'IBM Plex Mono',monospace;font-size:9px;fill:var(--navy);font-weight:600;}
-.c-grid{stroke:var(--border);stroke-width:1;}
-.c-bar{transition:opacity .15s;} .c-bar:hover{opacity:.75;}
-
-/* horizontal bar list - used for categories, fields, events */
-.hbar{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin-top:9px;}
-.hbar-top{display:flex;justify-content:space-between;gap:8px;font-size:.72rem;margin-bottom:3px;}
-.hbar-name{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.hbar-track{height:7px;background:var(--border);border-radius:4px;overflow:hidden;}
-.hbar-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--navy),var(--blue) 70%,var(--sky));
-  transition:width .5s ease;}
-.hbar-n{font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--t2);white-space:nowrap;}
-
-/* legend for donuts */
-.legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;}
-.legend span{display:inline-flex;align-items:center;gap:5px;font-size:.7rem;color:var(--t2);}
-.legend i{width:9px;height:9px;border-radius:3px;display:inline-block;flex-shrink:0;}
-.donut-wrap{display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
-.donut-wrap svg{width:120px;height:120px;flex-shrink:0;}
-.donut-mid{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:15px;fill:var(--navy);}
-.donut-sub{font-family:'IBM Plex Mono',monospace;font-size:7.5px;fill:var(--t3);}
-
-/* 24h activity strip */
-.hstrip{display:grid;grid-template-columns:repeat(24,1fr);gap:2px;margin-top:8px;}
-.hcell{aspect-ratio:1;border-radius:3px;background:var(--border);position:relative;}
-.hstrip-ax{display:grid;grid-template-columns:repeat(24,1fr);gap:2px;margin-top:4px;
-  font-family:'IBM Plex Mono',monospace;font-size:7px;color:var(--t3);text-align:center;}
-.an-map{height:260px;border-radius:10px;overflow:hidden;border:1px solid var(--border);margin-top:10px;}
-.range-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;}
-.range-row button{font-family:'IBM Plex Mono',monospace;font-size:.68rem;padding:5px 11px;border-radius:8px;
-  border:1px solid var(--border2);background:var(--surface);color:var(--t2);cursor:pointer;}
-.range-row button.on{background:var(--navy);color:#fff;border-color:var(--navy);}
-.tl-body{padding:0 16px 16px;border-top:1px solid var(--border);}
-.tl-body p.summary-full{font-size:.82rem;line-height:1.6;margin:12px 0;}
-.tl-cv{font-size:.78rem;color:var(--t2);white-space:pre-wrap;background:var(--sf2);border-radius:8px;padding:10px 12px;margin-top:8px;max-height:200px;overflow-y:auto;}
+.tl-body{padding:0 var(--s4) var(--s4);border-top:1px solid var(--border);}
+.tl-body p.summary-full{font-size:.82rem;line-height:1.6;margin:var(--s3) 0;}
+.tl-cv{font-size:.78rem;color:var(--t2);white-space:pre-wrap;background:var(--sf2);
+  border-radius:var(--r2);padding:10px var(--s3);margin-top:var(--s2);max-height:200px;overflow-y:auto;}
 .tl-rec{border-top:1px solid var(--border);margin-top:10px;padding-top:10px;}
-.tl-rec-top{display:flex;align-items:center;gap:8px;margin-bottom:4px;}
+.tl-rec-top{display:flex;align-items:center;gap:var(--s2);margin-bottom:4px;flex-wrap:wrap;}
 .tl-rec-top b{font-size:.82rem;}
 .tl-rec p{font-size:.76rem;margin-bottom:3px;line-height:1.5;}
 .tl-rec b{color:var(--t2);font-weight:600;}
-.fit-pill{font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:.68rem;color:var(--ok);background:rgba(5,150,105,.1);border-radius:10px;padding:2px 8px;flex-shrink:0;}
-.fit-pill.mid{color:var(--warn);background:rgba(217,119,6,.1);}
+.fit-pill{font-family:var(--fm);font-weight:600;font-size:.68rem;color:var(--ok);
+  background:var(--ok-soft);border-radius:var(--rp);padding:2px var(--s2);flex-shrink:0;}
+.fit-pill.mid{color:var(--warn);background:var(--warn-soft);}
+.loc-map{height:160px;border-radius:var(--r2);overflow:hidden;margin-top:var(--s2);border:1px solid var(--border);}
 
-/* EXAMPLES LIST */
-.ex-row{border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px;}
-.ex-top{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
-.badge{font-family:'IBM Plex Mono',monospace;font-size:.62rem;padding:2px 9px;border-radius:10px;text-transform:uppercase;letter-spacing:.04em;}
-.badge.good{background:rgba(5,150,105,.1);color:var(--ok);}
-.badge.bad{background:rgba(220,38,38,.1);color:var(--dead);}
-.badge.borderline{background:rgba(217,119,6,.1);color:var(--warn);}
-.ex-src{font-family:'IBM Plex Mono',monospace;font-size:.62rem;color:var(--t3);margin-left:auto;}
-.ex-body p{font-size:.8rem;margin-bottom:4px;}
-.ex-body b{color:var(--t2);font-weight:600;}
-.ex-del{font-family:'IBM Plex Mono',monospace;font-size:.65rem;color:var(--dead);background:none;border:none;cursor:pointer;padding:2px 6px;}
-.empty{color:var(--t3);font-size:.8rem;text-align:center;padding:30px 0;}
+/* audit log */
+.audit-row{display:grid;grid-template-columns:150px 1fr auto;gap:var(--s3);align-items:baseline;
+  padding:10px var(--s3);border-bottom:1px solid var(--border);font-size:.78rem;}
+.audit-row:last-child{border-bottom:none;}
+.audit-act{font-family:var(--fm);font-size:.7rem;color:var(--blue);}
+.audit-act.danger{color:var(--dead);}
+@media (max-width:640px){.audit-row{grid-template-columns:1fr;gap:2px;}}
+
+/* ----------------------------------------------------------- ANALYTICS -- */
+.funnel-row{display:flex;align-items:center;gap:var(--s3);margin-top:var(--s4);flex-wrap:wrap;}
+.funnel-label{width:150px;flex-shrink:0;font-size:.8rem;color:var(--t2);}
+.funnel-bar-track{flex:1;min-width:160px;height:30px;background:var(--sf2);border-radius:var(--r2);overflow:hidden;}
+.funnel-bar-fill{height:100%;min-width:2px;background:linear-gradient(120deg,var(--navy2),var(--blue) 65%,var(--sky));
+  border-radius:var(--r2);display:flex;align-items:center;padding:0 10px;color:#fff;
+  font-family:var(--fm);font-size:.72rem;font-weight:600;white-space:nowrap;transition:width .5s var(--ease);}
+.funnel-pct{width:110px;flex-shrink:0;text-align:right;font-family:var(--fm);font-size:.72rem;color:var(--t3);}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:var(--s4);}
+.kpi{background:var(--sf2);border:1px solid var(--border);border-radius:var(--r3);
+  padding:var(--s3) var(--s4);position:relative;overflow:hidden;}
+.kpi::after{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:linear-gradient(180deg,var(--navy2),var(--blue) 60%,var(--sky));}
+.kpi-v{font-family:var(--fd);font-weight:700;font-size:1.5rem;color:var(--navy);
+  line-height:1.1;font-variant-numeric:tabular-nums;}
+.kpi-l{font-size:.68rem;color:var(--t2);margin-top:3px;line-height:1.35;}
+.kpi-sub{font-family:var(--fm);font-size:.6rem;color:var(--t3);margin-top:4px;}
+.kpi.good .kpi-v{color:var(--ok);} .kpi.good::after{background:linear-gradient(180deg,var(--ok),var(--ok));}
+.kpi.warn .kpi-v{color:var(--warn);} .kpi.warn::after{background:linear-gradient(180deg,var(--warn),var(--warn));}
+.chart-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:var(--s3);margin-top:var(--s4);}
+.chart-box{background:var(--sf2);border:1px solid var(--border);border-radius:var(--r3);padding:var(--s4);}
+.chart-box h3{font-family:var(--fd);font-size:.82rem;font-weight:600;color:var(--navy);margin-bottom:2px;}
+.chart-box .hint{font-size:.68rem;margin-bottom:10px;}
+.chart-box svg{display:block;width:100%;height:auto;overflow:visible;}
+.c-axis{font-family:var(--fm);font-size:8.5px;fill:var(--t3);}
+.c-val{font-family:var(--fm);font-size:9px;fill:var(--navy);font-weight:600;}
+.c-grid{stroke:var(--border);stroke-width:1;}
+.c-bar{transition:opacity .15s;} .c-bar:hover{opacity:.75;}
+.hbar{display:grid;grid-template-columns:1fr auto;gap:var(--s2);align-items:center;margin-top:9px;}
+.hbar-top{display:flex;justify-content:space-between;gap:var(--s2);font-size:.72rem;margin-bottom:3px;}
+.hbar-name{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hbar-track{height:7px;background:var(--border);border-radius:4px;overflow:hidden;}
+.hbar-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--navy2),var(--blue) 70%,var(--sky));transition:width .5s var(--ease);}
+.hbar-n{font-family:var(--fm);font-size:.68rem;color:var(--t2);white-space:nowrap;}
+.legend{display:flex;flex-wrap:wrap;gap:6px var(--s4);margin-top:10px;}
+.legend span{display:inline-flex;align-items:center;gap:5px;font-size:.7rem;color:var(--t2);}
+.legend i{width:9px;height:9px;border-radius:3px;display:inline-block;flex-shrink:0;}
+.donut-wrap{display:flex;align-items:center;gap:var(--s4);flex-wrap:wrap;}
+.donut-wrap svg{width:120px;height:120px;flex-shrink:0;}
+.donut-mid{font-family:var(--fd);font-weight:700;font-size:15px;fill:var(--navy);}
+.donut-sub{font-family:var(--fm);font-size:7.5px;fill:var(--t3);}
+.hstrip{display:grid;grid-template-columns:repeat(24,1fr);gap:2px;margin-top:var(--s2);}
+.hcell{aspect-ratio:1;border-radius:3px;background:var(--border);}
+.hstrip-ax{display:grid;grid-template-columns:repeat(24,1fr);gap:2px;margin-top:4px;
+  font-family:var(--fm);font-size:7px;color:var(--t3);text-align:center;}
+.an-map{height:260px;border-radius:var(--r2);overflow:hidden;border:1px solid var(--border);margin-top:10px;}
+.range-row{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap;margin-top:10px;}
+.range-row button{font-family:var(--fm);font-size:.7rem;padding:0 var(--s3);min-height:32px;
+  border-radius:var(--r2);border:1px solid var(--border2);background:var(--surface);color:var(--t2);cursor:pointer;}
+.range-row button.on{background:var(--navy);color:var(--surface);border-color:var(--navy);}
+:root[data-theme="dark"] .range-row button.on{background:var(--blue);color:#06101f;border-color:var(--blue);}
+.scope-note{font-family:var(--fm);font-size:.64rem;color:var(--t3);margin-top:6px;}
+
+/* collapsed-by-default analytics groups: the old page rendered ~14 cards and
+   ~20 charts in one go, all above-the-fold cost for below-the-fold value. */
+details.group{border:1px solid var(--border);border-radius:var(--r3);background:var(--surface);
+  margin-bottom:var(--s4);box-shadow:var(--sh1);}
+details.group > summary{list-style:none;cursor:pointer;padding:var(--s4) var(--s5);
+  display:flex;align-items:center;gap:10px;min-height:var(--tap);font-family:var(--fd);
+  font-weight:600;font-size:.95rem;color:var(--navy);}
+details.group > summary::-webkit-details-marker{display:none;}
+details.group > summary:hover{background:var(--sf2);border-radius:var(--r3);}
+details.group[open] > summary{border-bottom:1px solid var(--border);border-radius:var(--r3) var(--r3) 0 0;}
+details.group .group-body{padding:var(--s5);}
+details.group .caret{margin-left:auto;color:var(--t3);font-size:.7rem;transition:transform .15s var(--ease);}
+details.group[open] .caret{transform:rotate(90deg);}
+
+@media (max-width:760px){
+  main{padding:var(--s4) var(--s3) 96px;}
+  .card{padding:var(--s4);border-radius:var(--r2);}
+  .table-wrap{margin:0 calc(var(--s4) * -1);padding:0 var(--s4);}
+  .fld-row{grid-template-columns:1fr;}
+  .funnel-label{width:100%;}
+  .funnel-pct{width:auto;}
+  header{padding:0 var(--s3);}
+  .sections-inner{padding:0 var(--s3);}
+  details.group .group-body{padding:var(--s4);}
+  .u-stats{gap:var(--s4);padding:var(--s3);}
+}
 </style>
 </head>
 <body>
@@ -214,38 +491,180 @@ textarea:focus,input:focus,select:focus{border-color:var(--blue);}
 <div id="gate">
   <h1>ORBITCAST — Admin</h1>
   <p>Enter the admin secret to unlock the dashboard.</p>
-  <input id="secret-input" type="password" placeholder="ADMIN_SECRET" autocomplete="off">
-  <button id="unlock-btn">Unlock</button>
-  <div class="err" id="gate-err"></div>
+  <input id="secret-input" type="password" placeholder="ADMIN_SECRET" autocomplete="off" aria-label="Admin secret">
+  <button class="btn" id="unlock-btn" style="width:100%">Unlock</button>
+  <div class="err" id="gate-err" role="alert"></div>
+  <p class="gate-note">The secret is held in this tab only (sessionStorage), so a new tab
+     asks again. The server refuses any secret shorter than 24 characters — if a correct-looking
+     secret is rejected, check its length in the Railway variables first.</p>
 </div>
 
-<div id="app" style="display:none">
+<div id="app" hidden>
   <header>
     <div class="logo"><span class="logo-mark"></span>ORBITCAST</div>
     <span class="hd-tag">admin</span>
     <div class="hd-right">
-      <button class="btn secondary" id="lock-btn" style="font-size:.68rem;padding:6px 12px;">Lock</button>
+      <span class="hd-tag" id="hd-scrape">—</span>
+      <button class="icon-btn" id="theme-btn" title="Theme" aria-label="Switch theme">◐</button>
+      <button class="btn secondary sm" id="lock-btn">Lock</button>
     </div>
   </header>
+
+  <nav class="sections" role="tablist" aria-label="Admin sections">
+    <div class="sections-inner">
+      <button class="sec" role="tab" data-section="catalogue" aria-selected="true">Catalogue<span class="dot"></span></button>
+      <button class="sec" role="tab" data-section="people"    aria-selected="false">People</button>
+      <button class="sec" role="tab" data-section="engine"    aria-selected="false">Engine</button>
+      <button class="sec" role="tab" data-section="ops"       aria-selected="false">Ops<span class="dot"></span></button>
+      <button class="sec" role="tab" data-section="analytics" aria-selected="false">Analytics</button>
+    </div>
+  </nav>
+
   <main>
-    <div class="tabs">
-      <button class="tab active" data-tab="addlink">Add by Link</button>
-      <button class="tab" data-tab="sources">Sources</button>
-      <button class="tab" data-tab="upload">Upload Dataset</button>
-      <button class="tab" data-tab="examples">Examples</button>
-      <button class="tab" data-tab="rules">Scoring Rules</button>
-      <button class="tab" data-tab="users">Users</button>
-      <button class="tab" data-tab="analytics">Analytics</button>
+
+  <!-- ══════════════════════════════════════════════ CATALOGUE ══════════ -->
+  <div class="section active" id="section-catalogue">
+    <div class="subnav" role="tablist">
+      <button class="subtab" role="tab" data-sub="coverage"   aria-selected="true">Coverage <span class="count" id="c-coverage"></span></button>
+      <button class="subtab" role="tab" data-sub="organisers" aria-selected="false">Organisers <span class="count" id="c-organisers"></span></button>
+      <button class="subtab" role="tab" data-sub="leads"      aria-selected="false">Leads <span class="count" id="c-leads"></span></button>
+      <button class="subtab" role="tab" data-sub="addlink"    aria-selected="false">Add by link</button>
+      <button class="subtab" role="tab" data-sub="events"     aria-selected="false">Events</button>
+    </div>
+
+    <!-- COVERAGE -->
+    <div class="subpanel active" id="sub-coverage">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Source health</h2>
+            <p class="hint">Every source feeding the catalogue and what it contributed on the last scrape,
+              post-filter. A source on 0 used to be unreadable — dormant and broken looked identical.
+              Each row now carries when it last returned anything and the last error it raised, so
+              "0 events, last worked 11 days ago" is a fact you can act on. Pause stops a source being
+              scraped at all, for the built-in sources as well as the Luma organisers.</p>
+          </div>
+          <div class="card-actions">
+            <span class="stamp" id="cov-stamp"></span>
+            <button class="btn secondary sm" data-refresh="coverage">Refresh</button>
+          </div>
+        </div>
+        <div class="toolbar">
+          <input type="search" id="cov-q" placeholder="Filter sources…" aria-label="Filter sources">
+          <label class="switch"><input type="checkbox" id="cov-problem"> Only problems (0 or ≤2)</label>
+          <span class="spacer"></span>
+          <span class="toolbar-count" id="cov-count"></span>
+        </div>
+        <div id="coverage-box"></div>
+      </div>
+    </div>
+
+    <!-- ORGANISERS -->
+    <div class="subpanel" id="sub-organisers">
+      <div class="card">
+        <div class="card-head">
+          <div><h2>Add a recurring organiser</h2>
+          <p class="hint">Paste any Luma organiser link — a calendar (<code>lu.ma/cal-…</code>), a vanity
+            URL (<code>luma.com/londonai</code>), or a host profile (<code>luma.com/user/…</code>).
+            It is checked against their real upcoming events before anything is written.</p></div>
+        </div>
+        <label for="src-id">Luma organiser link or id</label>
+        <input type="text" id="src-id" placeholder="luma.com/user/… · lu.ma/cal-… · luma.com/londonai" autocomplete="off">
+        <label for="src-name">Organiser name (optional)</label>
+        <input type="text" id="src-name" placeholder="shown as the source name">
+        <div class="row-btns">
+          <button class="btn" id="src-check-btn">Check it</button>
+          <button class="btn secondary" id="src-add-btn" style="display:none;">Add as a source</button>
+        </div>
+        <div class="msg" id="src-msg"></div>
+        <div id="src-verdict"></div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div><h2>Tracked organisers</h2>
+          <p class="hint">Approved from here and scraped every refresh. Pausing keeps the record but stops
+            the scrape — a quiet organiser is not a dead one.</p></div>
+          <div class="card-actions">
+            <span class="stamp" id="src-stamp"></span>
+            <button class="btn secondary sm" data-refresh="organisers">Refresh</button>
+          </div>
+        </div>
+        <div class="toolbar">
+          <input type="search" id="src-q" placeholder="Filter organisers…" aria-label="Filter organisers">
+          <span class="spacer"></span><span class="toolbar-count" id="src-count"></span>
+        </div>
+        <div id="sources-list"></div>
+      </div>
+    </div>
+
+    <!-- LEADS -->
+    <div class="subpanel" id="sub-leads">
+      <div class="card">
+        <div class="card-head">
+          <div><h2>Discovered leads</h2>
+          <p class="hint">Organisers the scraper found hosting events we already ingest, or on Luma's
+            London feed. Proposals only — nothing here feeds the catalogue until you add it.
+            The queue is paginated against a real total, decisions apply optimistically without
+            refetching the list, and anything you accept or reject is written to the audit trail.</p></div>
+          <div class="card-actions">
+            <span class="stamp" id="leads-stamp"></span>
+            <button class="btn secondary sm" data-refresh="leads">Refresh</button>
+          </div>
+        </div>
+
+        <div class="banner info" id="leads-tidy-banner" hidden>
+          <span id="leads-tidy-text"></span>
+          <button class="btn xs secondary" id="leads-tidy-btn" style="margin-left:auto">Tidy them now</button>
+        </div>
+
+        <div class="toolbar">
+          <input type="search" id="lead-q" placeholder="Search name or sample title…" aria-label="Search leads">
+          <select id="lead-via" aria-label="Discovery route">
+            <option value="">Any route</option>
+            <option value="host_history">host_history</option>
+            <option value="city_feed">city_feed</option>
+            <option value="catalog_host">catalog_host</option>
+          </select>
+          <select id="lead-min" aria-label="Minimum events">
+            <option value="2">2+ events</option>
+            <option value="3">3+ events</option>
+            <option value="5">5+ events</option>
+            <option value="1">1+ events</option>
+            <option value="0">Any</option>
+          </select>
+          <select id="lead-fresh" aria-label="Freshness">
+            <option value="0">Any age</option>
+            <option value="7">Seen in last 7 days</option>
+            <option value="14">Seen in last 14 days</option>
+            <option value="stale">Not seen in 14 days</option>
+          </select>
+          <select id="lead-sort" aria-label="Sort">
+            <option value="events">Most events</option>
+            <option value="recent">Most recently seen</option>
+            <option value="oldest">Longest in the queue</option>
+            <option value="name">Name A–Z</option>
+          </select>
+          <span class="spacer"></span>
+          <span class="toolbar-count" id="leads-count"></span>
+        </div>
+
+        <label class="switch" style="margin:0 0 8px"><input type="checkbox" id="lead-all"> Select everything on this page</label>
+        <div id="leads-list"></div>
+        <div id="leads-bulk" hidden></div>
+        <div class="pager" id="leads-pager" hidden></div>
+      </div>
     </div>
 
     <!-- ADD BY LINK -->
-    <div class="panel active" id="panel-addlink">
+    <div class="subpanel" id="sub-addlink">
       <div class="card">
-        <h2>Add an event by link</h2>
-        <p class="hint">Paste the event's own page. It gets fetched, read, and checked against
-          the catalog rules - London or genuinely online, upcoming, a real event page, not an
-          aggregator card, not already listed. If every check passes it goes straight in.</p>
-        <label>Event URL</label>
+        <div class="card-head"><div>
+          <h2>Add an event by link</h2>
+          <p class="hint">Paste the event's own page. It gets fetched, read, and checked against the
+            catalogue rules — London or genuinely online, upcoming, a real event page, not an
+            aggregator card, not already listed. If every check passes it goes straight in.</p>
+        </div></div>
+        <label for="link-url">Event URL</label>
         <input type="text" id="link-url" placeholder="https://…" autocomplete="off">
         <div class="row-btns">
           <button class="btn" id="link-check-btn">Check it</button>
@@ -255,114 +674,129 @@ textarea:focus,input:focus,select:focus{border-color:var(--blue);}
         <div class="msg" id="link-msg"></div>
         <div id="link-verdict"></div>
       </div>
-
       <div class="card">
-        <h2>Events added by link</h2>
-        <p class="hint">These are re-emitted into the catalog on every scrape, and drop off on
-          their own once the date passes.</p>
+        <div class="card-head">
+          <div><h2>Events added by link</h2>
+          <p class="hint">Re-emitted into the catalogue on every scrape, and they drop off on their own
+            once the date passes.</p></div>
+          <div class="card-actions"><button class="btn secondary sm" data-refresh="addlink">Refresh</button></div>
+        </div>
         <div id="links-list"></div>
       </div>
     </div>
 
-
-    <!-- SOURCES -->
-    <div class="panel" id="panel-sources">
+    <!-- EVENTS -->
+    <div class="subpanel" id="sub-events">
       <div class="card">
-        <h2>Coverage</h2>
-        <p class="hint">Every source feeding the catalog and what it actually contributed on the last
-          scrape, by category. Counts are post-filter - what survived the London and junk rules, not what
-          the site listed. A source on 0 is either dormant or broken; the two look identical from here,
-          so check the site before assuming it needs fixing.</p>
-        <p class="hint">This view is the reason <code>/api/summary</code> needs the admin secret: it is
-          the whole source list on one screen, which is exactly what the public app no longer exposes.</p>
-        <div id="coverage-box"><div class="empty">Loading…</div></div>
-      </div>
-
-      <div class="card">
-        <h2>Add a recurring organiser</h2>
-        <p class="hint">Paste any Luma organiser link — a calendar (<code>lu.ma/cal-…</code>), a vanity
-          calendar URL (<code>luma.com/londonai</code>), or a person's host profile
-          (<code>luma.com/user/…</code>). No <code>cal-</code> id needed: the link is resolved to one,
-          which is also what stops the same organiser being tracked twice under two URLs.</p>
-        <p class="hint">It gets checked against their real upcoming events: already tracked, genuinely
-          London or online, and a category OrbitCast hosts. From then on every refresh takes only their
-          London and virtual events — anything in San Francisco, Singapore or anywhere else is dropped
-          automatically, with nothing for you to review.</p>
-        <label>Luma organiser link or id</label>
-        <input type="text" id="src-id" placeholder="luma.com/user/… · lu.ma/cal-… · luma.com/londonai" autocomplete="off">
-        <label>Organiser name (optional)</label>
-        <input type="text" id="src-name" placeholder="shown as the source name">
-        <div class="row-btns">
-          <button class="btn" id="src-check-btn">Check it</button>
-          <button class="btn secondary" id="src-add-btn" style="display:none;">Add as a source</button>
+        <div class="card-head">
+          <div><h2>Live catalogue</h2>
+          <p class="hint">Everything currently being served. A bad scraped event could not be touched
+            from here before — only manually added ones could be removed. Hiding one drops it from the
+            catalogue immediately and keeps it out of every future scrape, and it can be restored below.</p></div>
+          <div class="card-actions">
+            <span class="stamp" id="ev-stamp"></span>
+            <button class="btn secondary sm" data-refresh="events">Refresh</button>
+          </div>
         </div>
-        <div class="msg" id="src-msg"></div>
-        <div id="src-verdict"></div>
+        <div class="toolbar">
+          <input type="search" id="ev-q" placeholder="Search the catalogue by title, source or venue…" aria-label="Search catalogue">
+          <span class="spacer"></span><span class="toolbar-count" id="ev-count"></span>
+        </div>
+        <div id="ev-list"></div>
+        <div class="pager" id="ev-pager" hidden></div>
       </div>
-
       <div class="card">
-        <h2>Tracked organisers</h2>
-        <p class="hint">Approved from here and scraped every refresh. Pausing keeps the record but stops
-          the scrape - a quiet organiser is not a dead one.</p>
-        <div id="sources-list"></div>
+        <div class="card-head"><div><h2>Hidden events</h2>
+          <p class="hint">Suppressed by hand. They stay out of the catalogue, the calendar and the
+            scorer until restored.</p></div></div>
+        <div id="hidden-list"></div>
       </div>
+    </div>
+  </div>
 
+  <!-- ══════════════════════════════════════════════ PEOPLE ═════════════ -->
+  <div class="section" id="section-people">
+    <div class="subnav" role="tablist">
+      <button class="subtab" role="tab" data-sub="accounts" aria-selected="true">Accounts <span class="count" id="c-accounts"></span></button>
+      <button class="subtab" role="tab" data-sub="visitors" aria-selected="false">Visitors <span class="count" id="c-visitors"></span></button>
+    </div>
+
+    <div class="subpanel active" id="sub-accounts">
       <div class="card">
-        <h2>Discovered leads</h2>
-        <p class="hint">Organisers the scraper found hosting events we already ingest, or on Luma's London
-          feed. Proposals only - nothing here feeds until you check and add it.</p>
-        <div id="candidates-list"></div>
+        <div class="card-head">
+          <div><h2>Accounts</h2>
+          <p class="hint">Google sign-in made the account the real identity, and nothing in the panel
+            could show you one. This is every account row: who it is, when they joined, their digest
+            state, saved events, and how many analyses they have run.</p></div>
+          <div class="card-actions">
+            <span class="stamp" id="acc-stamp"></span>
+            <button class="btn secondary sm" data-refresh="accounts">Refresh</button>
+          </div>
+        </div>
+        <div class="banner info" id="invite-banner"></div>
+        <div class="toolbar">
+          <input type="search" id="acc-q" placeholder="Search email or name…" aria-label="Search accounts">
+          <span class="spacer"></span><span class="toolbar-count" id="acc-count"></span>
+        </div>
+        <div id="accounts-list"></div>
       </div>
     </div>
 
-    <!-- UPLOAD -->
-    <div class="panel" id="panel-upload">
+    <div class="subpanel" id="sub-visitors">
       <div class="card">
-        <h2>Upload a dataset document</h2>
-        <p class="hint">A PDF, DOCX, or TXT of CV-to-event judgments (even messy notes) - Claude structures it into examples automatically.</p>
-        <label class="drop" id="dropzone">
-          <input type="file" id="file-input" accept=".pdf,.docx,.txt">
-          <span id="drop-label">Drag a file here, or click to choose</span>
-        </label>
-        <div class="msg" id="upload-msg"></div>
+        <div class="card-head">
+          <div><h2>Look up a specific visitor</h2>
+          <p class="hint">Paste an oc_uid to see everything tied to that browser, or click any row below.</p></div>
+        </div>
+        <div class="lookup-row">
+          <input type="text" id="u-lookup-input" placeholder="oc_uid, e.g. a1b2c3d4e5f6…">
+          <button class="btn" id="u-lookup-btn">Look up</button>
+        </div>
+        <div class="msg" id="u-lookup-msg"></div>
+      </div>
+      <div class="card" id="users-list-card">
+        <div class="card-head">
+          <div><h2>All visitors</h2>
+          <p class="hint">Everyone ever asked for consent, most recently active first. A decline shows
+            zero activity by design.</p></div>
+          <div class="card-actions">
+            <span class="stamp" id="usr-stamp"></span>
+            <button class="btn secondary sm" data-refresh="visitors">Refresh</button>
+          </div>
+        </div>
+        <div class="toolbar">
+          <input type="search" id="usr-q" placeholder="Filter by oc_uid…" aria-label="Filter visitors">
+          <label class="switch"><input type="checkbox" id="usr-active"> Only with activity</label>
+          <span class="spacer"></span><span class="toolbar-count" id="usr-count"></span>
+        </div>
+        <div id="users-list"></div>
+      </div>
+      <div class="card" id="user-detail-card" style="display:none;">
+        <button class="u-back" id="u-back-btn">&larr; Back to all visitors</button>
+        <h2 id="u-detail-id"></h2>
+        <p class="hint" id="u-detail-meta"></p>
+        <div id="user-detail-body"></div>
       </div>
     </div>
+  </div>
 
-    <!-- EXAMPLES -->
-    <div class="panel" id="panel-examples">
-      <div class="card">
-        <h2>Add a single example manually</h2>
-        <p class="hint">No document needed - describe one person and how an event judgment played out.</p>
-        <label>Person / profile summary</label>
-        <textarea id="ex-summary" rows="2" placeholder="e.g. Backend engineer, 4 years, recently shipped two LLM fine-tuning projects"></textarea>
-        <label>Event context</label>
-        <textarea id="ex-context" rows="2" placeholder="e.g. Weekend hackathon on agentic tool-use"></textarea>
-        <label>Judgment</label>
-        <select id="ex-judgment">
-          <option value="good">good</option>
-          <option value="bad">bad</option>
-          <option value="borderline">borderline</option>
-        </select>
-        <label>Reasoning (the "ideal why")</label>
-        <textarea id="ex-why" rows="2" placeholder="Specific, evidence-tied reasoning for this judgment"></textarea>
-        <div class="row-btns"><button class="btn" id="add-ex-btn">Add example</button></div>
-        <div class="msg" id="add-ex-msg"></div>
-      </div>
-
-      <div class="card">
-        <h2>Stored examples</h2>
-        <p class="hint">The RAG knowledge base. Delete anything that's wrong or low quality.</p>
-        <div id="examples-list"></div>
-      </div>
+  <!-- ══════════════════════════════════════════════ ENGINE ═════════════ -->
+  <div class="section" id="section-engine">
+    <div class="subnav" role="tablist">
+      <button class="subtab" role="tab" data-sub="rules"    aria-selected="true">Scoring rules</button>
+      <button class="subtab" role="tab" data-sub="examples" aria-selected="false">Examples <span class="count" id="c-examples"></span></button>
+      <button class="subtab" role="tab" data-sub="upload"   aria-selected="false">Upload dataset</button>
     </div>
 
-    <!-- RULES -->
-    <div class="panel" id="panel-rules">
+    <div class="subpanel active" id="sub-rules">
       <div class="card">
-        <h2>Scoring rules</h2>
-        <p class="hint">This is the guidance Claude follows when judging fit. The JSON output format is fixed elsewhere and can't be broken by editing this.</p>
-        <span id="rules-status" class="hd-tag" style="display:inline-block;margin-bottom:10px;"></span>
-        <textarea id="rules-box" class="rules-box"></textarea>
+        <div class="card-head">
+          <div><h2>Scoring rules</h2>
+          <p class="hint">The guidance Claude follows when judging fit. The JSON output format is fixed
+            elsewhere and cannot be broken by editing this.</p></div>
+          <div class="card-actions"><span class="hd-tag" id="rules-status"></span></div>
+        </div>
+        <textarea id="rules-box" class="rules-box" aria-label="Scoring rules"></textarea>
         <div class="row-btns">
           <button class="btn" id="save-rules-btn">Save</button>
           <button class="btn secondary" id="reset-rules-btn">Reset to default</button>
@@ -371,247 +805,528 @@ textarea:focus,input:focus,select:focus{border-color:var(--blue);}
       </div>
     </div>
 
-    <!-- USERS -->
-    <div class="panel" id="panel-users">
+    <div class="subpanel" id="sub-examples">
       <div class="card">
-        <h2>Look up a specific user</h2>
-        <p class="hint">Paste an oc_uid (the value of their <code>oc_uid</code> cookie) to see everything tied to that browser, or click any row below.</p>
-        <div class="lookup-row">
-          <input type="text" id="u-lookup-input" placeholder="oc_uid, e.g. a1b2c3d4e5f6...">
-          <button class="btn" id="u-lookup-btn">Look up</button>
+        <div class="card-head"><div><h2>Add a single example</h2>
+          <p class="hint">Describe one person and how an event judgment played out.</p></div></div>
+        <label for="ex-summary">Person / profile summary</label>
+        <textarea id="ex-summary" rows="2" placeholder="e.g. Backend engineer, 4 years, recently shipped two LLM fine-tuning projects"></textarea>
+        <label for="ex-context">Event context</label>
+        <textarea id="ex-context" rows="2" placeholder="e.g. Weekend hackathon on agentic tool-use"></textarea>
+        <label for="ex-judgment">Judgment</label>
+        <select id="ex-judgment">
+          <option value="good">good</option><option value="bad">bad</option><option value="borderline">borderline</option>
+        </select>
+        <label for="ex-why">Reasoning (the "ideal why")</label>
+        <textarea id="ex-why" rows="2" placeholder="Specific, evidence-tied reasoning for this judgment"></textarea>
+        <div class="row-btns"><button class="btn" id="add-ex-btn">Add example</button></div>
+        <div class="msg" id="add-ex-msg"></div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div><h2>Stored examples</h2>
+          <p class="hint">The RAG knowledge base. Delete anything wrong or low quality.</p></div>
+          <div class="card-actions"><button class="btn secondary sm" data-refresh="examples">Refresh</button></div>
         </div>
-        <div class="msg" id="u-lookup-msg"></div>
-      </div>
-
-      <div class="card" id="users-list-card">
-        <h2>All users</h2>
-        <p class="hint">Everyone ever asked for consent, most recently active first. Only consented users have analyses/interactions - a decline shows zero activity by design.</p>
-        <div id="users-list"><div class="empty">Loading…</div></div>
-      </div>
-
-      <div class="card" id="user-detail-card" style="display:none;">
-        <button class="u-back" id="u-back-btn">&larr; Back to all users</button>
-        <h2 id="u-detail-id"></h2>
-        <p class="hint" id="u-detail-meta"></p>
-        <div id="user-detail-body"></div>
+        <div id="examples-list"></div>
       </div>
     </div>
 
-    <!-- ANALYTICS -->
-    <div class="panel" id="panel-analytics">
+    <div class="subpanel" id="sub-upload">
       <div class="card">
-        <h2>The numbers</h2>
-        <p class="hint">Every figure below is counted live from the database, not sampled or estimated.</p>
-        <div class="range-row">
-          <span class="hint" style="margin:0">Time-series window:</span>
-          <button data-days="7"  onclick="setAnRange(7)">7 days</button>
-          <button data-days="30" class="on" onclick="setAnRange(30)">30 days</button>
-          <button data-days="90" onclick="setAnRange(90)">90 days</button>
+        <div class="card-head"><div><h2>Upload a dataset document</h2>
+          <p class="hint">A PDF, DOCX or TXT of CV-to-event judgments, even messy notes — Claude
+            structures it into examples automatically.</p></div></div>
+        <label class="drop" id="dropzone">
+          <input type="file" id="file-input" accept=".pdf,.docx,.txt">
+          <span id="drop-label">Drag a file here, or click to choose</span>
+        </label>
+        <div class="msg" id="upload-msg"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════ OPS ════════════════ -->
+  <div class="section" id="section-ops">
+    <div class="subnav" role="tablist">
+      <button class="subtab" role="tab" data-sub="scrape" aria-selected="true">Scrape</button>
+      <button class="subtab" role="tab" data-sub="mail"   aria-selected="false">Mail</button>
+      <button class="subtab" role="tab" data-sub="audit"  aria-selected="false">Audit log</button>
+    </div>
+
+    <div class="subpanel active" id="sub-scrape">
+      <div class="card">
+        <div class="card-head"><div><h2>Scrape</h2>
+          <p class="hint">The catalogue refreshes itself every 30 minutes. <code>POST /api/refresh</code>
+            has been admin-only since the October hardening but had no button anywhere in this panel,
+            so a scrape could not be triggered by hand at all. It can now.</p></div></div>
+        <div class="kpi-grid" id="scrape-kpis"></div>
+        <div class="row-btns">
+          <button class="btn" id="scrape-btn">Scrape now</button>
+          <button class="btn secondary" id="scrape-poll-btn">Check status</button>
         </div>
-        <div class="kpi-grid" id="an-kpis"></div>
+        <div class="msg" id="scrape-msg"></div>
       </div>
+    </div>
 
+    <div class="subpanel" id="sub-mail">
       <div class="card">
-        <h2>What's happening, in plain terms</h2>
-        <p class="hint" id="an-plain-summary">Loading…</p>
-        <div id="an-funnel-viz"></div>
+        <div class="card-head">
+          <div><h2>Mail</h2>
+          <p class="hint">Which provider is configured, which sending address it will use, and whether
+            that address can actually reach anyone. <code>MAIL_FROM</code> defaulting to
+            <code>onboarding@resend.dev</code> only mails the Resend account owner — this is where
+            you find that out before a digest goes nowhere.</p></div>
+          <div class="card-actions"><button class="btn secondary sm" data-refresh="mail">Refresh</button></div>
+        </div>
+        <div id="mail-status-box"></div>
+        <label for="mail-test-to">Send a test to</label>
+        <div class="lookup-row">
+          <input type="text" id="mail-test-to" placeholder="you@example.com" autocomplete="off">
+          <button class="btn" id="mail-test-btn">Send test</button>
+        </div>
+        <div class="msg" id="mail-msg"></div>
       </div>
+    </div>
 
+    <div class="subpanel" id="sub-audit">
       <div class="card">
-        <h2>Activity over time</h2>
+        <div class="card-head">
+          <div><h2>Audit log</h2>
+          <p class="hint">Sign-ins, refused sign-ins, analyses, exports, CV deletions, account deletions,
+            calendar-feed issues and admin CV downloads. The table has existed since migration 0014
+            with nothing able to read it.</p></div>
+          <div class="card-actions">
+            <span class="stamp" id="audit-stamp"></span>
+            <button class="btn secondary sm" data-refresh="audit">Refresh</button>
+          </div>
+        </div>
+        <div class="toolbar">
+          <select id="audit-action" aria-label="Filter by action"><option value="">All actions</option></select>
+          <span class="spacer"></span><span class="toolbar-count" id="audit-count"></span>
+        </div>
+        <div id="audit-list"></div>
+        <div class="pager" id="audit-pager" hidden></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════ ANALYTICS ══════════ -->
+  <div class="section" id="section-analytics">
+    <div class="card">
+      <div class="card-head">
+        <div><h2>The numbers</h2>
+        <p class="hint">Counted live from the database. The window below now actually applies: every
+          time-bounded chart is filtered to it, and the figures that are genuinely all-time say so.</p></div>
+        <div class="card-actions">
+          <span class="stamp" id="an-stamp"></span>
+          <button class="btn secondary sm" data-refresh="analytics">Refresh</button>
+        </div>
+      </div>
+      <div class="range-row" id="an-range">
+        <span class="hint" style="margin:0">Window:</span>
+        <button data-days="7">7 days</button>
+        <button data-days="30" class="on">30 days</button>
+        <button data-days="90">90 days</button>
+        <button data-days="0">All time</button>
+      </div>
+      <p class="scope-note" id="an-scope"></p>
+      <div class="kpi-grid" id="an-kpis"></div>
+    </div>
+
+    <div class="card">
+      <h2>What's happening, in plain terms</h2>
+      <p class="hint" id="an-plain-summary"></p>
+      <div id="an-funnel-viz"></div>
+    </div>
+
+    <details class="group" open>
+      <summary>Activity over time<span class="caret">&#9656;</span></summary>
+      <div class="group-body">
         <p class="hint">Consent accepted, analyses run, and event click-throughs per day.</p>
         <div id="an-timeseries"></div>
       </div>
+    </details>
 
-      <div class="card">
-        <h2>Is the engine actually being honest?</h2>
-        <p class="hint">The product's core claim is "two to four strong matches, frequently none."
-          These two charts are what make that claim checkable rather than just asserted.</p>
+    <details class="group" open>
+      <summary>Is the engine actually being honest?<span class="caret">&#9656;</span></summary>
+      <div class="group-body">
+        <p class="hint">The product's claim is "two to four strong matches, frequently none". These two
+          charts make that checkable rather than asserted.</p>
         <div class="chart-grid">
-          <div class="chart-box">
-            <h3>Fit-score distribution</h3>
-            <p class="hint">Every score the engine has ever returned. Nothing below 65 should exist —
-              that floor is enforced in code, so a bar to the left of 65 would be a real bug.</p>
-            <div id="an-fit"></div>
-          </div>
-          <div class="chart-box">
-            <h3>Matches per analysis</h3>
-            <p class="hint">How many events each person actually got. Zero is a legitimate, honest
-              outcome — not a failure.</p>
-            <div id="an-matches"></div>
-          </div>
+          <div class="chart-box"><h3>Fit-score distribution</h3>
+            <p class="hint">Nothing below 65 should exist — that floor is enforced in code.</p>
+            <div id="an-fit"></div></div>
+          <div class="chart-box"><h3>Matches per analysis</h3>
+            <p class="hint">Zero is a legitimate outcome, not a failure.</p>
+            <div id="an-matches"></div></div>
         </div>
       </div>
+    </details>
 
-      <div class="card">
-        <h2>Who is using it</h2>
-        <div class="chart-grid">
-          <div class="chart-box"><h3>Evidence level</h3>
-            <p class="hint">"Thin" means a stated ambition with little track record — it triggers the orientation write-up.</p>
-            <div id="an-evidence"></div></div>
-          <div class="chart-box"><h3>Seniority</h3>
-            <p class="hint">As read from the CV by the profile engine.</p>
-            <div id="an-seniority"></div></div>
-          <div class="chart-box"><h3>Input usability</h3>
-            <p class="hint">Whether we could get a real person out of what was submitted.</p>
-            <div id="an-kinds"></div></div>
-          <div class="chart-box"><h3>Fields people are aiming at</h3>
-            <div id="an-fields"></div></div>
-        </div>
-      </div>
+    <details class="group">
+      <summary>Who is using it<span class="caret">&#9656;</span></summary>
+      <div class="group-body"><div class="chart-grid">
+        <div class="chart-box"><h3>Evidence level</h3>
+          <p class="hint">"Thin" means a stated ambition with little track record.</p><div id="an-evidence"></div></div>
+        <div class="chart-box"><h3>Seniority</h3><div id="an-seniority"></div></div>
+        <div class="chart-box"><h3>Input usability</h3><div id="an-kinds"></div></div>
+        <div class="chart-box"><h3>Fields people are aiming at</h3><div id="an-fields"></div></div>
+      </div></div>
+    </details>
 
-      <div class="card">
-        <h2>What gets recommended, and what gets clicked</h2>
-        <div class="chart-grid">
-          <div class="chart-box"><h3>By category</h3>
-            <p class="hint">Volume of recommendations, with the average fit score each category earns.</p>
-            <div id="an-categories"></div></div>
-          <div class="chart-box"><h3>Most-recommended events</h3>
-            <div id="an-topevents"></div></div>
-          <div class="chart-box"><h3>Most-clicked events</h3>
-            <p class="hint">Recommendations that people actually opened.</p>
-            <div id="an-clicked"></div></div>
-          <div class="chart-box"><h3>Return usage</h3>
-            <p class="hint">How many analyses each person has run.</p>
-            <div id="an-repeat"></div></div>
-        </div>
-      </div>
+    <details class="group">
+      <summary>What gets recommended, and what gets clicked<span class="caret">&#9656;</span></summary>
+      <div class="group-body"><div class="chart-grid">
+        <div class="chart-box"><h3>By category</h3><div id="an-categories"></div></div>
+        <div class="chart-box"><h3>Most-recommended events</h3><div id="an-topevents"></div></div>
+        <div class="chart-box"><h3>Most-clicked events</h3><div id="an-clicked"></div></div>
+        <div class="chart-box"><h3>Return usage</h3><div id="an-repeat"></div></div>
+      </div></div>
+    </details>
 
-      <div class="card">
-        <h2>When people use it</h2>
-        <div class="chart-grid">
-          <div class="chart-box"><h3>By hour of day</h3>
-            <p class="hint">Server time (UTC). Darker means busier.</p>
-            <div id="an-hours"></div></div>
-          <div class="chart-box"><h3>By day of week</h3>
-            <div id="an-weekdays"></div></div>
-        </div>
-      </div>
+    <details class="group">
+      <summary>When people use it<span class="caret">&#9656;</span></summary>
+      <div class="group-body"><div class="chart-grid">
+        <div class="chart-box"><h3>By hour of day (UTC)</h3><div id="an-hours"></div></div>
+        <div class="chart-box"><h3>By day of week</h3><div id="an-weekdays"></div></div>
+      </div></div>
+    </details>
 
-      <div class="card">
-        <h2>Uploads and location</h2>
+    <details class="group" id="an-map-group">
+      <summary>Uploads and location<span class="caret">&#9656;</span></summary>
+      <div class="group-body">
         <div class="chart-grid">
-          <div class="chart-box"><h3>Files received</h3>
-            <p class="hint">Only the extracted text is kept for analysis; these are the file records themselves.</p>
-            <div id="an-files"></div></div>
-          <div class="chart-box"><h3>Location permission</h3>
-            <p class="hint">Asked only after consent, and always optional.</p>
-            <div id="an-locconsent"></div></div>
+          <div class="chart-box"><h3>Files received</h3><div id="an-files"></div></div>
+          <div class="chart-box"><h3>Location permission</h3><div id="an-locconsent"></div></div>
         </div>
-        <h3 style="font-family:'Space Grotesk',sans-serif;font-size:.82rem;color:var(--navy);margin-top:16px;">Where people are</h3>
-        <p class="hint">Every location point users have shared, at the precision their browser reported.</p>
+        <h3 style="margin-top:16px">Where people are</h3>
+        <p class="hint">Every location point shared, at the precision the browser reported. The map
+          library is fetched only when this group is opened.</p>
         <div class="an-map" id="an-map"></div>
       </div>
+    </details>
 
-      <div class="card">
-        <h2>Training data</h2>
-        <p class="hint">Human-reviewed examples in the retrieval set, by verdict. These feed the scorer's few-shot context.</p>
-        <div id="an-labeled"></div>
+    <details class="group">
+      <summary>Training data and latest runs<span class="caret">&#9656;</span></summary>
+      <div class="group-body">
+        <h3>Human-reviewed examples</h3><div id="an-labeled"></div>
+        <h3 style="margin-top:16px">Latest analyses</h3><div id="an-recent"></div>
       </div>
+    </details>
 
-      <div class="card">
-        <h2>Latest analyses</h2>
-        <p class="hint">The most recent runs, newest first.</p>
-        <div id="an-recent"></div>
-      </div>
-
-      <div class="card">
-        <h2>Full traffic attribution</h2>
-        <p class="hint">Every UTM combination and referrer we have recorded, per consented visitor.</p>
+    <details class="group">
+      <summary>Traffic attribution<span class="caret">&#9656;</span></summary>
+      <div class="group-body">
+        <h3>Every UTM combination and referrer</h3>
         <div id="an-traffic"></div>
-      </div>
-
-      <div class="card">
-        <h2>Broken down by where people came from</h2>
-        <p class="hint">Same three steps as above, split per traffic source. "Source" is the UTM param if the link had one, otherwise the referring site's domain, otherwise "direct / unknown" (typed the URL, or the browser withheld it). The last two columns are conversion rates, not raw counts.</p>
+        <h3 style="margin-top:18px">Broken down by where people came from</h3>
+        <p class="hint">The last two columns are conversion rates, not raw counts.</p>
         <div class="lookup-row">
-          <input type="text" id="an-filter-input" placeholder="Filter by source…" oninput="renderFunnel()">
-          <select id="an-sort-sel" onchange="renderFunnel()">
+          <input type="text" id="an-filter-input" placeholder="Filter by source…">
+          <select id="an-sort-sel">
             <option value="accepted">Sort: Most accepted</option>
             <option value="submitted_analysis">Sort: Most submitted a CV</option>
             <option value="clicked_recommendation">Sort: Most clicked an event</option>
             <option value="source">Sort: Source name (A-Z)</option>
           </select>
         </div>
-        <div id="analytics-body"><div class="empty">Loading…</div></div>
+        <div id="analytics-body"></div>
       </div>
-    </div>
+    </details>
+  </div>
+
   </main>
 </div>
 
+<div id="toasts" aria-live="polite"></div>
+<dialog class="sheet" id="confirm-dlg">
+  <div class="sheet-body"><h3 id="confirm-title">Are you sure?</h3><p id="confirm-text"></p></div>
+  <div class="sheet-foot">
+    <button class="btn secondary" id="confirm-no">Cancel</button>
+    <button class="btn danger" id="confirm-yes">Confirm</button>
+  </div>
+</dialog>
+
 <script>
+/* ===========================================================================
+   ORBITCAST ADMIN — runtime
+   Three things the previous build got wrong and this one fixes by design:
+     1. unlocking fired seven loads at once, six of them for hidden tabs;
+     2. every tab click refetched, so nothing was ever cached;
+     3. api() recorded err.status and then ignored it, so a 401 or a 429
+        mid-session left every panel showing a bare string and no way back.
+   =========================================================================== */
+
 const SECRET_KEY = "oc_admin_secret";
+const THEME_KEY  = "oc_admin_theme";
 let SECRET = sessionStorage.getItem(SECRET_KEY) || "";
+
+/* ---------------------------------------------------------------- theme -- */
+function applyTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  const b = document.getElementById("theme-btn");
+  if (b) { b.textContent = t === "dark" ? "☾" : t === "light" ? "☀" : "◐";
+           b.title = "Theme: " + t + " (click to change)"; }
+}
+applyTheme(localStorage.getItem(THEME_KEY) || "auto");
+
+/* ---------------------------------------------------------------- toast -- */
+function toast(message, kind) {
+  const box = document.getElementById("toasts");
+  const el = document.createElement("div");
+  el.className = "toast " + (kind || "");
+  el.textContent = message;
+  box.appendChild(el);
+  setTimeout(() => { el.style.opacity = "0"; setTimeout(() => el.remove(), 250); }, kind === "err" ? 7000 : 4000);
+}
+
+/* -------------------------------------------------------------- confirm -- */
+/* Replaces confirm(): a real dialog, so a destructive action states what it
+   will do rather than relying on a one-line browser prompt. */
+function confirmAction(title, text, okLabel) {
+  const dlg = document.getElementById("confirm-dlg");
+  document.getElementById("confirm-title").textContent = title;
+  document.getElementById("confirm-text").textContent = text || "";
+  const yes = document.getElementById("confirm-yes");
+  yes.textContent = okLabel || "Confirm";
+  return new Promise(resolve => {
+    const done = v => { dlg.close(); yes.onclick = null; resolve(v); };
+    yes.onclick = () => done(true);
+    document.getElementById("confirm-no").onclick = () => done(false);
+    dlg.onclose = () => resolve(false);
+    dlg.showModal();
+  });
+}
+
+/* ----------------------------------------------------------- busy state -- */
+/* Every control that writes goes through this. Before, addSource / addLink /
+   uploadFile / save-rules never disabled anything, so a double click sent two
+   writes and nothing on screen said a request was in flight. */
+async function withBusy(btn, fn) {
+  if (!btn) return fn();
+  if (btn.dataset.busy) return;
+  btn.dataset.busy = "1"; btn.disabled = true;
+  try { return await fn(); }
+  finally { delete btn.dataset.busy; btn.disabled = false; }
+}
+function bindBusy(id, fn) {
+  const el = document.getElementById(id);
+  if (el) el.onclick = () => withBusy(el, () => fn(el));
+  return el;
+}
+
+/* ------------------------------------------------------------- fetching -- */
+let RATE_LIMITED_UNTIL = 0;
 
 function api(path, opts = {}) {
   opts.headers = Object.assign({ "X-Admin-Secret": SECRET }, opts.headers || {});
   return fetch(path, opts).then(async r => {
     const data = await r.json().catch(() => ({}));
     if (!r.ok) {
-      // Carry the body on the error, not just its message. A refused add
-      // returns the full re-run verdict, and throwing that away is why the
-      // panel kept showing the checks from the earlier "Check it" run while
-      // the message above it described a different set of failures.
       const err = new Error(data.error || `Request failed (${r.status})`);
-      err.payload = data;
-      err.status = r.status;
+      err.payload = data; err.status = r.status;
+      // 401 mid-session means the secret was rotated or revoked. Re-lock
+      // instead of painting "Unauthorized" into eight panels.
+      if (r.status === 401) { relock("That secret is no longer accepted — it may have been rotated on the server."); }
+      if (r.status === 429) {
+        const retry = Number(r.headers.get("Retry-After")) || 60;
+        RATE_LIMITED_UNTIL = Date.now() + retry * 1000;
+        err.message = `Rate limited. Try again in about ${Math.ceil(retry / 60)} min.`;
+        toast(err.message, "err");
+      }
       throw err;
     }
     return data;
   });
 }
 
-async function tryUnlock(secret) {
-  SECRET = secret;
-  await api("/api/admin/config"); // throws on 401
-  sessionStorage.setItem(SECRET_KEY, secret);
-  document.getElementById("gate").style.display = "none";
-  document.getElementById("app").style.display = "block";
-  loadExamples();
-  loadRules();
-  loadUsers();
-  loadLinks();
-  loadSources();
-  loadCandidates();
-  loadCoverage();
+/* ---------------------------------------------------------------- states -- */
+/* Loading, empty and error are three distinct things and must never render
+   identically — the old build put all three in the same grey <div>. */
+function stateLoading(el, msg) {
+  el.innerHTML = `<div class="state loading"><div class="skel" style="width:70%"></div>
+    <div class="skel" style="width:90%"></div><div class="skel" style="width:55%"></div>
+    <div class="state-sub">${esc(msg || "Loading…")}</div></div>`;
+}
+function stateEmpty(el, title, sub) {
+  el.innerHTML = `<div class="state empty"><div class="state-ico">◌</div>
+    <div>${esc(title)}</div>${sub ? `<div class="state-sub">${esc(sub)}</div>` : ""}</div>`;
+}
+function stateError(el, err, retryKey) {
+  el.innerHTML = `<div class="state error"><div class="state-ico">⚠</div>
+    <div>${esc(err && err.message || "Something went wrong.")}</div>
+    <div class="state-sub">${err && err.status ? "HTTP " + err.status : "No response from the server."}</div>
+    ${retryKey ? `<button class="btn secondary sm" data-retry="${esc(retryKey)}">Try again</button>` : ""}</div>`;
+  if (retryKey) {
+    const b = el.querySelector("[data-retry]");
+    if (b) b.onclick = () => withBusy(b, () => ensure(retryKey, true));
+  }
+}
+const esc = s => (s == null ? "" : String(s)).replace(/[&<>"']/g,
+  c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function setStamp(id, when) {
+  if (!id) return;                       // views without a stamp element
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (!when) { el.textContent = ""; return; }
+  const mins = Math.floor((Date.now() - when) / 60000);
+  el.textContent = mins < 1 ? "updated just now" : `updated ${mins} min ago`;
 }
 
-document.getElementById("unlock-btn").onclick = async () => {
+/* ---------------------------------------------------------------- leaflet -- */
+/* Loaded on demand. It was a blocking <script> in <head> on every page view:
+   ~150KB for one map in one view, behind a gate most views never pass. */
+let LEAFLET_PROMISE = null;
+function ensureLeaflet() {
+  if (typeof L !== "undefined") return Promise.resolve(true);
+  if (LEAFLET_PROMISE) return LEAFLET_PROMISE;
+  LEAFLET_PROMISE = new Promise(resolve => {
+    const css = document.createElement("link");
+    css.rel = "stylesheet"; css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+    css.integrity = "sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="; css.crossOrigin = "";
+    document.head.appendChild(css);
+    const js = document.createElement("script");
+    js.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    js.integrity = "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="; js.crossOrigin = "";
+    js.onload = () => resolve(true);
+    js.onerror = () => resolve(false);   // offline/CDN blocked: callers degrade
+    document.head.appendChild(js);
+  });
+  return LEAFLET_PROMISE;
+}
+
+/* ============================== VIEW REGISTRY ==============================
+   One entry per loadable view. Nothing loads until its panel is opened, and
+   nothing reloads inside its TTL unless Refresh is pressed. Writes call
+   invalidate() on whatever they changed. */
+const VIEWS = {};            // name -> { load, ttl, stamp }
+const CACHE = {};            // name -> { at, err }
+
+function registerView(name, load, opts) {
+  VIEWS[name] = Object.assign({ load, ttl: 120000 }, opts || {});
+}
+function invalidate() {
+  [].slice.call(arguments).forEach(n => { delete CACHE[n]; });
+}
+async function ensure(name, force) {
+  const v = VIEWS[name];
+  if (!v) return;
+  const c = CACHE[name];
+  if (!force && c && !c.err && Date.now() - c.at < v.ttl) { setStamp(v.stamp, c.at); return; }
+  try {
+    await v.load();
+    CACHE[name] = { at: Date.now() };
+  } catch (e) {
+    CACHE[name] = { at: Date.now(), err: e };
+  }
+  setStamp(v.stamp, CACHE[name].at);
+}
+
+/* --------------------------------------------------------------- routing -- */
+const DEFAULT_SUB = { catalogue: "coverage", people: "accounts", engine: "rules", ops: "scrape" };
+const SUB_VIEW = {
+  coverage: "coverage", organisers: "organisers", leads: "leads", addlink: "addlink",
+  events: "events", accounts: "accounts", visitors: "visitors", rules: "rules",
+  examples: "examples", upload: null, scrape: "scrape", mail: "mail", audit: "audit",
+};
+let CURRENT_SECTION = "catalogue";
+const CURRENT_SUB = Object.assign({}, DEFAULT_SUB);
+
+function showSection(name) {
+  CURRENT_SECTION = name;
+  document.querySelectorAll(".sec").forEach(b =>
+    b.setAttribute("aria-selected", String(b.dataset.section === name)));
+  document.querySelectorAll(".section").forEach(s =>
+    s.classList.toggle("active", s.id === "section-" + name));
+  if (name === "analytics") { ensure("analytics"); return; }
+  showSub(name, CURRENT_SUB[name] || DEFAULT_SUB[name]);
+}
+function showSub(section, sub) {
+  CURRENT_SUB[section] = sub;
+  const root = document.getElementById("section-" + section);
+  if (!root) return;
+  root.querySelectorAll(".subtab").forEach(b =>
+    b.setAttribute("aria-selected", String(b.dataset.sub === sub)));
+  root.querySelectorAll(".subpanel").forEach(p =>
+    p.classList.toggle("active", p.id === "sub-" + sub));
+  const view = SUB_VIEW[sub];
+  if (view) ensure(view);
+}
+function wireNav() {
+  document.querySelectorAll(".sec").forEach(b => { b.onclick = () => showSection(b.dataset.section); });
+  document.querySelectorAll(".subtab").forEach(b => {
+    b.onclick = () => showSub(b.closest(".section").id.replace("section-", ""), b.dataset.sub);
+  });
+  document.querySelectorAll("[data-refresh]").forEach(b => {
+    b.onclick = () => withBusy(b, () => ensure(b.dataset.refresh, true));
+  });
+}
+
+/* ------------------------------------------------------------------ gate -- */
+function relock(reason) {
+  sessionStorage.removeItem(SECRET_KEY);
+  SECRET = "";
+  Object.keys(CACHE).forEach(k => delete CACHE[k]);
+  document.getElementById("app").hidden = true;
+  document.getElementById("gate").style.display = "";
+  const err = document.getElementById("gate-err");
+  if (reason) err.textContent = reason;
+}
+
+async function tryUnlock(secret) {
+  SECRET = secret;
+  await api("/api/admin/config");            // throws on a bad secret
+  sessionStorage.setItem(SECRET_KEY, secret);
+  document.getElementById("gate").style.display = "none";
+  document.getElementById("app").hidden = false;
+  document.getElementById("gate-err").textContent = "";
+  bootOnce();
+  showSection(CURRENT_SECTION);              // loads exactly ONE view
+}
+
+let BOOTED = false;
+function bootOnce() {
+  if (BOOTED) return;
+  BOOTED = true;
+  wireNav();
+  wireActions();
+  pollScrape();                              // cheap, unauthenticated, 1 call
+  setInterval(() => {
+    const v = VIEWS[SUB_VIEW[CURRENT_SUB[CURRENT_SECTION]] || ""];
+    if (v) setStamp(v.stamp, (CACHE[SUB_VIEW[CURRENT_SUB[CURRENT_SECTION]]] || {}).at);
+  }, 30000);
+}
+
+document.getElementById("unlock-btn").onclick = function () {
+  const btn = this;
   const val = document.getElementById("secret-input").value.trim();
   const err = document.getElementById("gate-err");
   err.textContent = "";
-  if (!val) return;
-  try {
-    await tryUnlock(val);
-  } catch (e) {
-    err.textContent = "Wrong secret, or ADMIN_SECRET isn't set on the server.";
-  }
+  if (!val) { err.textContent = "Enter the secret."; return; }
+  withBusy(btn, async () => {
+    try { await tryUnlock(val); }
+    catch (e) {
+      err.textContent = e.status === 401
+        ? "Rejected. Either the secret is wrong, or the server's ADMIN_SECRET is unset or shorter than 24 characters — it fails closed on both."
+        : (e.message || "Could not reach the server.");
+    }
+  });
 };
 document.getElementById("secret-input").addEventListener("keydown", e => {
   if (e.key === "Enter") document.getElementById("unlock-btn").click();
 });
-document.getElementById("lock-btn").onclick = () => {
-  sessionStorage.removeItem(SECRET_KEY);
-  location.reload();
+document.getElementById("lock-btn").onclick = () => { relock(""); location.reload(); };
+document.getElementById("theme-btn").onclick = () => {
+  const now = localStorage.getItem(THEME_KEY) || "auto";
+  const next = now === "auto" ? "light" : now === "light" ? "dark" : "auto";
+  localStorage.setItem(THEME_KEY, next);
+  applyTheme(next);
 };
 
-if (SECRET) {
-  tryUnlock(SECRET).catch(() => { sessionStorage.removeItem(SECRET_KEY); });
-}
 
-// TABS
-document.querySelectorAll(".tab").forEach(btn => {
-  btn.onclick = () => {
-    document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
-    document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
-    btn.classList.add("active");
-    document.getElementById("panel-" + btn.dataset.tab).classList.add("active");
-    if (btn.dataset.tab === "users") loadUsers();
-    if (btn.dataset.tab === "analytics") loadAnalytics();
-    if (btn.dataset.tab === "sources") loadCoverage();
-  };
-});
-
+/* ---------- reused: dataset upload, examples, scoring rules ---------- */
 // UPLOAD
 const dropzone = document.getElementById("dropzone");
 const fileInput = document.getElementById("file-input");
@@ -635,7 +1350,7 @@ async function uploadFile(file) {
     const data = await api("/api/admin/ingest", { method: "POST", body: form });
     uploadMsg.className = "msg ok";
     uploadMsg.textContent = `Found ${data.found}, stored ${data.stored}, skipped ${data.skipped}.`;
-    loadExamples();
+    invalidate("examples"); loadExamples();
   } catch (e) {
     uploadMsg.className = "msg err";
     uploadMsg.textContent = e.message;
@@ -671,7 +1386,7 @@ async function loadExamples() {
     `).join("");
     list.querySelectorAll(".ex-del").forEach(btn => {
       btn.onclick = async () => {
-        if (!confirm("Delete this example?")) return;
+        if (!await confirmAction("Delete this example?", "It leaves the retrieval set immediately and stops informing the scorer.", "Delete")) return;
         await api(`/api/admin/examples/${btn.dataset.id}`, { method: "DELETE" });
         loadExamples();
       };
@@ -744,7 +1459,7 @@ document.getElementById("save-rules-btn").onclick = async () => {
 };
 
 document.getElementById("reset-rules-btn").onclick = async () => {
-  if (!confirm("Reset scoring rules to the built-in default?")) return;
+  if (!await confirmAction("Reset scoring rules?", "Your custom guidance is replaced by the built-in default on the next analysis.", "Reset")) return;
   const msg = document.getElementById("rules-msg");
   try {
     const data = await api("/api/admin/config", {
@@ -763,6 +1478,8 @@ document.getElementById("reset-rules-btn").onclick = async () => {
 };
 
 // ── SOURCES (recurring organisers) ───────────────────────────────────────
+
+/* ---------- reused: organiser verdict / check / add ------------------ */
 // Adding an organiser is a bigger commitment than adding an event - it is
 // scraped every refresh from then on - so the same two-step applies: check
 // first, add only once the verdict is on screen.
@@ -823,118 +1540,12 @@ async function addSource() {
     document.getElementById("src-name").value = "";
     renderSrcVerdict(null);
     document.getElementById("src-add-btn").style.display = "none";
-    loadSources(); loadCandidates();
+    invalidate("organisers", "leads", "coverage");
+    ensure("organisers", true); ensure("leads", true);
   } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
 }
 
-async function loadCoverage() {
-  const box = document.getElementById("coverage-box");
-  try {
-    const { summary, last_run } = await api("/api/summary");
-    if (!summary || !summary.length) {
-      box.innerHTML = `<div class="empty">No scrape has run yet.</div>`; return;
-    }
-    const byCat = {};
-    summary.forEach(r => { (byCat[r.category] = byCat[r.category] || []).push(r); });
-    // Thinnest category first: the point of this view is to show where the
-    // catalog is starving, and sorting it alphabetically buries that.
-    const cats = Object.keys(byCat).sort((a, b) =>
-      byCat[a].reduce((n, r) => n + (r.count || 0), 0) -
-      byCat[b].reduce((n, r) => n + (r.count || 0), 0));
-    const total = summary.reduce((n, r) => n + (r.count || 0), 0);
-    box.innerHTML = `<p class="ex-meta">${total} events · ${summary.length} sources · last scrape ${fmtDate(last_run)}</p>` +
-      cats.map(cat => {
-        const rows = byCat[cat].slice().sort((a, b) => (b.count || 0) - (a.count || 0));
-        const sub = rows.reduce((n, r) => n + (r.count || 0), 0);
-        return `
-      <div class="ex-item">
-        <div class="ex-head">
-          <span class="ex-src">${escapeHtml(cat || "Uncategorised")}</span>
-          <span class="badge ${sub >= 25 ? "good" : ""}">${sub} event${sub === 1 ? "" : "s"}</span>
-        </div>
-        ${rows.map(r => `<p class="ex-meta">${escapeHtml(r.emoji || "")} ${escapeHtml(r.source)}
-           — <b>${r.count || 0}</b></p>`).join("")}
-      </div>`;
-      }).join("");
-  } catch (e) { box.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`; }
-}
-
-async function loadSources() {
-  const list = document.getElementById("sources-list");
-  try {
-    const { sources } = await api("/api/admin/sources");
-    if (!sources.length) { list.innerHTML = `<div class="empty">No organisers added yet.</div>`; return; }
-    list.innerHTML = sources.map(s => `
-      <div class="ex-item">
-        <div class="ex-head">
-          <span class="ex-src">${escapeHtml(s.category || "")}</span>
-          <button class="btn secondary js-src-status" data-id="${escapeHtml(s.identifier)}"
-                  data-next="${s.status === "active" ? "paused" : "active"}"
-                  style="font-size:.62rem;padding:4px 10px;">${s.status === "active" ? "Pause" : "Resume"}</button>
-        </div>
-        <p><b>${escapeHtml(s.emoji || "")} ${escapeHtml(s.name || "")}</b>
-           <span class="badge ${s.status === "active" ? "good" : ""}">${escapeHtml(s.status)}</span></p>
-        <div class="ex-meta">${escapeHtml(s.identifier)} · ${escapeHtml(s.kind)} · ${fmtDate(s.created_at)}</div>
-      </div>`).join("");
-    list.querySelectorAll(".js-src-status").forEach(b => {
-      b.onclick = async () => {
-        try {
-          await api("/api/admin/sources/status", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ identifier: b.dataset.id, status: b.dataset.next })
-          });
-          loadSources();
-        } catch (e) { alert(e.message); }
-      };
-    });
-  } catch (e) { list.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`; }
-}
-
-async function loadCandidates() {
-  const list = document.getElementById("candidates-list");
-  try {
-    const { candidates } = await api("/api/admin/source-candidates?status=new");
-    if (!candidates.length) { list.innerHTML = `<div class="empty">No unreviewed leads.</div>`; return; }
-    list.innerHTML = candidates.map(c => `
-      <div class="ex-item">
-        <div class="ex-head">
-          <span class="ex-src">${escapeHtml(c.discovered_via || "discovered")}</span>
-          <span>
-            <button class="btn js-cand-check" data-id="${escapeHtml(c.identifier)}"
-                    data-name="${escapeHtml(c.name || "")}" style="font-size:.62rem;padding:4px 10px;">Check</button>
-            <button class="btn danger js-cand-ignore" data-id="${escapeHtml(c.identifier)}"
-                    style="font-size:.62rem;padding:4px 10px;">Ignore</button>
-          </span>
-        </div>
-        <p><b>${escapeHtml(c.name || c.identifier)}</b></p>
-        <p>${c.event_count} events seen · in ${c.times_seen} scrapes${c.city ? " · " + escapeHtml(c.city) : ""}</p>
-        ${c.sample_title ? `<p class="ex-meta">e.g. ${escapeHtml(c.sample_title)}</p>` : ""}
-        <div class="ex-meta">${escapeHtml(c.identifier)}</div>
-      </div>`).join("");
-    // "Check" drops the lead into the form above rather than acting on it -
-    // an organiser should never be added without its verdict being seen.
-    list.querySelectorAll(".js-cand-check").forEach(b => {
-      b.onclick = () => {
-        document.getElementById("src-id").value = b.dataset.id;
-        document.getElementById("src-name").value = b.dataset.name;
-        document.getElementById("src-id").scrollIntoView({ behavior: "smooth", block: "center" });
-        checkSource();
-      };
-    });
-    list.querySelectorAll(".js-cand-ignore").forEach(b => {
-      b.onclick = async () => {
-        try {
-          await api(`/api/admin/source-candidates/${encodeURIComponent(b.dataset.id)}`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: "ignored" })
-          });
-          loadCandidates();
-        } catch (e) { alert(e.message); }
-      };
-    });
-  } catch (e) { list.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`; }
-}
-
+/* ---------- reused: add-by-link, helpers, SVG chart kit -------------- */
 document.getElementById("src-check-btn").onclick = checkSource;
 document.getElementById("src-add-btn").onclick = addSource;
 document.getElementById("src-id").addEventListener("keydown", e => {
@@ -1071,7 +1682,7 @@ async function loadLinks() {
   const list = document.getElementById("links-list");
   try {
     const { events } = await api("/api/admin/links");
-    if (!events.length) { list.innerHTML = `<div class="empty">Nothing added by link yet.</div>`; return; }
+    if (!events.length) { stateEmpty(list, "Nothing added by link yet.", "Paste an event URL above to put one into the catalogue by hand."); return; }
     // The URL goes in a data attribute and the handler is bound afterwards,
     // rather than being interpolated into an inline onclick. escapeHtml turns
     // an apostrophe into &#39;, which the HTML parser decodes back to a real
@@ -1091,10 +1702,14 @@ async function loadLinks() {
         <div class="ex-meta">${e.added_by ? "Added by " + escapeHtml(e.added_by) + " · " : ""}${fmtDate(e.created_at)}</div>
       </div>`).join("");
     list.querySelectorAll(".js-remove-link").forEach(btn => {
-      btn.onclick = () => removeLink(btn.dataset.url);
+      btn.onclick = () => withBusy(btn, async () => {
+        if (!await confirmAction("Remove this event?",
+            "It stops being re-emitted into the catalogue on the next scrape.", "Remove")) return;
+        await removeLink(btn.dataset.url);
+      });
     });
   } catch (e) {
-    list.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`;
+    stateError(list, e, "addlink");
   }
 }
 
@@ -1140,7 +1755,7 @@ async function downloadRawFile(analysisId) {
     a.click();
     a.remove();
   } catch (e) {
-    alert(e.message);
+    toast(e.message, "err");
   }
 }
 
@@ -1157,7 +1772,7 @@ function fmtBytes(n) {
   return (n / (1024 * 1024)).toFixed(1) + " MB";
 }
 function initAdminLocMap(el) {
-  if (typeof L === "undefined") return; // CDN blocked/offline - the coordinate link above still works
+  if (typeof L === "undefined") return;  // ensureLeaflet() loads it before this is called // CDN blocked/offline - the coordinate link above still works
   const lat = +el.dataset.lat, lng = +el.dataset.lng;
   const map = L.map(el, { scrollWheelZoom: false, attributionControl: true }).setView([lat, lng], 12);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -1303,68 +1918,7 @@ function anTable(rows, cols){
       `<td>${c.render ? c.render(r) : anEsc(r[c.key])}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
 }
 
-let AN_DAYS = 30, AN_MAP = null;
-function setAnRange(d){
-  AN_DAYS = d;
-  document.querySelectorAll(".range-row button").forEach(b =>
-    b.classList.toggle("on", Number(b.dataset.days) === d));
-  loadAnalytics();
-}
-
-async function loadAnalytics() {
-  const body = document.getElementById("analytics-body");
-  const viz = document.getElementById("an-funnel-viz");
-  const summary = document.getElementById("an-plain-summary");
-  body.innerHTML = `<div class="empty">Loading…</div>`;
-  summary.textContent = "Loading…";
-  viz.innerHTML = "";
-  try {
-    const data = await api("/api/admin/analytics?days=" + AN_DAYS);
-    FUNNEL_DATA = data.funnel || [];
-    renderAnalyticsCharts(data);
-
-    if (!FUNNEL_DATA.length) {
-      summary.textContent = "No one has accepted the consent banner yet - this fills in once real visitors start using the app.";
-      renderFunnel();
-      return;
-    }
-
-    // Overall totals across every source - this is the number that
-    // actually answers "is this working", before slicing by source at all.
-    const totals = FUNNEL_DATA.reduce((t, r) => ({
-      accepted: t.accepted + r.accepted,
-      submitted: t.submitted + r.submitted_analysis,
-      clicked: t.clicked + r.clicked_recommendation,
-    }), { accepted: 0, submitted: 0, clicked: 0 });
-    const pct = (num, den) => den ? Math.round(num / den * 100) : 0;
-    const submitPct = pct(totals.submitted, totals.accepted);
-    const clickPct = pct(totals.clicked, totals.submitted);
-
-    summary.innerHTML = `<b>${totals.accepted}</b> people have accepted the consent banner. `
-      + `Of those, <b>${totals.submitted}</b> went on to actually submit a CV or description `
-      + `(<b>${submitPct}%</b> of everyone who accepted). Of the people who got results, `
-      + `<b>${totals.clicked}</b> clicked through to an actual event `
-      + `(<b>${clickPct}%</b> of the people who submitted).`;
-
-    const bar = (label, count, denom) => {
-      const width = denom ? Math.max(2, Math.round(count / denom * 100)) : 2;
-      return `<div class="funnel-row">
-          <div class="funnel-label">${label}</div>
-          <div class="funnel-bar-track"><div class="funnel-bar-fill" style="width:${width}%">${count}</div></div>
-          <div class="funnel-pct">${denom ? Math.round(count / denom * 100) + "% of step above" : "—"}</div>
-        </div>`;
-    };
-    viz.innerHTML = bar("Accepted the banner", totals.accepted, null)
-      + bar("Submitted a CV", totals.submitted, totals.accepted)
-      + bar("Clicked an event", totals.clicked, totals.submitted);
-
-    renderFunnel();
-  } catch (e) {
-    summary.textContent = "";
-    body.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`;
-  }
-}
-
+/* ---------- reused: analytics chart rendering + funnel table --------- */
 function renderAnalyticsCharts(d) {
   const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
   const t = d.totals || {};
@@ -1383,12 +1937,18 @@ function renderAnalyticsCharts(d) {
   const kpi = (v, l, sub, cls) =>
     `<div class="kpi ${cls || ""}"><div class="kpi-v">${v}</div><div class="kpi-l">${anEsc(l)}</div>
      ${sub ? `<div class="kpi-sub">${anEsc(sub)}</div>` : ""}</div>`;
+  // Headline counters stay all-time; the window is shown underneath each one
+  // that has a windowed equivalent, so the range buttons visibly do something
+  // to the KPI strip as well as to the charts below it.
+  const w = d.totals_window || {};
+  const wd = d.window_days || 0;
+  const win = v => wd ? `${anNum(v || 0)} in the last ${wd} days` : "all time";
   set("an-kpis",
       kpi(anNum(t.visitors), "Browsers seen", `${t.accepted || 0} accepted · ${t.declined || 0} declined`)
-    + kpi(acceptRate + "%", "Accepted consent", "of everyone who saw the banner")
-    + kpi(anNum(t.people_analysed), "People analysed", `${anNum(t.analyses)} analyses run`)
-    + kpi(anNum(t.recommendations), "Recommendations made", `${recsPer} per usable analysis`)
-    + kpi(anNum(t.clicks), "Event click-throughs", "recommendations actually opened")
+    + kpi(acceptRate + "%", "Accepted consent", `${win(w.accepted)}`)
+    + kpi(anNum(t.people_analysed), "People analysed", `${anNum(t.analyses)} analyses · ${win(w.people_analysed)}`)
+    + kpi(anNum(t.recommendations), "Recommendations made", `${recsPer} per usable analysis · ${win(w.recommendations)}`)
+    + kpi(anNum(t.clicks), "Event click-throughs", `${win(w.clicks)}`)
     + kpi(t.avg_fit ?? "—", "Average fit score", `range ${t.min_fit ?? "—"}–${t.max_fit ?? "—"}`)
     + kpi(zeroPct + "%", "Returned no matches", "honest refusals, by design", "good")
     + kpi(usableRate + "%", "Inputs usable", `${anNum(t.usable_inputs)} of ${anNum(t.analyses)}`)
@@ -1545,36 +2105,7 @@ function renderFunnel() {
     }).join("") + `</tbody></table>`;
 }
 
-async function loadUsers() {
-  document.getElementById("users-list-card").style.display = "block";
-  document.getElementById("user-detail-card").style.display = "none";
-  const list = document.getElementById("users-list");
-  list.innerHTML = `<div class="empty">Loading…</div>`;
-  try {
-    const data = await api("/api/admin/users");
-    if (!data.users.length) {
-      list.innerHTML = `<div class="empty">No one has been asked for consent yet.</div>`;
-      return;
-    }
-    list.innerHTML = `<table class="u-table"><thead><tr>
-        <th>oc_uid</th><th>Consented</th><th>Analyses</th><th>Interactions</th><th>Last active</th>
-      </tr></thead><tbody>` + data.users.map(u => `
-        <tr class="clickable" data-uid="${escapeHtml(u.oc_uid)}">
-          <td class="u-id">${escapeHtml(u.oc_uid)}</td>
-          <td>${u.consented ? "yes" : "no"}</td>
-          <td>${u.analyses_count}</td>
-          <td>${u.interactions_count}</td>
-          <td>${fmtDate(u.last_active)}</td>
-        </tr>
-      `).join("") + `</tbody></table>`;
-    list.querySelectorAll("tr[data-uid]").forEach(tr => {
-      tr.onclick = () => showUserDetail(tr.dataset.uid);
-    });
-  } catch (e) {
-    list.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`;
-  }
-}
-
+/* ---------- reused: visitor detail timeline -------------------------- */
 function oneLine(s, max = 90) {
   s = (s || "").replace(/\s+/g, " ").trim();
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
@@ -1585,6 +2116,7 @@ function fitPillClass(score) {
 }
 
 async function showUserDetail(oc_uid) {
+  showSub("people", "visitors");
   document.getElementById("users-list-card").style.display = "none";
   const card = document.getElementById("user-detail-card");
   card.style.display = "block";
@@ -1709,29 +2241,709 @@ async function showUserDetail(oc_uid) {
     }
 
     body.innerHTML = html;
-    body.querySelectorAll(".loc-map").forEach(initAdminLocMap);
+    if (body.querySelector(".loc-map")) {
+      ensureLeaflet().then(ok => { if (ok) body.querySelectorAll(".loc-map").forEach(initAdminLocMap); });
+    }
   } catch (e) {
     document.getElementById("u-detail-meta").textContent = "";
     body.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`;
   }
 }
 
-document.getElementById("u-back-btn").onclick = () => {
-  document.getElementById("user-detail-card").style.display = "none";
-  document.getElementById("users-list-card").style.display = "block";
+
+
+/* ===========================================================================
+   VIEWS
+   =========================================================================== */
+let AN_DAYS = 30, AN_MAP = null, AN_DATA = null;
+
+const fmtWhen = iso => {
+  if (!iso) return "never";
+  const d = new Date(iso); if (isNaN(d)) return String(iso);
+  const mins = Math.round((Date.now() - d.getTime()) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return mins + " min ago";
+  const h = Math.round(mins / 60);
+  if (h < 48) return h + "h ago";
+  return Math.round(h / 24) + "d ago";
 };
 
-document.getElementById("u-lookup-btn").onclick = () => {
-  const msg = document.getElementById("u-lookup-msg");
-  const val = document.getElementById("u-lookup-input").value.trim();
-  msg.className = "msg";
-  msg.textContent = "";
-  if (!val) { msg.className = "msg err"; msg.textContent = "Paste an oc_uid first."; return; }
-  showUserDetail(val).catch(() => {});
-};
-document.getElementById("u-lookup-input").addEventListener("keydown", e => {
-  if (e.key === "Enter") document.getElementById("u-lookup-btn").click();
-});
+/* ---------------------------------------------------------- COVERAGE ----- */
+let COVERAGE = null;
+
+async function loadCoverage() {
+  const box = document.getElementById("coverage-box");
+  stateLoading(box, "Reading the last scrape…");
+  try {
+    COVERAGE = await api("/api/admin/coverage");
+    renderCoverage();
+    const bad = (COVERAGE.sources || []).filter(s => (s.count || 0) === 0 && !s.paused).length;
+    document.getElementById("c-coverage").textContent = bad ? `${bad} at 0` : "";
+    document.querySelector('.sec[data-section="catalogue"]').classList.toggle("has-alert", bad > 0);
+  } catch (e) { stateError(box, e, "coverage"); throw e; }
+}
+
+function renderCoverage() {
+  const box = document.getElementById("coverage-box");
+  if (!COVERAGE) return;
+  const q = (document.getElementById("cov-q").value || "").toLowerCase().trim();
+  const only = document.getElementById("cov-problem").checked;
+  let rows = (COVERAGE.sources || []).filter(s =>
+    (!q || (s.source || "").toLowerCase().includes(q) || (s.category || "").toLowerCase().includes(q)) &&
+    (!only || (s.count || 0) <= 2));
+  document.getElementById("cov-count").textContent =
+    `${rows.length} of ${(COVERAGE.sources || []).length} sources · ${COVERAGE.total_events || 0} events`;
+  document.getElementById("cov-stamp").textContent = "last scrape " + fmtWhen(COVERAGE.last_run);
+  if (!rows.length) { stateEmpty(box, "No source matches that filter.", "Clear the search or turn off the problems-only switch."); return; }
+
+  const byCat = {};
+  rows.forEach(r => { (byCat[r.category || "Uncategorised"] = byCat[r.category || "Uncategorised"] || []).push(r); });
+  const cats = Object.keys(byCat).sort((a, b) =>
+    byCat[a].reduce((n, r) => n + (r.count || 0), 0) - byCat[b].reduce((n, r) => n + (r.count || 0), 0));
+
+  box.innerHTML = cats.map(cat => {
+    const list = byCat[cat].slice().sort((a, b) => (b.count || 0) - (a.count || 0));
+    const sub = list.reduce((n, r) => n + (r.count || 0), 0);
+    return `<div class="cat-block">
+      <div class="cat-head">${esc(cat)}
+        <span class="badge ${sub >= 25 ? "good" : sub ? "" : "bad"}" style="margin-left:auto">${sub} event${sub === 1 ? "" : "s"}</span>
+      </div>
+      ${list.map(s => {
+        const n = s.count || 0;
+        const cls = s.paused ? "" : n === 0 ? "zero" : n <= 2 ? "thin" : "";
+        const health = s.paused ? "paused — not scraped"
+          : s.last_error ? `last error: ${s.last_error}`
+          : n === 0 ? `0 events · last returned anything ${fmtWhen(s.last_success_at)}${s.consecutive_zero ? ` · ${s.consecutive_zero} empty runs in a row` : ""}`
+          : `last returned anything ${fmtWhen(s.last_success_at)}`;
+        return `<div class="src-row">
+          <div class="src-name">${esc(s.emoji || "")} <span>${esc(s.source)}</span>
+            ${s.kind === "luma" ? `<span class="badge info">luma</span>` : `<span class="badge">built-in</span>`}
+            ${s.paused ? `<span class="badge warn">paused</span>` : ""}</div>
+          <div class="src-count ${cls}">${n}</div>
+          <button class="btn xs secondary js-pause" data-src="${esc(s.source)}" data-next="${s.paused ? "0" : "1"}">${s.paused ? "Resume" : "Pause"}</button>
+          <div class="src-health">${esc(health)}</div>
+        </div>`;
+      }).join("")}
+    </div>`;
+  }).join("");
+
+  box.querySelectorAll(".js-pause").forEach(b => {
+    b.onclick = () => withBusy(b, async () => {
+      try {
+        await api("/api/admin/sources/pause", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ source: b.dataset.src, paused: b.dataset.next === "1" })
+        });
+        const row = (COVERAGE.sources || []).find(s => s.source === b.dataset.src);
+        if (row) row.paused = b.dataset.next === "1";
+        invalidate("organisers");
+        renderCoverage();
+        toast(`${b.dataset.src} ${b.dataset.next === "1" ? "paused" : "resumed"}.`, "ok");
+      } catch (e) { toast(e.message, "err"); }
+    });
+  });
+}
+
+/* -------------------------------------------------------- ORGANISERS ----- */
+let ORGS = [];
+async function loadOrganisers() {
+  const list = document.getElementById("sources-list");
+  stateLoading(list);
+  try { ORGS = (await api("/api/admin/sources")).sources || []; renderOrganisers(); }
+  catch (e) { stateError(list, e, "organisers"); throw e; }
+}
+function renderOrganisers() {
+  const list = document.getElementById("sources-list");
+  const q = (document.getElementById("src-q").value || "").toLowerCase().trim();
+  const rows = ORGS.filter(s => !q || (s.name || "").toLowerCase().includes(q) || (s.identifier || "").toLowerCase().includes(q));
+  document.getElementById("src-count").textContent = `${rows.length} of ${ORGS.length}`;
+  document.getElementById("c-organisers").textContent = ORGS.length || "";
+  if (!rows.length) { stateEmpty(list, ORGS.length ? "No organiser matches that filter." : "No organisers added yet.", ORGS.length ? "" : "Paste a Luma calendar link above to track one."); return; }
+  list.innerHTML = rows.map(s => `
+    <div class="ex-item">
+      <div class="ex-head">
+        <b>${esc(s.emoji || "")} ${esc(s.name || "")}</b>
+        <span class="badge ${s.status === "active" ? "good" : "warn"}">${esc(s.status)}</span>
+        <span class="ex-src">${esc(s.category || "")}</span>
+        <button class="btn xs secondary js-org-status" data-id="${esc(s.identifier)}"
+                data-next="${s.status === "active" ? "paused" : "active"}">${s.status === "active" ? "Pause" : "Resume"}</button>
+      </div>
+      <div class="ex-meta">${esc(s.identifier)} · ${esc(s.kind)} · added ${fmtWhen(s.created_at)}</div>
+    </div>`).join("");
+  list.querySelectorAll(".js-org-status").forEach(b => {
+    b.onclick = () => withBusy(b, async () => {
+      try {
+        await api("/api/admin/sources/status", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ identifier: b.dataset.id, status: b.dataset.next })
+        });
+        const row = ORGS.find(s => s.identifier === b.dataset.id);
+        if (row) row.status = b.dataset.next;
+        invalidate("coverage"); renderOrganisers();
+        toast(`Organiser ${b.dataset.next}.`, "ok");
+      } catch (e) { toast(e.message, "err"); }
+    });
+  });
+}
+
+/* -------------------------------------------------------------- LEADS ---- */
+/* 806 rows in the queue, an API that hard-capped at 100 with no offset and no
+   total, and a full refetch after every single decision against a 120/hour
+   limit. Paginated against a real total, filtered server-side, decided in
+   bulk, and applied optimistically. */
+const LEADS = { page: 0, size: 25, total: 0, rows: [], sel: new Set(), counts: {} };
+
+function leadQuery() {
+  const p = new URLSearchParams({
+    status: "new", limit: String(LEADS.size), offset: String(LEADS.page * LEADS.size),
+    q: document.getElementById("lead-q").value.trim(),
+    via: document.getElementById("lead-via").value,
+    min_events: document.getElementById("lead-min").value,
+    fresh: document.getElementById("lead-fresh").value,
+    sort: document.getElementById("lead-sort").value,
+  });
+  return p.toString();
+}
+
+async function loadLeads() {
+  const list = document.getElementById("leads-list");
+  stateLoading(list, "Reading the queue…");
+  try {
+    const d = await api("/api/admin/source-candidates?" + leadQuery());
+    LEADS.rows = d.candidates || []; LEADS.total = d.total || 0; LEADS.counts = d.counts || {};
+    LEADS.sel.clear();
+    renderLeads();
+    const tidy = d.tidy || {};
+    const n = (tidy.already_tracked || 0) + (tidy.thin_stale || 0);
+    const banner = document.getElementById("leads-tidy-banner");
+    banner.hidden = !n;
+    if (n) document.getElementById("leads-tidy-text").textContent =
+      `${n} of these need no judgment: ${tidy.already_tracked || 0} are already tracked sources and `
+      + `${tidy.thin_stale || 0} have one event or fewer and have not been seen in a fortnight.`;
+    document.getElementById("c-leads").textContent = LEADS.total || "";
+  } catch (e) { stateError(list, e, "leads"); throw e; }
+}
+
+function renderLeads() {
+  const list = document.getElementById("leads-list");
+  document.getElementById("leads-count").textContent = LEADS.total
+    ? `${LEADS.page * LEADS.size + 1}–${Math.min(LEADS.total, (LEADS.page + 1) * LEADS.size)} of ${LEADS.total} unreviewed`
+    : "0 unreviewed";
+  if (!LEADS.rows.length) {
+    stateEmpty(list, LEADS.counts.new ? "Nothing matches these filters." : "The queue is clear.",
+      LEADS.counts.new ? `${LEADS.counts.new} leads are still unreviewed under other filters.` : "New leads appear after each scrape.");
+    document.getElementById("leads-pager").hidden = true;
+    renderBulk(); return;
+  }
+  list.innerHTML = LEADS.rows.map(c => `
+    <div class="lead" data-id="${esc(c.identifier)}">
+      <input type="checkbox" class="js-lead-sel" aria-label="Select ${esc(c.name || c.identifier)}">
+      <div class="lead-main">
+        <div class="lead-name">${esc(c.name || c.identifier)}</div>
+        <div class="lead-meta">${c.event_count} event${c.event_count === 1 ? "" : "s"} · seen in ${c.times_seen} scrape${c.times_seen === 1 ? "" : "s"}
+          · last seen ${fmtWhen(c.last_seen)} · ${esc(c.discovered_via || "discovered")}${c.city ? " · " + esc(c.city) : ""}</div>
+        ${c.sample_title ? `<div class="lead-meta">e.g. ${esc(c.sample_title)}</div>` : ""}
+      </div>
+      <div class="lead-acts">
+        <button class="btn xs js-lead-check" data-id="${esc(c.identifier)}" data-name="${esc(c.name || "")}">Check</button>
+        <button class="btn xs secondary js-lead-ignore" data-id="${esc(c.identifier)}">Ignore</button>
+      </div>
+    </div>`).join("");
+
+  list.querySelectorAll(".js-lead-check").forEach(b => {
+    b.onclick = () => {
+      document.getElementById("src-id").value = b.dataset.id;
+      document.getElementById("src-name").value = b.dataset.name;
+      showSub("catalogue", "organisers");
+      document.getElementById("src-check-btn").click();
+    };
+  });
+  list.querySelectorAll(".js-lead-ignore").forEach(b => {
+    b.onclick = () => withBusy(b, () => decideLeads([b.dataset.id], "ignored"));
+  });
+  list.querySelectorAll(".js-lead-sel").forEach(cb => {
+    cb.onchange = () => {
+      const row = cb.closest(".lead");
+      row.classList.toggle("sel", cb.checked);
+      if (cb.checked) LEADS.sel.add(row.dataset.id); else LEADS.sel.delete(row.dataset.id);
+      renderBulk();
+    };
+  });
+
+  const pager = document.getElementById("leads-pager");
+  const pages = Math.max(1, Math.ceil(LEADS.total / LEADS.size));
+  pager.hidden = pages < 2;
+  pager.innerHTML = `
+    <button class="btn secondary sm" id="lead-prev" ${LEADS.page === 0 ? "disabled" : ""}>Previous</button>
+    <span class="pos">Page ${LEADS.page + 1} of ${pages}</span>
+    <button class="btn secondary sm" id="lead-next" ${LEADS.page + 1 >= pages ? "disabled" : ""}>Next</button>
+    <span class="spacer"></span>
+    <span class="pos">${LEADS.counts.added || 0} added · ${LEADS.counts.ignored || 0} ignored all time</span>`;
+  const prev = document.getElementById("lead-prev"), next = document.getElementById("lead-next");
+  if (prev) prev.onclick = () => { LEADS.page--; document.getElementById("lead-all").checked = false; ensure("leads", true); };
+  if (next) next.onclick = () => { LEADS.page++; document.getElementById("lead-all").checked = false; ensure("leads", true); };
+  renderBulk();
+}
+
+function renderBulk() {
+  const bar = document.getElementById("leads-bulk");
+  const n = LEADS.sel.size;
+  bar.hidden = !n;
+  if (!n) return;
+  bar.innerHTML = `<div class="bulkbar"><b>${n} selected</b>
+      <button class="btn secondary sm" id="bulk-ignore">Ignore ${n}</button>
+      <button class="btn secondary sm" id="bulk-clear">Clear</button></div>`;
+  document.getElementById("bulk-clear").onclick = () => {
+    LEADS.sel.clear();
+    document.getElementById("lead-all").checked = false;
+    document.querySelectorAll(".lead.sel").forEach(r => { r.classList.remove("sel"); r.querySelector("input").checked = false; });
+    renderBulk();
+  };
+  const bi = document.getElementById("bulk-ignore");
+  bi.onclick = () => withBusy(bi, async () => {
+    const ok = await confirmAction(`Ignore ${n} leads?`,
+      "They stay rejected across future scrapes and can be found again under the ignored status.", `Ignore ${n}`);
+    if (ok) await decideLeads(Array.from(LEADS.sel), "ignored");
+  });
+}
+
+/* Optimistic: the row goes immediately and the list is NOT refetched. The old
+   build issued a POST plus a full reload per decision, so roughly sixty
+   decisions exhausted the hourly budget and the panel printed a raw 429. */
+async function decideLeads(ids, status) {
+  try {
+    const r = await api("/api/admin/source-candidates/bulk", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identifiers: ids, status })
+    });
+    ids.forEach(id => {
+      const row = document.querySelector(`.lead[data-id="${CSS.escape(id)}"]`);
+      if (row) { row.classList.add("going"); setTimeout(() => row.remove(), 200); }
+      LEADS.sel.delete(id);
+    });
+    LEADS.rows = LEADS.rows.filter(c => ids.indexOf(c.identifier) === -1);
+    LEADS.total = Math.max(0, LEADS.total - (r.updated || ids.length));
+    LEADS.counts.ignored = (LEADS.counts.ignored || 0) + (status === "ignored" ? (r.updated || ids.length) : 0);
+    document.getElementById("c-leads").textContent = LEADS.total || "";
+    document.getElementById("leads-count").textContent = `${LEADS.total} unreviewed`;
+    renderBulk();
+    toast(`${r.updated || ids.length} lead${(r.updated || ids.length) === 1 ? "" : "s"} ${status}.`, "ok");
+    if (!LEADS.rows.length) ensure("leads", true);
+  } catch (e) { toast(e.message, "err"); }
+}
+
+/* ------------------------------------------------------------- EVENTS ---- */
+const EVENTS = { page: 0, size: 25, total: 0, rows: [] };
+async function loadEvents() {
+  const list = document.getElementById("ev-list");
+  stateLoading(list, "Reading the live catalogue…");
+  try {
+    const q = new URLSearchParams({ q: document.getElementById("ev-q").value.trim(),
+      limit: String(EVENTS.size), offset: String(EVENTS.page * EVENTS.size) });
+    const d = await api("/api/admin/catalogue?" + q.toString());
+    EVENTS.rows = d.events || []; EVENTS.total = d.total || 0;
+    document.getElementById("ev-count").textContent =
+      `${EVENTS.total} matching · ${d.catalogue_size || 0} in the catalogue`;
+    document.getElementById("ev-stamp").textContent = "scraped " + fmtWhen(d.last_run);
+    if (!EVENTS.rows.length) { stateEmpty(list, "No event matches that search.", "Try a shorter term, or clear the box to see everything."); }
+    else list.innerHTML = EVENTS.rows.map(e => `
+      <div class="ex-item">
+        <div class="ex-head">
+          <b>${esc(e.title || "")}</b>
+          ${e.offtopic ? `<span class="badge warn">off-topic: ${esc(e.offtopic)}</span>` : ""}
+          <span class="ex-src">${esc(e.category || "")}</span>
+          <button class="btn xs danger js-hide" data-id="${esc(e.id)}" data-title="${esc(e.title || "")}">Hide</button>
+        </div>
+        <div class="ex-meta">${esc(e.date || "no date")}${e.time ? " · " + esc(e.time) : ""}
+          · ${esc(e.location || (e.is_online ? "Online" : "London"))} · ${esc(e.source || "")}${e.format ? " · " + esc(e.format) : ""}</div>
+        ${e.url ? `<div class="ex-meta"><a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.url)}</a></div>` : ""}
+      </div>`).join("");
+    list.querySelectorAll(".js-hide").forEach(b => {
+      b.onclick = () => withBusy(b, async () => {
+        const ok = await confirmAction("Hide this event?",
+          `"${b.dataset.title}" leaves the catalogue, the calendar and the scorer immediately, and stays out of future scrapes. You can restore it below.`, "Hide it");
+        if (!ok) return;
+        try {
+          await api("/api/admin/events/hide", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: b.dataset.id, title: b.dataset.title }) });
+          b.closest(".ex-item").remove();
+          toast("Hidden.", "ok"); invalidate("coverage"); loadHidden();
+        } catch (e) { toast(e.message, "err"); }
+      });
+    });
+    const pager = document.getElementById("ev-pager");
+    const pages = Math.max(1, Math.ceil(EVENTS.total / EVENTS.size));
+    pager.hidden = pages < 2;
+    pager.innerHTML = `<button class="btn secondary sm" id="ev-prev" ${EVENTS.page === 0 ? "disabled" : ""}>Previous</button>
+      <span class="pos">Page ${EVENTS.page + 1} of ${pages}</span>
+      <button class="btn secondary sm" id="ev-next" ${EVENTS.page + 1 >= pages ? "disabled" : ""}>Next</button>`;
+    const p = document.getElementById("ev-prev"), n = document.getElementById("ev-next");
+    if (p) p.onclick = () => { EVENTS.page--; ensure("events", true); };
+    if (n) n.onclick = () => { EVENTS.page++; ensure("events", true); };
+    await loadHidden();
+  } catch (e) { stateError(list, e, "events"); throw e; }
+}
+
+async function loadHidden() {
+  const box = document.getElementById("hidden-list");
+  try {
+    const d = await api("/api/admin/events/hidden");
+    const rows = d.hidden || [];
+    if (!rows.length) { stateEmpty(box, "Nothing is hidden.", "Events you suppress from the catalogue appear here."); return; }
+    box.innerHTML = rows.map(h => `
+      <div class="ex-item"><div class="ex-head"><b>${esc(h.title || h.event_id)}</b>
+        <button class="btn xs secondary js-unhide" data-id="${esc(h.event_id)}">Restore</button></div>
+        <div class="ex-meta">${esc(h.event_id)} · hidden ${fmtWhen(h.created_at)}</div></div>`).join("");
+    box.querySelectorAll(".js-unhide").forEach(b => {
+      b.onclick = () => withBusy(b, async () => {
+        try {
+          await api("/api/admin/events/unhide", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: b.dataset.id }) });
+          toast("Restored — it returns on the next scrape.", "ok");
+          invalidate("events"); loadHidden();
+        } catch (e) { toast(e.message, "err"); }
+      });
+    });
+  } catch (e) { stateError(box, e); }
+}
+
+/* ----------------------------------------------------------- ACCOUNTS ---- */
+let ACCOUNTS = [];
+async function loadAccounts() {
+  const list = document.getElementById("accounts-list");
+  stateLoading(list);
+  try {
+    const d = await api("/api/admin/accounts");
+    ACCOUNTS = d.accounts || [];
+    const inv = d.invite || {};
+    const banner = document.getElementById("invite-banner");
+    banner.className = "banner " + (inv.invite_only ? "ok" : "warn");
+    banner.textContent = inv.invite_only
+      ? `Invite gate ON — ${inv.allowed_domains && inv.allowed_domains.length ? "domains: " + inv.allowed_domains.join(", ") : ""}${inv.allowed_emails ? ` ${inv.allowed_emails} named address${inv.allowed_emails === 1 ? "" : "es"}` : ""}. New accounts outside that list are refused.`
+      : "Invite gate OFF — anyone with a Google account can create one. Set ALLOWED_EMAIL_DOMAINS or ALLOWED_EMAILS on Railway to close it.";
+    document.getElementById("c-accounts").textContent = ACCOUNTS.length || "";
+    renderAccounts();
+  } catch (e) { stateError(list, e, "accounts"); throw e; }
+}
+function renderAccounts() {
+  const list = document.getElementById("accounts-list");
+  const q = (document.getElementById("acc-q").value || "").toLowerCase().trim();
+  const rows = ACCOUNTS.filter(a => !q || (a.email || "").toLowerCase().includes(q) || (a.name || "").toLowerCase().includes(q));
+  document.getElementById("acc-count").textContent = `${rows.length} of ${ACCOUNTS.length}`;
+  if (!rows.length) { stateEmpty(list, ACCOUNTS.length ? "No account matches that search." : "No accounts yet.", ACCOUNTS.length ? "" : "Accounts are created the first time someone signs in with Google."); return; }
+  list.innerHTML = `<div class="table-wrap"><table class="u-table stacked"><thead><tr>
+      <th>Email</th><th>Name</th><th>Joined</th><th>Digest</th><th class="num">Analyses</th>
+      <th class="num">Saved</th><th>Calendar feed</th><th>Last seen</th></tr></thead><tbody>`
+    + rows.map(a => `<tr class="clickable" data-uid="${esc(a.oc_uid)}">
+        <td data-label="Email" class="u-id">${esc(a.email || "—")}</td>
+        <td data-label="Name">${esc(a.name || "—")}</td>
+        <td data-label="Joined">${fmtWhen(a.created_at)}</td>
+        <td data-label="Digest">${a.digest_enabled ? `<span class="badge good">${esc(a.digest_cadence || "on")}</span>` : `<span class="badge">off</span>`}</td>
+        <td data-label="Analyses" class="num">${a.analyses_count || 0}</td>
+        <td data-label="Saved" class="num">${a.saved_count || 0}</td>
+        <td data-label="Calendar feed">${a.cal_feed ? "active" : "—"}</td>
+        <td data-label="Last seen">${fmtWhen(a.last_active)}</td>
+      </tr>`).join("") + `</tbody></table></div>`;
+  list.querySelectorAll("tr[data-uid]").forEach(tr => {
+    tr.onclick = () => { showSub("people", "visitors"); showUserDetail(tr.dataset.uid); };
+  });
+}
+
+/* ----------------------------------------------------------- VISITORS ---- */
+let USERS = [];
+async function loadVisitors() {
+  const list = document.getElementById("users-list");
+  // Do not yank a visitor's detail view out from under the operator. This
+  // can be entered from the Accounts tab, which switches sub-tab first and
+  // may trigger a refresh of this list while the detail is already open.
+  if (document.getElementById("user-detail-card").style.display !== "block") {
+    document.getElementById("users-list-card").style.display = "block";
+    document.getElementById("user-detail-card").style.display = "none";
+  }
+  stateLoading(list);
+  try {
+    USERS = (await api("/api/admin/users")).users || [];
+    document.getElementById("c-visitors").textContent = USERS.length || "";
+    renderVisitors();
+  } catch (e) { stateError(list, e, "visitors"); throw e; }
+}
+function renderVisitors() {
+  const list = document.getElementById("users-list");
+  const q = (document.getElementById("usr-q").value || "").toLowerCase().trim();
+  const active = document.getElementById("usr-active").checked;
+  const rows = USERS.filter(u => (!q || (u.oc_uid || "").toLowerCase().includes(q))
+    && (!active || u.analyses_count || u.interactions_count));
+  document.getElementById("usr-count").textContent = `${rows.length} of ${USERS.length}`;
+  if (!rows.length) { stateEmpty(list, USERS.length ? "No visitor matches that filter." : "No one has been asked for consent yet."); return; }
+  list.innerHTML = `<div class="table-wrap"><table class="u-table stacked"><thead><tr>
+      <th>oc_uid</th><th>Consented</th><th class="num">Analyses</th><th class="num">Interactions</th><th>Last active</th>
+    </tr></thead><tbody>` + rows.map(u => `
+      <tr class="clickable" data-uid="${esc(u.oc_uid)}">
+        <td data-label="oc_uid" class="u-id">${esc(u.oc_uid)}</td>
+        <td data-label="Consented">${u.consented ? `<span class="badge good">yes</span>` : `<span class="badge">no</span>`}</td>
+        <td data-label="Analyses" class="num">${u.analyses_count}</td>
+        <td data-label="Interactions" class="num">${u.interactions_count}</td>
+        <td data-label="Last active">${fmtWhen(u.last_active)}</td>
+      </tr>`).join("") + `</tbody></table></div>`;
+  list.querySelectorAll("tr[data-uid]").forEach(tr => { tr.onclick = () => showUserDetail(tr.dataset.uid); });
+}
+
+/* ---------------------------------------------------------------- OPS ---- */
+async function pollScrape() {
+  try {
+    const s = await (await fetch("/api/status")).json();
+    const tag = document.getElementById("hd-scrape");
+    if (tag) tag.textContent = s.scraping ? "scraping…" : "scraped " + fmtWhen(s.last_run);
+    return s;
+  } catch (e) { return null; }
+}
+
+async function loadScrape() {
+  const s = await pollScrape();
+  const box = document.getElementById("scrape-kpis");
+  const cov = COVERAGE || {};
+  box.innerHTML =
+    `<div class="kpi"><div class="kpi-v">${s && s.scraping ? "running" : "idle"}</div><div class="kpi-l">Scraper</div></div>`
+  + `<div class="kpi"><div class="kpi-v">${s ? fmtWhen(s.last_run) : "—"}</div><div class="kpi-l">Last scrape</div></div>`
+  + `<div class="kpi"><div class="kpi-v">${cov.total_events != null ? cov.total_events : "—"}</div><div class="kpi-l">Events in the catalogue</div><div class="kpi-sub">from the last coverage read</div></div>`
+  + `<div class="kpi"><div class="kpi-v">30 min</div><div class="kpi-l">Automatic interval</div><div class="kpi-sub">REFRESH_MINUTES</div></div>`;
+}
+
+async function loadMail() {
+  const box = document.getElementById("mail-status-box");
+  stateLoading(box);
+  try {
+    const m = await api("/api/admin/mail/status");
+    const yes = v => v ? `<span class="badge good">present</span>` : `<span class="badge">absent</span>`;
+    const devFrom = (m.mail_from || "").includes("onboarding@resend.dev");
+    box.innerHTML =
+      (m.provider ? "" : `<div class="banner warn">No provider is configured. Nothing can send: no digests, no sign-in mail.</div>`)
+    + (devFrom ? `<div class="banner warn">MAIL_FROM is still the Resend sandbox address, which can only deliver to the Resend account owner. Verify a sending domain before digests go to real users.</div>` : "")
+    + `<div class="kpi-grid">
+        <div class="kpi"><div class="kpi-v" style="font-size:1rem">${esc(m.provider || "none")}</div><div class="kpi-l">Active provider</div></div>
+        <div class="kpi"><div class="kpi-v" style="font-size:.9rem">${esc(m.mail_from || "—")}</div><div class="kpi-l">MAIL_FROM</div></div>
+        <div class="kpi"><div class="kpi-v" style="font-size:.9rem">${esc(m.public_url || "—")}</div><div class="kpi-l">PUBLIC_URL</div></div>
+       </div>
+       <div class="toolbar" style="margin-top:12px">
+         <span class="toolbar-count">Resend key ${yes(m.resend_key)}</span>
+         <span class="toolbar-count">Mailjet key ${yes(m.mailjet_key)}</span>
+         <span class="toolbar-count">Mailjet secret ${yes(m.mailjet_secret)}</span>
+         <span class="toolbar-count">SMTP host ${m.smtp_host ? esc(m.smtp_host) : `<span class="badge">absent</span>`}</span>
+       </div>`
+    + (m.last_error ? `<div class="banner warn" style="margin-top:12px">Last failure: ${esc(m.last_error)}</div>` : "");
+  } catch (e) { stateError(box, e, "mail"); throw e; }
+}
+
+const AUDIT = { page: 0, size: 50, total: 0 };
+async function loadAudit() {
+  const list = document.getElementById("audit-list");
+  stateLoading(list);
+  try {
+    const p = new URLSearchParams({ limit: String(AUDIT.size), offset: String(AUDIT.page * AUDIT.size),
+      action: document.getElementById("audit-action").value });
+    const d = await api("/api/admin/audit?" + p.toString());
+    AUDIT.total = d.total || 0;
+    const sel = document.getElementById("audit-action");
+    if (sel.options.length <= 1 && (d.actions || []).length) {
+      sel.innerHTML = `<option value="">All actions</option>` +
+        d.actions.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join("");
+    }
+    document.getElementById("audit-count").textContent = `${AUDIT.total} entries`;
+    const rows = d.entries || [];
+    if (!rows.length) { stateEmpty(list, "Nothing logged under this filter.", "Sign-ins, analyses, exports and deletions are written here as they happen."); }
+    else list.innerHTML = rows.map(r => `
+      <div class="audit-row">
+        <span class="tl-time">${fmtWhen(r.created_at)}</span>
+        <span><span class="audit-act ${/delete|refus|clear/i.test(r.action) ? "danger" : ""}">${esc(r.action)}</span>
+          ${r.account_email ? ` · ${esc(r.account_email)}` : r.account_id ? ` · account ${r.account_id}` : ""}
+          ${r.resource_type ? ` · ${esc(r.resource_type)}` : ""}${r.resource_id ? ` ${esc(r.resource_id)}` : ""}</span>
+        <span class="ex-meta">${esc(r.ip_address || "")}</span>
+      </div>`).join("");
+    const pager = document.getElementById("audit-pager");
+    const pages = Math.max(1, Math.ceil(AUDIT.total / AUDIT.size));
+    pager.hidden = pages < 2;
+    pager.innerHTML = `<button class="btn secondary sm" id="aud-prev" ${AUDIT.page === 0 ? "disabled" : ""}>Previous</button>
+      <span class="pos">Page ${AUDIT.page + 1} of ${pages}</span>
+      <button class="btn secondary sm" id="aud-next" ${AUDIT.page + 1 >= pages ? "disabled" : ""}>Next</button>`;
+    const a = document.getElementById("aud-prev"), b = document.getElementById("aud-next");
+    if (a) a.onclick = () => { AUDIT.page--; ensure("audit", true); };
+    if (b) b.onclick = () => { AUDIT.page++; ensure("audit", true); };
+  } catch (e) { stateError(list, e, "audit"); throw e; }
+}
+
+/* ---------------------------------------------------------- ANALYTICS ---- */
+function setAnRange(d) {
+  AN_DAYS = d;
+  document.querySelectorAll("#an-range button").forEach(b => b.classList.toggle("on", Number(b.dataset.days) === d));
+  ensure("analytics", true);
+}
+
+async function loadAnalytics() {
+  const body = document.getElementById("analytics-body");
+  const summary = document.getElementById("an-plain-summary");
+  summary.textContent = "Loading…";
+  document.getElementById("an-kpis").innerHTML = `<div class="skel" style="height:64px"></div><div class="skel" style="height:64px"></div><div class="skel" style="height:64px"></div><div class="skel" style="height:64px"></div>`;
+  try {
+    const data = await api("/api/admin/analytics?days=" + AN_DAYS);
+    AN_DATA = data;
+    FUNNEL_DATA = data.funnel || [];
+    document.getElementById("an-scope").textContent = AN_DAYS
+      ? `Charts below cover the last ${AN_DAYS} days. The headline counters are all-time, with the windowed figure underneath each one.`
+      : "Everything below is all-time.";
+    renderAnalyticsCharts(data);
+
+    if (!FUNNEL_DATA.length) {
+      summary.textContent = "No one has accepted the consent banner yet — this fills in once real visitors start using the app.";
+      renderFunnel(); return;
+    }
+    const totals = FUNNEL_DATA.reduce((t, r) => ({
+      accepted: t.accepted + r.accepted, submitted: t.submitted + r.submitted_analysis,
+      clicked: t.clicked + r.clicked_recommendation }), { accepted: 0, submitted: 0, clicked: 0 });
+    const pct = (n, d2) => d2 ? Math.round(n / d2 * 100) : 0;
+    summary.innerHTML = `<b>${totals.accepted}</b> people have accepted the consent banner. `
+      + `Of those, <b>${totals.submitted}</b> went on to submit a CV or description `
+      + `(<b>${pct(totals.submitted, totals.accepted)}%</b>). Of those, <b>${totals.clicked}</b> clicked `
+      + `through to an actual event (<b>${pct(totals.clicked, totals.submitted)}%</b>).`;
+    const bar = (label, count, denom) => `<div class="funnel-row">
+        <div class="funnel-label">${label}</div>
+        <div class="funnel-bar-track"><div class="funnel-bar-fill" style="width:${denom ? Math.max(2, Math.round(count / denom * 100)) : 100}%">${count}</div></div>
+        <div class="funnel-pct">${denom ? Math.round(count / denom * 100) + "% of step above" : "—"}</div></div>`;
+    document.getElementById("an-funnel-viz").innerHTML =
+        bar("Accepted the banner", totals.accepted, null)
+      + bar("Submitted a CV", totals.submitted, totals.accepted)
+      + bar("Clicked an event", totals.clicked, totals.submitted);
+    renderFunnel();
+  } catch (e) {
+    summary.textContent = "";
+    stateError(body, e, "analytics");
+    document.getElementById("an-kpis").innerHTML = "";
+    throw e;
+  }
+}
+
+/* ------------------------------------------------------------ REGISTRY --- */
+registerView("coverage",   loadCoverage,   { ttl: 60000,  stamp: "cov-stamp" });
+registerView("organisers", loadOrganisers, { ttl: 120000, stamp: "src-stamp" });
+registerView("leads",      loadLeads,      { ttl: 60000,  stamp: "leads-stamp" });
+registerView("addlink",    () => loadLinks(), { ttl: 120000 });
+registerView("events",     loadEvents,     { ttl: 60000,  stamp: "ev-stamp" });
+registerView("accounts",   loadAccounts,   { ttl: 120000, stamp: "acc-stamp" });
+registerView("visitors",   loadVisitors,   { ttl: 120000, stamp: "usr-stamp" });
+registerView("rules",      () => loadRules(),    { ttl: 300000 });
+registerView("examples",   () => loadExamples(), { ttl: 120000 });
+registerView("scrape",     loadScrape,     { ttl: 20000 });
+registerView("mail",       loadMail,       { ttl: 120000 });
+registerView("audit",      loadAudit,      { ttl: 60000,  stamp: "audit-stamp" });
+registerView("analytics",  loadAnalytics,  { ttl: 60000,  stamp: "an-stamp" });
+
+/* ------------------------------------------------------------- ACTIONS --- */
+function debounce(fn, ms) { let t; return function () { clearTimeout(t); t = setTimeout(fn, ms || 220); }; }
+
+function wireActions() {
+  // Wrap every handler the reused modules bound at parse time, so a write
+  // button locks itself while its request is in flight.
+  ["add-ex-btn", "save-rules-btn", "reset-rules-btn", "src-check-btn", "src-add-btn",
+   "link-check-btn", "link-add-btn", "link-force-btn", "u-lookup-btn"].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el || !el.onclick || el.dataset.wrapped) return;
+    const orig = el.onclick; el.dataset.wrapped = "1";
+    el.onclick = () => withBusy(el, () => orig.call(el));
+  });
+
+  document.getElementById("cov-q").oninput = debounce(renderCoverage);
+  document.getElementById("cov-problem").onchange = renderCoverage;
+  document.getElementById("src-q").oninput = debounce(renderOrganisers);
+  document.getElementById("acc-q").oninput = debounce(renderAccounts);
+  document.getElementById("usr-q").oninput = debounce(renderVisitors);
+  document.getElementById("usr-active").onchange = renderVisitors;
+
+  const leadReload = debounce(() => { LEADS.page = 0; document.getElementById("lead-all").checked = false; ensure("leads", true); }, 320);
+  ["lead-q", "lead-via", "lead-min", "lead-fresh", "lead-sort"].forEach(id => {
+    const el = document.getElementById(id);
+    el.oninput = leadReload; el.onchange = leadReload;
+  });
+  document.getElementById("lead-all").onchange = function () {
+    LEADS.sel.clear();
+    document.querySelectorAll("#leads-list .lead").forEach(r => {
+      r.classList.toggle("sel", this.checked);
+      r.querySelector("input").checked = this.checked;
+      if (this.checked) LEADS.sel.add(r.dataset.id);
+    });
+    renderBulk();
+  };
+  bindBusy("leads-tidy-btn", async () => {
+    const ok = await confirmAction("Tidy the queue?",
+      "Leads that are already tracked sources are marked added, and leads with one event or fewer that have not been seen in a fortnight are ignored. Nothing with real activity is touched.", "Tidy");
+    if (!ok) return;
+    try {
+      const r = await api("/api/admin/source-candidates/tidy", { method: "POST" });
+      toast(`${r.updated || 0} leads cleared.`, "ok");
+      ensure("leads", true);
+    } catch (e) { toast(e.message, "err"); }
+  });
+
+  document.getElementById("ev-q").oninput = debounce(() => { EVENTS.page = 0; ensure("events", true); }, 320);
+  document.getElementById("audit-action").onchange = () => { AUDIT.page = 0; ensure("audit", true); };
+  document.querySelectorAll("#an-range button").forEach(b => { b.onclick = () => setAnRange(Number(b.dataset.days)); });
+  document.getElementById("an-filter-input").oninput = debounce(renderFunnel);
+  document.getElementById("an-sort-sel").onchange = renderFunnel;
+
+  // The map library is fetched only when this group is opened for the first time.
+  const mg = document.getElementById("an-map-group");
+  if (mg) mg.addEventListener("toggle", () => {
+    if (mg.open && AN_DATA) ensureLeaflet().then(ok => { if (ok) renderAnalyticsCharts(AN_DATA); });
+  });
+
+  bindBusy("scrape-btn", async () => {
+    const ok = await confirmAction("Scrape now?",
+      "Every source is fetched in the background. It takes a couple of minutes and the current catalogue keeps serving while it runs.", "Scrape");
+    if (!ok) return;
+    const msg = document.getElementById("scrape-msg");
+    try {
+      await api("/api/refresh", { method: "POST" });
+      msg.className = "msg ok"; msg.textContent = "Started. Watching for it to finish…";
+      watchScrape();
+    } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
+  });
+  bindBusy("scrape-poll-btn", async () => { await loadScrape(); toast("Status refreshed.", "ok"); });
+  bindBusy("mail-test-btn", async () => {
+    const to = document.getElementById("mail-test-to").value.trim();
+    const msg = document.getElementById("mail-msg");
+    if (!to || to.indexOf("@") === -1) { msg.className = "msg err"; msg.textContent = "Give an address to send to."; return; }
+    msg.className = "msg"; msg.textContent = "Sending…";
+    try {
+      const r = await api("/api/admin/mail/test", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to }) });
+      msg.className = r.ok ? "msg ok" : "msg err";
+      msg.textContent = r.ok ? `Accepted by ${r.provider}. If it does not arrive, the provider took it and dropped it — check the sending domain.`
+                             : `Refused by ${r.provider || "the provider"}: ${r.error || "no reason given"}`;
+    } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
+  });
+}
+
+let SCRAPE_TIMER = null;
+function watchScrape() {
+  clearInterval(SCRAPE_TIMER);
+  let ticks = 0;
+  SCRAPE_TIMER = setInterval(async () => {
+    ticks++;
+    const s = await pollScrape();
+    if (!s || (!s.scraping && ticks > 1) || ticks > 40) {
+      clearInterval(SCRAPE_TIMER);
+      const msg = document.getElementById("scrape-msg");
+      msg.className = "msg ok";
+      msg.textContent = "Scrape finished — the catalogue has been replaced.";
+      invalidate("coverage", "events", "scrape");
+      loadScrape();
+      toast("Scrape finished.", "ok");
+    }
+  }, 6000);
+}
+
+/* ---------- resume a session only after the registry exists ---------- */
+if (SECRET) {
+  tryUnlock(SECRET).catch(() => { sessionStorage.removeItem(SECRET_KEY); SECRET = ""; });
+}
 </script>
 </body>
 </html>

@@ -522,6 +522,17 @@ def get_analytics_overview(days: int = 30):
             if cur is None:
                 return out
 
+            # The 7/30/90 buttons used to re-run all 21 queries and change
+            # exactly ONE chart: only `daily` read the parameter, everything
+            # else was all-time. `win` is spliced into every block that has a
+            # timestamp. days=0 means all time. int() is the injection guard —
+            # nothing user-supplied reaches the string.
+            d = int(days or 0)
+            win = "" if d <= 0 else f" and {{}} >= now() - interval '{d} days'"
+
+            def W(col):
+                return win.format(col) if win else ""
+
             def safe(key, sql, params=None, single=False):
                 """One bad query must not blank the whole dashboard."""
                 try:
@@ -549,13 +560,32 @@ def get_analytics_overview(days: int = 30):
                   (select coalesce(min(fit_score),0) from recommendations)                   as min_fit
             """, single=True)
 
+            # the same counters, inside the window, so a KPI can show both
+            safe("totals_window", f"""
+                select
+                  (select count(*) from consent
+                    where consented {W('consented_at') or ''})                  as accepted,
+                  (select count(*) from analyses where true {W('created_at')})  as analyses,
+                  (select count(distinct oc_uid) from analyses
+                    where true {W('created_at')})                               as people_analysed,
+                  (select count(*) from recommendations
+                    where true {W('created_at')})                               as recommendations,
+                  (select count(*) from interactions
+                    where true {W('created_at')})                               as clicks
+            """, single=True)
+
             # ---- activity over time ------------------------------------
             # Generated date spine so quiet days plot as zero instead of
             # silently collapsing the x-axis.
             safe("daily", """
-                with spine as (
+                with bounds as (
+                  select coalesce(least((select min(consented_at) from consent),
+                                        (select min(created_at)   from analyses)),
+                                  now())::date as start_d
+                ), spine as (
                   select generate_series(
-                    (current_date - (%s || ' days')::interval)::date,
+                    case when %s::int = 0 then (select start_d from bounds)
+                         else (current_date - (%s || ' days')::interval)::date end,
                     current_date, '1 day')::date as d
                 )
                 select to_char(s.d,'YYYY-MM-DD') as day,
@@ -566,93 +596,93 @@ def get_analytics_overview(days: int = 30):
                   (select count(*) from interactions i
                      where i.created_at::date = s.d)                        as clicks
                 from spine s order by s.d
-            """, (days,))
+            """, (d, d))
 
             # ---- the honesty curve -------------------------------------
-            safe("fit_hist", """
+            safe("fit_hist", f"""
                 select width_bucket(fit_score, 60, 100, 8) as bucket,
                        60 + (width_bucket(fit_score, 60, 100, 8) - 1) * 5 as lo,
                        count(*) as n
-                from recommendations where fit_score is not null
+                from recommendations where fit_score is not null {W('created_at')}
                 group by 1,2 order by 1
             """)
-            safe("matches_dist", """
+            safe("matches_dist", f"""
                 select n_matches, count(*) as analyses from (
                   select a.id, count(r.id) as n_matches
                   from analyses a
                   left join recommendations r on r.analysis_id = a.id
-                  where a.is_cv group by a.id
+                  where a.is_cv {W('a.created_at')} group by a.id
                 ) t group by n_matches order by n_matches
             """)
 
             # ---- what the engine actually recommends -------------------
-            safe("categories", """
+            safe("categories", f"""
                 select coalesce(nullif(category,''),'Uncategorised') as category,
                        count(*) as n, round(avg(fit_score)::numeric,1) as avg_fit
-                from recommendations group by 1 order by n desc
+                from recommendations where true {W('created_at')} group by 1 order by n desc
             """)
-            safe("top_events", """
+            safe("top_events", f"""
                 select title, coalesce(nullif(category,''),'—') as category,
                        count(*) as times_recommended,
                        round(avg(fit_score)::numeric,1) as avg_fit
-                from recommendations where title is not null and title <> ''
+                from recommendations where title is not null and title <> '' {W('created_at')}
                 group by title, category order by times_recommended desc, avg_fit desc limit 12
             """)
-            safe("clicked_events", """
+            safe("clicked_events", f"""
                 select r.title, count(*) as clicks
                 from interactions i join recommendations r on r.id = i.recommendation_id
-                where r.title is not null and r.title <> ''
+                where r.title is not null and r.title <> '' {W('i.created_at')}
                 group by r.title order by clicks desc limit 12
             """)
 
             # ---- who the people are ------------------------------------
-            safe("evidence", """
+            safe("evidence", f"""
                 select coalesce(nullif(evidence_level,''),'unknown') as evidence_level,
                        count(*) as n
-                from analyses group by 1 order by n desc
+                from analyses where true {W('created_at')} group by 1 order by n desc
             """)
-            safe("input_kinds", """
+            safe("input_kinds", f"""
                 select case when is_cv then 'usable (CV / self-description)'
                             else 'unusable input' end as kind, count(*) as n
-                from analyses group by 1 order by n desc
+                from analyses where true {W('created_at')} group by 1 order by n desc
             """)
-            safe("seniority", """
+            safe("seniority", f"""
                 select coalesce(nullif(profile->>'seniority',''),'unstated') as seniority,
                        count(*) as n
-                from analyses where profile is not null group by 1 order by n desc
+                from analyses where profile is not null {W('created_at')} group by 1 order by n desc
             """)
-            safe("fields", """
+            safe("fields", f"""
                 select coalesce(nullif(field,''),'unstated') as field, count(*) as n
-                from analyses group by 1 order by n desc limit 12
+                from analyses where true {W('created_at')} group by 1 order by n desc limit 12
             """)
 
             # ---- rhythm -------------------------------------------------
-            safe("hours", """
+            safe("hours", f"""
                 select extract(hour from created_at)::int as hour, count(*) as n
-                from analyses group by 1 order by 1
+                from analyses where true {W('created_at')} group by 1 order by 1
             """)
-            safe("weekdays", """
+            safe("weekdays", f"""
                 select extract(isodow from created_at)::int as dow, count(*) as n
-                from analyses group by 1 order by 1
+                from analyses where true {W('created_at')} group by 1 order by 1
             """)
-            safe("repeat", """
+            safe("repeat", f"""
                 select n_analyses, count(*) as people from (
-                  select oc_uid, count(*) as n_analyses from analyses group by oc_uid
+                  select oc_uid, count(*) as n_analyses from analyses where true {W('created_at')} group by oc_uid
                 ) t group by n_analyses order by n_analyses
             """)
 
             # ---- uploads ------------------------------------------------
-            safe("files", """
+            safe("files", f"""
                 select count(*) as n,
                        coalesce(sum(size_bytes),0) as total_bytes,
                        coalesce(round(avg(size_bytes))::bigint,0) as avg_bytes,
                        coalesce(max(size_bytes),0) as max_bytes
-                from raw_files
+                from raw_files where true {W('created_at')}
             """, single=True)
-            safe("file_types", """
+            safe("file_types", f"""
                 select coalesce(nullif(lower(regexp_replace(filename,'^.*\\.','')),''),'unknown') as ext,
                        count(*) as n, coalesce(round(avg(size_bytes))::bigint,0) as avg_bytes
-                from raw_files group by 1 order by n desc
+                from raw_files where true {W('created_at')} group by 1 order by n desc
             """)
 
             # ---- location ------------------------------------------------
@@ -663,26 +693,26 @@ def get_analytics_overview(days: int = 30):
                   count(*) filter (where location_consented is null)  as never_asked
                 from consent
             """, single=True)
-            safe("locations", """
+            safe("locations", f"""
                 select round(lat::numeric,4) as lat, round(lng::numeric,4) as lng,
                        round(coalesce(accuracy_m,0)::numeric,0) as accuracy_m,
                        to_char(created_at,'YYYY-MM-DD') as day
-                from user_locations order by created_at desc limit 500
+                from user_locations where true {W('created_at')} order by created_at desc limit 500
             """)
 
             # ---- training data + traffic detail --------------------------
-            safe("labeled", """
+            safe("labeled", f"""
                 select judgment, count(*) as n from labeled_examples
-                group by 1 order by n desc
+                where true {W('created_at')} group by 1 order by n desc
             """)
-            safe("traffic_detail", """
+            safe("traffic_detail", f"""
                 select
                   coalesce(nullif(utm_source,''),'—')   as utm_source,
                   coalesce(nullif(utm_medium,''),'—')   as utm_medium,
                   coalesce(nullif(utm_campaign,''),'—') as utm_campaign,
                   coalesce(nullif(regexp_replace(referrer,'^https?://([^/]+).*$','\\1'),''),'—') as referrer,
                   count(*) as people
-                from consent where consented
+                from consent where consented {W('consented_at')}
                 group by 1,2,3,4 order by people desc limit 20
             """)
             safe("recent", """
@@ -694,6 +724,11 @@ def get_analytics_overview(days: int = 30):
                        left(a.oc_uid, 8) as uid
                 from analyses a order by a.created_at desc limit 15
             """)
+        out["window_days"] = int(days or 0)
+        # location_consent and `recent` are deliberately NOT windowed: the
+        # first is a standing state rather than an event, the second is "the
+        # latest 15" by definition. The UI labels both as all-time.
+        out["all_time_blocks"] = ["totals", "location_consent", "recent"]
     except Exception as exc:
         log.warning(f"get_analytics_overview failed: {exc}")
     return out
@@ -2276,3 +2311,432 @@ def audit(account_id, action: str, resource: str = None, detail: dict = None,
     except Exception as exc:
         log.warning(f"audit failed: {exc}")
         return False
+
+
+# --------------------------------------------------------------------------
+# Source health  (migration 0015)
+# --------------------------------------------------------------------------
+# The coverage view used to render a per-source count and nothing else, and
+# its own hint admitted the problem: "a source on 0 is either dormant or
+# broken; the two look identical from here." They are not identical any more.
+# Every scrape writes one row per source with what it returned, when it last
+# returned anything, and the error it raised if it crashed.
+
+def record_source_health(rows: list) -> int:
+    """Upsert one row per source from a finished scrape.
+
+    last_success_at only moves when a source actually returned something, so
+    it answers "when did this last work" rather than "when did we last try".
+    consecutive_zero is the streak length, which is what turns one quiet run
+    into a visible problem after a few of them."""
+    if not rows:
+        return 0
+    written = 0
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return 0
+            for r in rows:
+                name = (r.get("source") or "").strip()
+                if not name:
+                    continue
+                count = int(r.get("count") or 0)
+                cur.execute(
+                    """
+                    insert into source_health
+                      (source, kind, emoji, category, last_count, consecutive_zero,
+                       last_run, last_success_at, last_error, updated_at)
+                    values (%s, %s, %s, %s, %s, %s, now(), %s, %s, now())
+                    on conflict (source) do update set
+                      kind             = excluded.kind,
+                      emoji            = coalesce(excluded.emoji, source_health.emoji),
+                      category         = coalesce(excluded.category, source_health.category),
+                      last_count       = excluded.last_count,
+                      consecutive_zero = case when excluded.last_count > 0 then 0
+                                              else source_health.consecutive_zero + 1 end,
+                      last_run         = now(),
+                      last_success_at  = case when excluded.last_count > 0 then now()
+                                              else source_health.last_success_at end,
+                      last_error       = excluded.last_error,
+                      updated_at       = now()
+                    """,
+                    (name, r.get("kind") or "builtin", r.get("emoji"), r.get("category"),
+                     count, 0 if count else 1,
+                     _now_if(count), (r.get("error") or None)),
+                )
+                written += 1
+            return written
+    except Exception as exc:
+        log.warning(f"record_source_health failed: {exc}")
+        return written
+
+
+def _now_if(count):
+    """last_success_at on INSERT: a first run that found nothing has never
+    succeeded, and must not be stamped as if it had."""
+    from datetime import datetime, timezone as _tz
+    return datetime.now(_tz.utc) if count else None
+
+
+def list_source_health():
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return []
+            rows = _rows(cur, """
+                select source, kind, emoji, category, last_count, consecutive_zero,
+                       last_run, last_success_at, last_error, paused
+                  from source_health
+            """)
+            for r in rows:
+                r["last_run"] = _iso(r["last_run"])
+                r["last_success_at"] = _iso(r["last_success_at"])
+            return rows
+    except Exception as exc:
+        log.warning(f"list_source_health failed: {exc}")
+        return []
+
+
+def paused_sources() -> set:
+    """Names of sources the operator has paused, of EITHER kind. Read once per
+    scrape. An empty set on any database problem, so a database blip never
+    silently stops the catalogue refreshing."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return set()
+            cur.execute("select source from source_health where paused")
+            return {r[0] for r in cur.fetchall()}
+    except Exception as exc:
+        log.warning(f"paused_sources failed: {exc}")
+        return set()
+
+
+def set_source_paused(source: str, paused: bool, kind: str = "builtin") -> bool:
+    """Pause or resume any source by name. Creates the health row if this
+    source has not been through a scrape yet."""
+    if not source:
+        return False
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                """
+                insert into source_health (source, kind, paused, updated_at)
+                values (%s, %s, %s, now())
+                on conflict (source) do update
+                  set paused = excluded.paused, updated_at = now()
+                """, (source, kind, bool(paused)))
+            return True
+    except Exception as exc:
+        log.warning(f"set_source_paused failed: {exc}")
+        return False
+
+
+# --------------------------------------------------------------------------
+# Hidden events  (migration 0015)
+# --------------------------------------------------------------------------
+def hidden_event_ids() -> set:
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return set()
+            cur.execute("select event_id from hidden_events")
+            return {r[0] for r in cur.fetchall()}
+    except Exception as exc:
+        log.warning(f"hidden_event_ids failed: {exc}")
+        return set()
+
+
+def list_hidden_events(limit: int = 200):
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return []
+            rows = _rows(cur, """
+                select event_id, title, reason, hidden_by, created_at
+                  from hidden_events order by created_at desc limit %s
+            """, (limit,))
+            for r in rows:
+                r["created_at"] = _iso(r["created_at"])
+            return rows
+    except Exception as exc:
+        log.warning(f"list_hidden_events failed: {exc}")
+        return []
+
+
+def hide_event(event_id: str, title: str = None, reason: str = None,
+               hidden_by: str = None) -> bool:
+    if not event_id:
+        return False
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                """
+                insert into hidden_events (event_id, title, reason, hidden_by)
+                values (%s, %s, %s, %s)
+                on conflict (event_id) do update
+                  set title = coalesce(excluded.title, hidden_events.title),
+                      reason = coalesce(excluded.reason, hidden_events.reason)
+                """, (event_id, (title or None), (reason or None), (hidden_by or None)))
+            return True
+    except Exception as exc:
+        log.warning(f"hide_event failed: {exc}")
+        return False
+
+
+def unhide_event(event_id: str) -> bool:
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute("delete from hidden_events where event_id = %s", (event_id,))
+            return cur.rowcount > 0
+    except Exception as exc:
+        log.warning(f"unhide_event failed: {exc}")
+        return False
+
+
+# --------------------------------------------------------------------------
+# Source candidates: a queue you can actually work through
+# --------------------------------------------------------------------------
+# The old list_source_candidates() hard-capped at 100 with no offset, no total,
+# no filter and no sort, against 806 unreviewed rows. The panel showed the top
+# hundred and looked like it was showing all of them.
+
+_CAND_SORTS = {
+    "events": "event_count desc, times_seen desc, last_seen desc",
+    "recent": "last_seen desc, event_count desc",
+    "oldest": "first_seen asc, event_count desc",
+    "name":   "lower(coalesce(name, identifier)) asc",
+}
+
+
+def search_source_candidates(status="new", limit=25, offset=0, q=None, via=None,
+                             min_events=0, fresh=None, sort="events"):
+    """One page of the queue plus the true total under the same filters."""
+    limit = max(1, min(int(limit or 25), 200))
+    offset = max(0, int(offset or 0))
+    where, params = [], []
+    if status:
+        where.append("status = %s"); params.append(status)
+    if q:
+        where.append("(name ilike %s or identifier ilike %s or sample_title ilike %s)")
+        params += [f"%{q}%"] * 3
+    if via:
+        where.append("discovered_via = %s"); params.append(via)
+    if min_events:
+        where.append("event_count >= %s"); params.append(int(min_events))
+    if fresh == "stale":
+        where.append("last_seen < now() - interval '14 days'")
+    elif fresh and str(fresh).isdigit() and int(fresh) > 0:
+        where.append("last_seen >= now() - (%s || ' days')::interval"); params.append(str(int(fresh)))
+    clause = (" where " + " and ".join(where)) if where else ""
+    order = _CAND_SORTS.get(sort or "events", _CAND_SORTS["events"])
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return [], 0
+            cur.execute("select count(*) from source_candidates" + clause, params)
+            total = cur.fetchone()[0]
+            rows = _rows(cur, f"""
+                select identifier, kind, name, url, city, timezone, event_count,
+                       times_seen, sample_title, status, discovered_via,
+                       first_seen, last_seen
+                  from source_candidates{clause}
+                 order by {order}
+                 limit %s offset %s
+            """, params + [limit, offset])
+            for r in rows:
+                r["first_seen"] = _iso(r["first_seen"])
+                r["last_seen"] = _iso(r["last_seen"])
+            return rows, total
+    except Exception as exc:
+        log.warning(f"search_source_candidates failed: {exc}")
+        return [], 0
+
+
+def source_candidate_counts() -> dict:
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return {}
+            cur.execute("select status, count(*) from source_candidates group by status")
+            return {r[0]: r[1] for r in cur.fetchall()}
+    except Exception as exc:
+        log.warning(f"source_candidate_counts failed: {exc}")
+        return {}
+
+
+def source_candidate_tidy_preview() -> dict:
+    """How many unreviewed leads need no human judgment at all:
+      - already tracked as a source (6 of them were sitting in the queue), and
+      - one event or fewer AND not seen in a scrape for a fortnight."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return {"already_tracked": 0, "thin_stale": 0}
+            cur.execute("""
+                select
+                  count(*) filter (where identifier in (select identifier from luma_sources)),
+                  count(*) filter (where event_count <= 1
+                                     and last_seen < now() - interval '14 days'
+                                     and identifier not in (select identifier from luma_sources))
+                  from source_candidates where status = 'new'
+            """)
+            a, b = cur.fetchone()
+            return {"already_tracked": a or 0, "thin_stale": b or 0}
+    except Exception as exc:
+        log.warning(f"source_candidate_tidy_preview failed: {exc}")
+        return {"already_tracked": 0, "thin_stale": 0}
+
+
+def tidy_source_candidates() -> int:
+    """Apply the two no-judgment rules above. Reversible: nothing is deleted,
+    the rows just move out of 'new'."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return 0
+            cur.execute("""
+                update source_candidates set status = 'added'
+                 where status = 'new'
+                   and identifier in (select identifier from luma_sources)
+            """)
+            n = cur.rowcount
+            cur.execute("""
+                update source_candidates set status = 'ignored'
+                 where status = 'new'
+                   and event_count <= 1
+                   and last_seen < now() - interval '14 days'
+            """)
+            return n + cur.rowcount
+    except Exception as exc:
+        log.warning(f"tidy_source_candidates failed: {exc}")
+        return 0
+
+
+def bulk_set_source_candidate_status(identifiers: list, status: str) -> int:
+    if status not in ("new", "added", "ignored") or not identifiers:
+        return 0
+    ids = [i for i in identifiers if i][:500]
+    if not ids:
+        return 0
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return 0
+            cur.execute(
+                "update source_candidates set status = %s where identifier = any(%s)",
+                (status, ids))
+            return cur.rowcount
+    except Exception as exc:
+        log.warning(f"bulk_set_source_candidate_status failed: {exc}")
+        return 0
+
+
+def auto_ignore_stale_candidates() -> int:
+    """Run at the END of discovery, every scrape. Without it the queue only
+    ever grows: 806 unreviewed leads had accumulated since 14 August, 530 of
+    them with a single event. A lead that has shown one event and has not
+    been seen for a fortnight is noise, not a decision."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return 0
+            cur.execute("""
+                update source_candidates set status = 'ignored'
+                 where status = 'new'
+                   and event_count <= 1
+                   and last_seen < now() - interval '21 days'
+            """)
+            n = cur.rowcount
+            cur.execute("""
+                update source_candidates set status = 'added'
+                 where status = 'new'
+                   and identifier in (select identifier from luma_sources)
+            """)
+            return n + cur.rowcount
+    except Exception as exc:
+        log.warning(f"auto_ignore_stale_candidates failed: {exc}")
+        return 0
+
+
+# --------------------------------------------------------------------------
+# Accounts and audit, for the admin panel
+# --------------------------------------------------------------------------
+def list_accounts(limit: int = 500):
+    """Google sign-in made the account the real identity and nothing in the
+    panel could show you one. Pre-aggregated per side rather than joined all
+    at once: joining analyses AND saved_events onto accounts in one query
+    multiplies rows per person before the distinct counts collapse them."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return []
+            rows = _rows(cur, """
+                with an as (
+                  select oc_uid, count(*) n, max(created_at) last_at
+                    from analyses group by oc_uid
+                ), sv as (
+                  select account_id, count(*) n from saved_events group by account_id
+                )
+                select a.id, a.email, a.name, a.oc_uid, a.created_at, a.last_login_at,
+                       (a.cal_token_hash is not null) as cal_feed,
+                       (d.account_id is not null and not coalesce(d.paused, false)
+                        and coalesce(d.frequency,'off') <> 'off') as digest_enabled,
+                       d.frequency                    as digest_cadence,
+                       d.next_send_at                 as digest_next,
+                       coalesce(an.n, 0)              as analyses_count,
+                       coalesce(sv.n, 0)              as saved_count,
+                       greatest(a.last_login_at, an.last_at, a.created_at) as last_active
+                  from accounts a
+                  left join digest_prefs d on d.account_id = a.id
+                  left join an on an.oc_uid = a.oc_uid
+                  left join sv on sv.account_id = a.id
+                 order by last_active desc nulls last
+                 limit %s
+            """, (limit,))
+            for r in rows:
+                for k in ("created_at", "last_login_at", "last_active", "digest_next"):
+                    r[k] = _iso(r.get(k))
+            return rows
+    except Exception as exc:
+        log.warning(f"list_accounts failed: {exc}")
+        return []
+
+
+def list_audit(limit: int = 50, offset: int = 0, action: str = None):
+    """The audit_log table has existed since migration 0014 with nothing able
+    to read it. Returns one page plus the true total."""
+    limit = max(1, min(int(limit or 50), 200))
+    offset = max(0, int(offset or 0))
+    where, params = [], []
+    if action:
+        where.append("l.action = %s"); params.append(action)
+    clause = (" where " + " and ".join(where)) if where else ""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return [], 0, []
+            cur.execute("select count(*) from audit_log l" + clause, params)
+            total = cur.fetchone()[0]
+            rows = _rows(cur, f"""
+                select l.id, l.account_id, a.email as account_email, l.action,
+                       l.resource, l.detail, l.ip_address, l.created_at
+                  from audit_log l
+                  left join accounts a on a.id = l.account_id{clause}
+                 order by l.created_at desc
+                 limit %s offset %s
+            """, params + [limit, offset])
+            for r in rows:
+                r["created_at"] = _iso(r["created_at"])
+            cur.execute("select distinct action from audit_log order by action")
+            actions = [r[0] for r in cur.fetchall()]
+            return rows, total, actions
+    except Exception as exc:
+        log.warning(f"list_audit failed: {exc}")
+        return [], 0, []
