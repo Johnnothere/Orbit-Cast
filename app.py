@@ -1234,6 +1234,37 @@ def _per_person_key():
     return f"acct:{aid}" if aid else f"ip:{auth.client_ip()}"
 
 
+# The free look. Research on sign-in walls is unambiguous (gating the first
+# taste of value is the single biggest conversion killer, and Google-only
+# login is a stated walk-away reason for a privacy-literate audience), so a
+# visitor gets to RUN ONE REAL ANALYSIS before any sign-in: typed text only,
+# never a file, and nothing is stored - no profile, no history, no identity.
+# Sign-in gates what needs an account to mean anything: uploads, saving,
+# re-runs, the digest. Tightly bounded, because each run costs real tokens:
+ANON_PER_IP = os.environ.get("ANON_PER_IP", "2 per day")
+ANON_DAILY_LIMIT = os.environ.get("ANON_DAILY_LIMIT", "150")
+
+
+def _anon_daily_limit():
+    return f"{int(ANON_DAILY_LIMIT)} per day"
+
+
+def _signed_in():
+    return bool(auth.current_session_id())
+
+
+def _analysis_owner():
+    """Who a queued analysis belongs to, for active_for/get: the account id
+    when signed in, else this browser's oc_uid cookie. The anon owner is only
+    as strong as a cookie, which is fine - it guards a poll endpoint that
+    returns the caller's own free-look result, nothing stored."""
+    aid = auth.current_session_id()
+    if aid:
+        return aid
+    oc_uid = request.cookies.get("oc_uid")
+    return f"anon:{oc_uid}" if oc_uid else None
+
+
 def _busy_response():
     resp = jsonify({"error": "OrbitCast is very busy right now. Please try again in a few minutes.",
                     "reason": "busy"})
@@ -1290,8 +1321,12 @@ def _run_analysis_job(account_id, oc_uid, consent, file_bytes, filename, mimetyp
 
     # One account, one person: the gate runs inside analyze_upload, after the
     # cheap classification pass and before any scoring spend (see identity.py).
-    gate = identity.make_gate(account_id, db.get_cv_identity(account_id),
-                              db.set_cv_identity_if_absent)
+    # Anonymous free looks have no account to lock and can't upload files, so
+    # they skip the gate.
+    gate = None
+    if account_id is not None:
+        gate = identity.make_gate(account_id, db.get_cv_identity(account_id),
+                                  db.set_cv_identity_if_absent)
     result = ai_engine.analyze_upload(file_text, events, user_location=user_location,
                                       identity_gate=gate)
     if result.get("identity_refused"):
@@ -1341,13 +1376,31 @@ def _run_reuse_job(oc_uid, last):
 
 
 @app.route("/api/analyze", methods=["POST"])
-@auth.login_required
 @limiter.limit("20 per hour", key_func=_per_person_key,
                error_message="You've run 20 analyses in the last hour. Give it a little while.")
+@limiter.limit(lambda: ANON_PER_IP, key_func=lambda: f"anonip:{auth.client_ip()}",
+               exempt_when=_signed_in,
+               # Only an ACCEPTED run spends a free look - a refused upload or a
+               # validation error must not eat it.
+               deduct_when=lambda resp: resp.status_code == 202,
+               error_message="That's the free look for today. Sign in with Google - it takes seconds, "
+                             "there's no password, and members run up to 20 analyses an hour.")
+@limiter.shared_limit(_anon_daily_limit, scope="anon-daily", key_func=lambda: "site",
+                      exempt_when=_signed_in,
+                      deduct_when=lambda resp: resp.status_code == 202,
+                      error_message="Today's free analyses are used up. Sign in with Google to run yours.")
 @limiter.shared_limit(_ai_daily_limit, scope="ai-daily", key_func=lambda: "site",
                       error_message="OrbitCast has hit today's analysis limit. Please try again tomorrow.")
 def api_analyze():
-    owner = auth.current_session_id()
+    anon = not _signed_in()
+    if anon and request.files.get("file"):
+        # Files stay behind sign-in: the identity lock and the stored-CV
+        # promises only mean something on an account.
+        return jsonify({"error": "Sign in to upload a CV. You can try it right now by "
+                                 "describing yourself instead - no account needed.",
+                        "reason": "auth_required"}), 401
+    oc_cookie = request.cookies.get("oc_uid") or uuid.uuid4().hex
+    owner = auth.current_session_id() or f"anon:{oc_cookie}"
     active = JOBS.active_for(owner)
     if active:
         return jsonify(active), 202
@@ -1375,8 +1428,10 @@ def api_analyze():
     if not load_events_cache().get("events"):
         return jsonify({"error": "The event catalogue is still loading. Try again in a minute."}), 503
 
-    # The route is login-gated, so the identity is the ACCOUNT's oc_uid - never
-    # a cookie the browser could have carried in from somewhere else.
+    # Signed in, the identity is the ACCOUNT's oc_uid - never a cookie the
+    # browser could have carried in from somewhere else. Anonymous, there is
+    # no identity at all: oc_uid=None means the job stores NOTHING - no
+    # profile, no history, no raw text - whatever the consent toggle said.
     acct = auth.current_account()
     oc_uid = acct["oc_uid"] if acct else None
     consent = bool(oc_uid and db.get_consent(oc_uid))
@@ -1387,14 +1442,20 @@ def api_analyze():
     except jobs.QueueFull:
         log.warning("Analysis queue full - turning a request away")
         return _busy_response()
-    _audit("analysis_run", acct, detail={"stored": consent, "file": bool(file_bytes)})
-    return jsonify(view), 202
+    _audit("analysis_run", acct, detail={"stored": consent, "file": bool(file_bytes),
+                                         "anon": anon})
+    resp = jsonify(view)
+    if anon and not request.cookies.get("oc_uid"):
+        # The anon owner key must survive to the polling request.
+        resp.set_cookie("oc_uid", oc_cookie, max_age=OC_UID_MAX_AGE, httponly=True,
+                        samesite="Lax", secure=_secure(), path="/")
+    return resp, 202
 
 
 @app.route("/api/analyze/jobs/<job_id>", methods=["GET"])
 @limiter.exempt     # polled every few seconds; a dictionary lookup, nothing more
 def api_analyze_job(job_id):
-    owner = auth.current_session_id()
+    owner = _analysis_owner()
     if not owner:
         return jsonify({"error": "Sign in to use this.", "reason": "auth_required"}), 401
     view = JOBS.get(job_id[:64], owner)

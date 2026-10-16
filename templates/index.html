@@ -484,6 +484,12 @@ kbd{font:500 11px/1 var(--f-mono);color:var(--tx-3);border:1px solid var(--line-
 .examples>span{font-size:12.5px;color:var(--tx-3);margin-right:4px}
 .examples .chip{height:30px;font-size:12.5px}
 .ta{width:100%;min-height:140px;resize:vertical;border-radius:16px;border:1px solid var(--line-2);background:var(--s1);padding:14px 16px;font:400 15px/1.6 var(--f-body);color:var(--tx)}
+.promise{display:flex;align-items:flex-start;gap:7px;margin-top:10px;font-size:13px;color:var(--tx-2)}
+.promise .i{flex:none;margin-top:2px;color:var(--ok)}
+.promise .linkish{all:unset;cursor:pointer;text-decoration:underline;text-underline-offset:2px;color:var(--tx)}
+.anon-cta{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-top:16px;padding:18px 20px;border-radius:16px;border:1px solid var(--line-2);background:linear-gradient(120deg,color-mix(in oklab,var(--ac) 12%,var(--s2)),var(--s2) 60%)}
+.anon-cta b{display:block;font:600 15px/1.35 var(--f-display)}
+.anon-cta span{display:block;margin-top:4px;font-size:13.5px;color:var(--tx-2);max-width:56ch}
 .ta-foot{display:flex;justify-content:flex-end;margin-top:6px;font:500 12px var(--f-mono);color:var(--tx-3)}
 .keep{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border-radius:14px;background:var(--s1);border:1px solid var(--line)}
 .keep b{display:block;font-weight:500;font-size:14px}
@@ -1021,6 +1027,7 @@ details.past[open]>summary .i{transform:rotate(180deg)}
               <h3>Drop your CV here, or choose a file</h3>
               <p>PDF, DOCX or TXT, up to 5 MB</p>
             </div>
+            <p class="promise"><svg class="i s14"><use href="#i-check"/></svg>Analysed once. Never shared, sold, or used to train anything. Delete it any time &mdash; or <button class="linkish" data-pane="txt">describe yourself instead</button>, no file needed.</p>
             <div class="file-row" id="fileRow" hidden>
               <svg class="i"><use href="#i-file"/></svg><span class="nm" id="fileName"></span><span class="sz" id="fileSize"></span>
               <button class="icon-btn sm" data-act="clearfile" aria-label="Remove file"><svg class="i s16"><use href="#i-x"/></svg></button>
@@ -1357,6 +1364,7 @@ function metaHTML(e){
   else if(e.loc.kind==='venue')h+='<span class="sep">·</span>'+ic('pin')+'<span class="loc">'+esc(e.loc.text)+'</span>';
   else if(e.loc.kind==='hybrid')h+='<span class="sep">·</span>'+ic('pin')+'<span class="loc">London, also online</span>';
   else if(e.loc.kind==='tbc')h+='<span class="sep">·</span><span class="loc">Venue TBC</span>';
+  else if(e.loc.kind==='london')h+='<span class="sep">·</span>'+ic('pin')+'<span class="loc">London \u00b7 venue on the organiser\u2019s page</span>';
   return h;
 }
 function saveBtn(id,cls){
@@ -1616,8 +1624,12 @@ function renderHome(){
 function syncRun(){
   const both=S.file&&$('#aiText').value.trim().length>=10;
   const using=both?(S.pane==='txt'?' Using your written description, not the file.':' Using your CV, not the written description.'):'';
-  $('#runNote').textContent=(ME.signed_in?'Only events scoring 65 or more are shown. Often that is none.':'Sign in with Google to run. No password.')+using;
-  $('#runBtn').innerHTML=(ME.signed_in?(S.result?'Run again':'Run the analysis'):'Sign in and run')+' '+ic('arrow-right','s16');
+  const usingFile=S.file&&S.pane!=='txt';
+  $('#runNote').textContent=(ME.signed_in
+      ?'Only events scoring 65 or more are shown. Often that is none. Members run up to 20 analyses an hour - OrbitCast is free, the AI behind it isn\u2019t.'
+      :(usingFile?'Sign in with Google to analyse a file. No password - or just describe yourself, no account needed.'
+                 :'Try it free, no account: type who you are and run. Nothing you write is stored.'))+using;
+  $('#runBtn').innerHTML=((ME.signed_in||!usingFile)?(S.result?'Run again':'Run the analysis'):'Sign in and run')+' '+ic('arrow-right','s16');
   const first=(ME.name||'').trim().split(/\s+/)[0]||'Account';
   const av=ME.avatar_url?'<img class="nav-avatar" src="'+esc(ME.avatar_url)+'" alt="" referrerpolicy="no-referrer">':'<span class="avatar">'+esc(first.charAt(0).toUpperCase()||'A')+'</span>';
   const na=$('#navAcct');na.innerHTML=ME.signed_in?av+esc(first):'Sign in';
@@ -1659,7 +1671,11 @@ function inputReady(){
 function wantRun(){
   if(!inputReady()){showErr(S.pane==='txt'?'Write a few lines about yourself first.':'Add a CV, or describe yourself in a few lines, first.');return;}
   hideErr();
-  if(!ME.signed_in){openSignin(true);return;}
+  /* The free look: a typed description runs without an account and stores
+     nothing. Files stay behind sign-in - the stored-CV promises and the
+     one-person-per-account rule only mean something on an account. */
+  const usingFile=S.file&&S.pane!=='txt';
+  if(!ME.signed_in&&usingFile){openSignin(true);return;}
   runAnalysis({});
 }
 
@@ -1756,7 +1772,11 @@ async function runAnalysis(opts){
     }
     i=STEPS.length;draw();
     S.result=data;
-    res.innerHTML=resultsHTML(data);res.hidden=false;
+    res.innerHTML=resultsHTML(data)+(ME.signed_in?'':
+      '<div class="anon-cta"><div><b>That was your free look \u2014 and it was a real one.</b>'
+      +'<span>Nothing you typed was stored. Sign in with Google to keep this profile, run more analyses, save events, and get the email digest. No password.</span></div>'
+      +'<button class="btn btn-primary" data-act="signin">Sign in with Google</button></div>');
+    res.hidden=false;
     $$('.deck-wrap',res).forEach(deckSync);
     if(!opts.reuse)clearDraft();
     $('#returning').hidden=true;
@@ -2461,6 +2481,7 @@ document.addEventListener('click',ev=>{
     case'delcv':deleteCv();break;
     case'clearfile':clearFile();break;
     case'run':wantRun();break;
+    case'signin':openSignin(false);break;
     case'reuse':$('#returning').hidden=true;if(!ME.signed_in){openSignin(false);break;}runAnalysis({reuse:true});break;
     case'reuse-no':$('#returning').hidden=true;break;
     case'rerun':rerun();break;
