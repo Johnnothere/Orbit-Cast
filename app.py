@@ -4,6 +4,7 @@ ORBITCAST — Web Dashboard + API
 Run with: python app.py
 """
 
+import atexit
 import os
 import re
 import json
@@ -21,10 +22,13 @@ from flask import Flask, jsonify, make_response, redirect, render_template, requ
 from werkzeug.middleware.proxy_fix import ProxyFix
 from markupsafe import escape
 from security import init_security
+from perf import init_perf
 import ai_engine
 import auth
 import db
 import digest
+import identity
+import jobs
 import mailer
 import rag
 
@@ -40,6 +44,73 @@ app.config["MAX_CONTENT_LENGTH"] = 12 * 1024 * 1024  # headroom for admin exampl
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 limiter = init_security(app)
+init_perf(app)
+
+# ─────────────────────────────────────────────
+# PER-ACCOUNT READ CACHE
+# ─────────────────────────────────────────────
+# A signed-in page load reads the account panel (/api/me: seven queries), the
+# saved list and the "welcome back" check. The database sits ~100 ms away, so
+# that was ~1 s of database time per page load, and under a crowd the shared
+# connection pool ran dry. These GETs are now answered from memory for up to
+# 30 s per person. Any write by that person (any non-GET request carrying
+# their session) and every finished analysis of theirs drops their entries,
+# so what they change themselves always shows at once. Things that change
+# behind their back (a digest going out) can show up to 30 s late.
+_ACCOUNT_CACHE_TTL_S = 30
+_ACCOUNT_CACHED_PATHS = frozenset({"/api/me", "/api/me/saved", "/api/my-history"})
+_acct_cache: dict = {}
+_acct_cache_lock = threading.Lock()
+
+
+def _invalidate_account(aid):
+    if aid is None:
+        return
+    with _acct_cache_lock:
+        for key in [k for k in _acct_cache if k[0] == aid]:
+            _acct_cache.pop(key, None)
+
+
+@app.before_request
+def _account_cache_lookup():
+    aid = auth.current_session_id()
+    if not aid:
+        return None
+    if request.method not in ("GET", "HEAD"):
+        _invalidate_account(aid)
+        return None
+    if request.path not in _ACCOUNT_CACHED_PATHS or request.query_string:
+        return None
+    with _acct_cache_lock:
+        hit = _acct_cache.get((aid, request.path))
+    if not hit or time.monotonic() - hit[0] > _ACCOUNT_CACHE_TTL_S:
+        return None
+    from flask import g
+    g._oc_from_cache = True
+    return app.response_class(hit[1], status=200, mimetype=hit[2])
+
+
+@app.after_request
+def _account_cache_store(response):
+    from flask import g
+    aid = auth.current_session_id()
+    if aid is None:
+        return response
+    if request.method not in ("GET", "HEAD"):
+        _invalidate_account(aid)          # again, after the write has landed
+        return response
+    if (g.get("_oc_from_cache") or request.path not in _ACCOUNT_CACHED_PATHS
+            or request.query_string or response.status_code != 200
+            or response.direct_passthrough or "Set-Cookie" in response.headers):
+        return response
+    body = response.get_data()
+    if request.path == "/api/me" and b'"signed_in":true' not in body:
+        return response                   # never pin a signed-out answer (e.g. a DB blip)
+    with _acct_cache_lock:
+        if len(_acct_cache) > 5000:
+            _acct_cache.clear()
+        _acct_cache[(aid, request.path)] = (time.monotonic(), body, response.mimetype)
+    return response
 
 # Registers the Google OIDC client and gives Flask a secret_key, which Authlib
 # needs to keep the OAuth state and nonce across the redirect. No-ops with a
@@ -341,6 +412,14 @@ def run_scrape_background():
         except Exception as e:
             log.warning(f"Source health not recorded: {e}")
 
+        # A scrape that found nothing at all is an outage (network down, every
+        # source failing at once), not an empty London. Keep serving the last
+        # good catalogue rather than blanking the site for 30 minutes. It runs
+        # AFTER source health is recorded, so the outage is still visible in
+        # the admin coverage view even while the old catalogue keeps serving.
+        if not all_events and load_events_cache().get("events"):
+            log.error("Scrape returned 0 events - keeping the previous catalogue")
+            return
         save_events_cache(all_events, summary_data)
         log.info(f"Scrape done: {len(all_events)} events ({dupes} cross-source duplicates removed)")
 
@@ -424,18 +503,39 @@ def _public_result(result):
     return {**result, "recommendations": [_public_event(r) for r in recs]}
 
 
+# Every visitor downloads the same catalogue, and it only changes when a scrape
+# (or an admin edit) swaps the catalogue object. Serialising ~500 events on
+# every request was the most expensive thing a page load did; now it happens
+# once per catalogue, and perf.py gzips and ETags the bytes.
+_events_body_memo = {"obj": None, "bodies": {}}
+_events_body_lock = threading.Lock()
+
+
 @app.route("/api/events")
+@limiter.exempt     # served from memory; per-IP limits here throttled whole campuses
 def api_events():
     cache    = load_events_cache()
     category = request.args.get("category", "").strip()
-    events   = cache.get("events", [])
-    if category:
-        events = [e for e in events if e.get("category","").lower() == category.lower()]
-    # The ?source= filter is gone on purpose: a public filter on a hidden
-    # field is an oracle - you can enumerate the source list by guessing at
-    # it, which defeats stripping the field in the first place.
-    return jsonify({"events": [_public_event(e) for e in events], "total": len(events),
-                    "last_run": cache.get("last_run"), "scraping": _scraping})
+    key = (category.lower(), _scraping)
+    with _events_body_lock:
+        if _events_body_memo["obj"] is not cache:
+            _events_body_memo["obj"] = cache
+            _events_body_memo["bodies"] = {}
+        body = _events_body_memo["bodies"].get(key)
+    if body is None:
+        events = cache.get("events", [])
+        if category:
+            events = [e for e in events if e.get("category","").lower() == category.lower()]
+        # The ?source= filter is gone on purpose: a public filter on a hidden
+        # field is an oracle - you can enumerate the source list by guessing at
+        # it, which defeats stripping the field in the first place.
+        body = app.json.dumps({"events": [_public_event(e) for e in events], "total": len(events),
+                               "last_run": cache.get("last_run"), "scraping": _scraping}).encode("utf-8")
+        with _events_body_lock:
+            bodies = _events_body_memo["bodies"]
+            if _events_body_memo["obj"] is cache and len(bodies) < 16:
+                bodies[key] = body
+    return app.response_class(body, mimetype="application/json")
 
 @app.route("/api/summary")
 def api_summary():
@@ -461,10 +561,27 @@ def api_refresh():
     return jsonify({"status": "started", "message": "Scraping in background..."})
 
 @app.route("/api/status")
+@limiter.exempt
 def api_status():
     return jsonify({"scraping": _scraping, "last_run": load_last_run().get("last_run")})
 
+
+@app.route("/api/health")
+@limiter.exempt
+def api_health():
+    """Railway's deploy health check (railway.json) and a quick load gauge.
+    Public answer is just "up"; queue and pool numbers are admin-only."""
+    out = {"ok": True}
+    if _admin_authorized():
+        out.update({"jobs": JOBS.stats(), "db_pool": db.pool_stats(),
+                    "ai_usage": ai_engine.USAGE,
+                    "ai_max_inflight": ai_engine.AI_MAX_INFLIGHT,
+                    "catalog_events": len(load_events_cache().get("events", [])),
+                    "threads": threading.active_count()})
+    return jsonify(out)
+
 @app.route("/")
+@limiter.exempt     # the page itself; gzipped and ETagged by perf.py
 def dashboard():
     resp = make_response(render_template("index.html"))
     ensure_oc_uid(resp)
@@ -533,7 +650,7 @@ def _page(heading: str, sub: str = "", extra: str = "", back: bool = True, statu
     return html, status
 
 @app.route("/auth/login")
-@limiter.limit("30 per hour")
+@limiter.limit("1200 per hour;120 per minute")
 def auth_google_login():
     """Hands off to Google's consent screen.
 
@@ -552,7 +669,7 @@ def auth_google_login():
 
 
 @app.route("/auth/callback")
-@limiter.limit("30 per hour")
+@limiter.limit("1200 per hour;120 per minute")
 def auth_google_callback():
     """Where Google sends the browser back. Exchanges the code, resolves the
     identity to an account, and sets the same signed session cookie the magic
@@ -608,7 +725,9 @@ def api_auth_logout():
 
 
 @app.route("/api/me")
-@limiter.limit("240 per hour")
+# Signed-out, this answers from environment flags alone - no database - so it is
+# not limited; signed-in it is limited per account.
+@limiter.limit("3000 per hour;300 per minute", exempt_when=lambda: not auth.current_session_id())
 def api_me():
     """One call for the whole signed-in state: who, and what alerts they get."""
     account = auth.current_account()
@@ -636,6 +755,10 @@ def api_me():
         "name": account.get("name"),
         "avatar_url": account.get("avatar_url"),
         "member_since": account.get("created_at"),
+        # Membership-card number: stable, human-readable, derived - nothing new
+        # stored. Account ids are sequential, which here is a feature: early
+        # members get low numbers.
+        "member_no": f"OC-{int(account['id']):04d}",
         # How this person gets in, said plainly: there is no password to
         # forget, and knowing that is the answer to "how do I reset it".
         "signin_method": "google" if meta.get("google_linked") else "email_link",
@@ -647,6 +770,8 @@ def api_me():
             # Text-only submissions have no file, so "on file" must mean
             # either - reporting only the upload would tell someone who typed
             # their background that nothing of theirs is stored.
+            # locked_to: the one person this account analyses (identity.py).
+            "locked_to": db.get_cv_identity(account["id"]),
             "on_file": bool(cv.get("file_count") or cv.get("last_text_at")),
             "file_count": cv.get("file_count", 0),
             "total_bytes": cv.get("total_bytes", 0),
@@ -1131,10 +1256,207 @@ def unsubscribe():
                        "Nothing else changes - your account and profile stay as they are.")
 
 
+# ─────────────────────────────────────────────
+# ANALYSIS - queued, not run inside the request
+# ─────────────────────────────────────────────
+# See jobs.py for why. The request validates, records consent and the audit
+# line, and hands everything else to the queue. The browser polls
+# /api/analyze/jobs/<id> for the result.
+
+JOBS = jobs.JobQueue()
+
+MAX_CV_BYTES = 5 * 1024 * 1024
+# Total analyses (fresh + re-runs) the whole site will start per day: a spend
+# ceiling, so a viral day or a scripted abuse cannot run up an unbounded
+# Anthropic bill. Raise it on Railway (AI_DAILY_LIMIT) when you expect more.
+AI_DAILY_LIMIT = os.environ.get("AI_DAILY_LIMIT", "2000")
+_EXTRACT_SLOTS = threading.BoundedSemaphore(
+    max(1, int(os.environ.get("EXTRACT_CONCURRENCY", "3"))))
+
+
+def _ai_daily_limit():
+    return f"{int(AI_DAILY_LIMIT)} per day"
+
+
+def _per_person_key():
+    """Signed-in routes are limited per account, not per network address: a
+    university or office network puts hundreds of people behind one IP, and
+    they should not share one person's allowance."""
+    aid = auth.current_session_id()
+    return f"acct:{aid}" if aid else f"ip:{auth.client_ip()}"
+
+
+# The free look. Research on sign-in walls is unambiguous (gating the first
+# taste of value is the single biggest conversion killer, and Google-only
+# login is a stated walk-away reason for a privacy-literate audience), so a
+# visitor gets to RUN ONE REAL ANALYSIS before any sign-in: typed text only,
+# never a file, and nothing is stored - no profile, no history, no identity.
+# Sign-in gates what needs an account to mean anything: uploads, saving,
+# re-runs, the digest. Tightly bounded, because each run costs real tokens:
+ANON_PER_IP = os.environ.get("ANON_PER_IP", "2 per day")
+ANON_DAILY_LIMIT = os.environ.get("ANON_DAILY_LIMIT", "150")
+
+
+def _anon_daily_limit():
+    return f"{int(ANON_DAILY_LIMIT)} per day"
+
+
+def _signed_in():
+    return bool(auth.current_session_id())
+
+
+def _analysis_owner():
+    """Who a queued analysis belongs to, for active_for/get: the account id
+    when signed in, else this browser's oc_uid cookie. The anon owner is only
+    as strong as a cookie, which is fine - it guards a poll endpoint that
+    returns the caller's own free-look result, nothing stored."""
+    aid = auth.current_session_id()
+    if aid:
+        return aid
+    oc_uid = request.cookies.get("oc_uid")
+    return f"anon:{oc_uid}" if oc_uid else None
+
+
+def _busy_response():
+    resp = jsonify({"error": "OrbitCast is very busy right now. Please try again in a few minutes.",
+                    "reason": "busy"})
+    resp.status_code = 503
+    resp.headers["Retry-After"] = "120"
+    return resp
+
+
+def _invalidates_owner(fn):
+    """Queue jobs write to the person's history; drop their cached panel when
+    the job ends so the new run shows straight away."""
+    def run(owner, *args):
+        try:
+            return fn(*args)
+        finally:
+            _invalidate_account(owner)
+    return run
+
+
+def _run_analysis_job(account_id, oc_uid, consent, file_bytes, filename, mimetype, pasted_text):
+    """Runs on a queue worker. Returns (http_status, payload)."""
+    if file_bytes:
+        # PDF/DOCX parsing is CPU work; a handful at a time keeps it from
+        # starving the web threads of the interpreter.
+        with _EXTRACT_SLOTS:
+            try:
+                file_text = ai_engine.extract_text(file_bytes, filename)
+            except ValueError as e:
+                # Raised with an already user-facing message (e.g. no extractable
+                # text found) - surface it instead of a generic one.
+                log.warning(f"CV extraction failed: {e}")
+                return 400, {"error": str(e)}
+            except Exception as e:
+                log.warning(f"CV extraction failed: {type(e).__name__}")
+                return 400, {"error": "Could not read that file. Try a PDF, DOCX, or TXT CV."}
+        if pasted_text:
+            file_text = f"{file_text}\n\n[ADDITIONAL CONTEXT FROM USER]\n{pasted_text}"
+    else:
+        file_text = pasted_text
+
+    if not file_text or len(file_text.strip()) < 10:
+        return 400, {"error": "Upload a CV, or tell us a bit about yourself."}
+    file_text = file_text[:20000]
+
+    events = load_events_cache().get("events", [])
+    if not events:
+        return 503, {"error": "The event catalogue is still loading. Try again in a minute."}
+
+    # Location only when this account granted it - used for a distance and a
+    # directions link on each match. The analysis runs identically without it.
+    user_location = None
+    if oc_uid and db.get_location_consent(oc_uid):
+        user_location = db.get_latest_location(oc_uid)
+
+    # One account, one person: the gate runs inside analyze_upload, after the
+    # cheap classification pass and before any scoring spend (see identity.py).
+    # Anonymous free looks have no account to lock and can't upload files, so
+    # they skip the gate.
+    gate = None
+    if account_id is not None:
+        gate = identity.make_gate(account_id, db.get_cv_identity(account_id),
+                                  db.set_cv_identity_if_absent)
+    result = ai_engine.analyze_upload(file_text, events, user_location=user_location,
+                                      identity_gate=gate)
+    if result.get("identity_refused"):
+        _audit("analysis_identity_refused", {"id": account_id},
+               detail={"file": bool(file_bytes)})
+        return 403, {"error": result.get("message_if_not_cv"), "reason": "identity"}
+
+    # Consent is the hinge: no recorded "yes" means nothing gets written, and
+    # the result the person sees is identical either way.
+    if consent and oc_uid:
+        try:
+            analysis_id = db.save_analysis(oc_uid, result.get("is_cv", False), file_text, result.get("profile"),
+                                            evidence_level=result.get("evidence_level"), field=result.get("field"))
+            # The original file, byte-for-byte, stored alongside the
+            # extracted-text row above - same consent gate, additive only.
+            if file_bytes and analysis_id is not None:
+                db.save_raw_file(analysis_id, filename, mimetype, file_bytes)
+            recs = result.get("recommendations", [])
+            rec_ids = db.save_recommendations(analysis_id, recs)
+            for rec, rec_id in zip(recs, rec_ids):
+                rec["recommendation_id"] = rec_id   # lets the browser track clicks
+        except Exception as e:
+            log.warning(f"Persisting analysis failed (non-fatal): {type(e).__name__}")
+    return 200, _public_result(result)
+
+
+def _run_reuse_job(oc_uid, last):
+    events = load_events_cache().get("events", [])
+    if not events:
+        return 503, {"error": "The event catalogue is still loading. Try again in a minute."}
+    user_location = db.get_latest_location(oc_uid) if db.get_location_consent(oc_uid) else None
+    scored = ai_engine.score_and_enrich(last["profile"], last["evidence_level"], last["field"],
+                                         events, user_location=user_location)
+    result = {"is_cv": True, "evidence_level": last["evidence_level"], "field": last["field"],
+              "profile": last["profile"], "clarifying_questions": [], "analysis_failed": False,
+              "message_if_not_cv": "", **scored}
+    try:
+        analysis_id = db.save_analysis(oc_uid, True, "[reused previous profile]", last["profile"],
+                                        evidence_level=last["evidence_level"], field=last["field"])
+        recs = result.get("recommendations", [])
+        rec_ids = db.save_recommendations(analysis_id, recs)
+        for rec, rec_id in zip(recs, rec_ids):
+            rec["recommendation_id"] = rec_id
+    except Exception as e:
+        log.warning(f"Persisting reused analysis failed (non-fatal): {type(e).__name__}")
+    return 200, _public_result(result)
+
+
 @app.route("/api/analyze", methods=["POST"])
-@auth.login_required
-@limiter.limit("20 per hour")
+@limiter.limit("20 per hour", key_func=_per_person_key,
+               error_message="You've run 20 analyses in the last hour. Give it a little while.")
+@limiter.limit(lambda: ANON_PER_IP, key_func=lambda: f"anonip:{auth.client_ip()}",
+               exempt_when=_signed_in,
+               # Only an ACCEPTED run spends a free look - a refused upload or a
+               # validation error must not eat it.
+               deduct_when=lambda resp: resp.status_code == 202,
+               error_message="That's the free look for today. Sign in with Google - it takes seconds, "
+                             "there's no password, and members run up to 20 analyses an hour.")
+@limiter.shared_limit(_anon_daily_limit, scope="anon-daily", key_func=lambda: "site",
+                      exempt_when=_signed_in,
+                      deduct_when=lambda resp: resp.status_code == 202,
+                      error_message="Today's free analyses are used up. Sign in with Google to run yours.")
+@limiter.shared_limit(_ai_daily_limit, scope="ai-daily", key_func=lambda: "site",
+                      error_message="OrbitCast has hit today's analysis limit. Please try again tomorrow.")
 def api_analyze():
+    anon = not _signed_in()
+    if anon and request.files.get("file"):
+        # Files stay behind sign-in: the identity lock and the stored-CV
+        # promises only mean something on an account.
+        return jsonify({"error": "Sign in to upload a CV. You can try it right now by "
+                                 "describing yourself instead - no account needed.",
+                        "reason": "auth_required"}), 401
+    oc_cookie = request.cookies.get("oc_uid") or uuid.uuid4().hex
+    owner = auth.current_session_id() or f"anon:{oc_cookie}"
+    active = JOBS.active_for(owner)
+    if active:
+        return jsonify(active), 202
+
     file = request.files.get("file")
     # NUL (0x00) can't be stored in a Postgres text column at all - the
     # insert raises, not just renders oddly. extract_text() already strips
@@ -1144,71 +1466,55 @@ def api_analyze():
     # the same way a bad PDF extraction did.
     pasted_text = (request.form.get("text") or "").replace("\x00", "").strip()
 
+    file_bytes, filename, mimetype = None, None, None
     if file and file.filename:
         file_bytes = file.read()
-        if len(file_bytes) > 5 * 1024 * 1024:
+        if len(file_bytes) > MAX_CV_BYTES:
             return jsonify({"error": "File too large (max 5MB)."}), 400
-        try:
-            file_text = ai_engine.extract_text(file_bytes, file.filename)
-        except ValueError as e:
-            # Raised with an already user-facing message (e.g. no extractable
-            # text found) - surface it instead of a generic one.
-            log.warning(f"CV extraction failed: {e}")
-            return jsonify({"error": str(e)}), 400
-        except Exception as e:
-            log.warning(f"CV extraction failed: {e}")
-            return jsonify({"error": "Could not read that file. Try a PDF, DOCX, or TXT CV."}), 400
-        if pasted_text:
-            file_text = f"{file_text}\n\n[ADDITIONAL CONTEXT FROM USER]\n{pasted_text}"
-    else:
-        file_text = pasted_text
-
-    if not file_text or len(file_text.strip()) < 10:
+        if not file_bytes:
+            return jsonify({"error": "That file looks empty - try a PDF, DOCX, or TXT CV."}), 400
+        filename, mimetype = file.filename, file.mimetype
+    elif len(pasted_text) < 10:
         return jsonify({"error": "Upload a CV, or tell us a bit about yourself."}), 400
-    file_text = file_text[:20000]
 
-    cache  = load_events_cache()
-    events = cache.get("events", [])
-    if not events:
-        return jsonify({"error": "No events available. Try refreshing first."}), 404
+    if not load_events_cache().get("events"):
+        return jsonify({"error": "The event catalogue is still loading. Try again in a minute."}), 503
 
-    # Read-only cookie peek (does not mint one) - only used to look up a
-    # location this browser already granted, so recommendations can carry a
-    # distance + directions link. None on any first visit or decline; the
-    # analysis runs identically either way.
-    # The route is login-gated, so the identity is the ACCOUNT's oc_uid - never
-    # a cookie the browser could have carried in from somewhere else.
-    _acct = auth.current_account()
-    _existing_oc_uid = _acct["oc_uid"] if _acct else None
-    user_location = None
-    if _existing_oc_uid and db.get_location_consent(_existing_oc_uid):
-        user_location = db.get_latest_location(_existing_oc_uid)
+    # Signed in, the identity is the ACCOUNT's oc_uid - never a cookie the
+    # browser could have carried in from somewhere else. Anonymous, there is
+    # no identity at all: oc_uid=None means the job stores NOTHING - no
+    # profile, no history, no raw text - whatever the consent toggle said.
+    acct = auth.current_account()
+    oc_uid = acct["oc_uid"] if acct else None
+    consent = bool(oc_uid and db.get_consent(oc_uid))
+    try:
+        view = JOBS.submit(owner, "analyze", _invalidates_owner(_run_analysis_job), owner,
+                           acct["id"] if acct else None,
+                           oc_uid, consent, file_bytes, filename, mimetype, pasted_text)
+    except jobs.QueueFull:
+        log.warning("Analysis queue full - turning a request away")
+        return _busy_response()
+    _audit("analysis_run", acct, detail={"stored": consent, "file": bool(file_bytes),
+                                         "anon": anon})
+    resp = jsonify(view)
+    if anon and not request.cookies.get("oc_uid"):
+        # The anon owner key must survive to the polling request.
+        resp.set_cookie("oc_uid", oc_cookie, max_age=OC_UID_MAX_AGE, httponly=True,
+                        samesite="Lax", secure=_secure(), path="/")
+    return resp, 202
 
-    result = ai_engine.analyze_upload(file_text, events, user_location=user_location)
 
-    resp = jsonify(_public_result(result))
-    oc_uid = _existing_oc_uid or ensure_oc_uid(resp)
-    _audit("analysis_run", _acct, detail={"stored": bool(db.get_consent(oc_uid)),
-                                          "file": bool(file and file.filename)})
-    # Consent is the hinge: no recorded "yes" for this browser means nothing
-    # gets written, and the response the user sees is identical either way.
-    if db.get_consent(oc_uid):
-        try:
-            analysis_id = db.save_analysis(oc_uid, result.get("is_cv", False), file_text, result.get("profile"),
-                                            evidence_level=result.get("evidence_level"), field=result.get("field"))
-            # The original file, byte-for-byte, stored alongside the
-            # extracted-text row above - same consent gate, additive only.
-            # The extraction pipeline above is untouched by this.
-            if file and file.filename and analysis_id is not None:
-                db.save_raw_file(analysis_id, file.filename, file.mimetype, file_bytes)
-            recs = result.get("recommendations", [])
-            rec_ids = db.save_recommendations(analysis_id, recs)
-            for rec, rec_id in zip(recs, rec_ids):
-                rec["recommendation_id"] = rec_id
-            resp = jsonify(_public_result(result))  # rebuild - recs now carry recommendation_id for tracking
-        except Exception as e:
-            log.warning(f"Persisting analysis failed (non-fatal): {e}")
-    return resp
+@app.route("/api/analyze/jobs/<job_id>", methods=["GET"])
+@limiter.exempt     # polled every few seconds; a dictionary lookup, nothing more
+def api_analyze_job(job_id):
+    owner = _analysis_owner()
+    if not owner:
+        return jsonify({"error": "Sign in to use this.", "reason": "auth_required"}), 401
+    view = JOBS.get(job_id[:64], owner)
+    if view is None:
+        return jsonify({"error": "That analysis is no longer running (the server may have restarted). "
+                                 "Please run it again.", "reason": "job_gone"}), 404
+    return jsonify(view)
 
 
 @app.route("/api/my-history", methods=["GET"])
@@ -1232,12 +1538,19 @@ def api_my_history():
 
 @app.route("/api/analyze/reuse", methods=["POST"])
 @auth.login_required
-@limiter.limit("30 per hour")
+@limiter.limit("30 per hour", key_func=_per_person_key,
+               error_message="You've re-run your profile a lot in the last hour. Give it a little while.")
+@limiter.shared_limit(_ai_daily_limit, scope="ai-daily", key_func=lambda: "site",
+                      error_message="OrbitCast has hit today's analysis limit. Please try again tomorrow.")
 def api_analyze_reuse():
     """Re-scores the caller's own last stored profile against the current
     catalog, without re-running extraction or asking them to resubmit
     anything - the 'don't make me upload my CV every time' feature. Same
     consent gate and same account-keyed access as /api/my-history."""
+    owner = auth.current_session_id()
+    active = JOBS.active_for(owner)
+    if active:
+        return jsonify(active), 202
     account = auth.current_account()
     oc_uid = account["oc_uid"] if account else None
     if not oc_uid or not db.get_consent(oc_uid):
@@ -1245,30 +1558,14 @@ def api_analyze_reuse():
     last = db.get_latest_analysis(oc_uid)
     if not last:
         return jsonify({"error": "No saved profile for this browser."}), 404
-
-    cache  = load_events_cache()
-    events = cache.get("events", [])
-    if not events:
-        return jsonify({"error": "No events available. Try refreshing first."}), 404
-
-    user_location = db.get_latest_location(oc_uid) if db.get_location_consent(oc_uid) else None
-    scored = ai_engine.score_and_enrich(last["profile"], last["evidence_level"], last["field"],
-                                         events, user_location=user_location)
-    result = {"is_cv": True, "evidence_level": last["evidence_level"], "field": last["field"],
-              "profile": last["profile"], "clarifying_questions": [], "analysis_failed": False,
-              "message_if_not_cv": "", **scored}
-
+    if not load_events_cache().get("events"):
+        return jsonify({"error": "The event catalogue is still loading. Try again in a minute."}), 503
     try:
-        analysis_id = db.save_analysis(oc_uid, True, "[reused previous profile]", last["profile"],
-                                        evidence_level=last["evidence_level"], field=last["field"])
-        recs = result.get("recommendations", [])
-        rec_ids = db.save_recommendations(analysis_id, recs)
-        for rec, rec_id in zip(recs, rec_ids):
-            rec["recommendation_id"] = rec_id
-    except Exception as e:
-        log.warning(f"Persisting reused analysis failed (non-fatal): {e}")
-
-    return jsonify(_public_result(result))
+        view = JOBS.submit(owner, "reuse", _invalidates_owner(_run_reuse_job), owner, oc_uid, last)
+    except jobs.QueueFull:
+        log.warning("Analysis queue full - turning a re-run away")
+        return _busy_response()
+    return jsonify(view), 202
 
 
 # ─────────────────────────────────────────────
@@ -1351,7 +1648,7 @@ def api_location():
 
 
 @app.route("/api/track", methods=["POST"])
-@limiter.limit("200 per hour")
+@limiter.limit("1200 per hour")
 def api_track():
     oc_uid, _ = _effective_oc_uid()
     data = request.get_json(silent=True) or {}
@@ -2203,6 +2500,9 @@ def _refresh_loop():
 # so this fires exactly once.
 logging.basicConfig(level=logging.INFO)
 threading.Thread(target=_refresh_loop, daemon=True).start()
+# Audit rows are written in the background (db.audit); give the last few a
+# moment to land when Gunicorn stops the worker on a deploy.
+atexit.register(db.flush_audit)
 
 # Email digests. Same single-worker reasoning as the refresh loop above, plus
 # a database claim per send so a restart mid-run cannot double-email anyone.

@@ -28,6 +28,7 @@ import logging
 import math
 import os
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
@@ -43,7 +44,11 @@ except Exception as _exc:  # pragma: no cover - never let RAG availability break
     log.warning(f"rag module unavailable, continuing without retrieval: {_exc}")
     rag = None
 
-MODEL = "claude-sonnet-5"             # current Sonnet model id
+# Models are env-switchable so cost experiments never need a code change.
+# Scoring and critique are the two passes that decide what "honest" means -
+# if you move them to a cheaper model, watch the admin honesty stats and the
+# critique rejection rate for a few days before trusting it.
+MODEL = os.environ.get("OC_MODEL_SCORE", "claude-sonnet-5")
 # Response-time fix: a normal analysis is 3 sequential Claude calls -
 # extract_profile -> score_events -> critique_recommendations - each a full
 # round trip plus real generation time, because scoring needs the extracted
@@ -56,7 +61,8 @@ MODEL = "claude-sonnet-5"             # current Sonnet model id
 # that catches drift back toward flattery - stay on Sonnet untouched. If
 # extraction quality ever looks off, move MODEL_EXTRACT back to MODEL; it's
 # a one-line revert.
-MODEL_EXTRACT = "claude-haiku-4-5-20251001"
+MODEL_EXTRACT = os.environ.get("OC_MODEL_EXTRACT", "claude-haiku-4-5-20251001")
+MODEL_CRITIQUE = os.environ.get("OC_MODEL_CRITIQUE", "") or None   # default: MODEL
 FIT_THRESHOLD = 65                   # only surface events scoring this or higher
 MAX_RECOMMENDATIONS = 5              # honesty rule: a few strong matches, never a padded list
 MAX_CATALOG_SIZE = 100                # cap events sent to scoring - the live catalog
@@ -65,6 +71,41 @@ MAX_CATALOG_SIZE = 100                # cap events sent to scoring - the live ca
                                        # JSON. Soonest-first is a reasonable priority cut.
 
 _client = None
+_client_lock = threading.Lock()
+
+# Rough running usage counters, surfaced on /api/health for the admin - the
+# fastest way to see whether prompt caching is actually hitting (cache_read
+# should dwarf uncached input once more than one analysis has run per scrape).
+USAGE = {"calls": 0, "input": 0, "cache_write": 0, "cache_read": 0, "output": 0}
+_usage_lock = threading.Lock()
+
+
+def _note_usage(resp):
+    try:
+        u = resp.usage
+        with _usage_lock:
+            USAGE["calls"] += 1
+            USAGE["input"] += getattr(u, "input_tokens", 0) or 0
+            USAGE["cache_write"] += getattr(u, "cache_creation_input_tokens", 0) or 0
+            USAGE["cache_read"] += getattr(u, "cache_read_input_tokens", 0) or 0
+            USAGE["output"] += getattr(u, "output_tokens", 0) or 0
+    except Exception:
+        pass
+
+# ── Load limits for the Claude API ───────────────────────────────────────────
+# Every model call in the app goes through _call() or _call_with_search(), and
+# both pass through this gate: at most AI_MAX_INFLIGHT requests to Anthropic at
+# once from this process - analyses, re-runs, the digest scheduler and admin
+# ingest all share it. Past that, callers queue here instead of piling onto the
+# API and getting 429s back. Raise it if your Anthropic rate-limit tier allows.
+AI_MAX_INFLIGHT = max(1, int(os.environ.get("AI_MAX_INFLIGHT", "32")))
+# Per-request ceiling. The SDK default is 10 minutes, which let one stuck call
+# hold a worker that long. Web-search orientation is the slowest call (60-90s).
+AI_TIMEOUT_S = float(os.environ.get("AI_TIMEOUT_S", "120"))
+# The SDK retries 429 / 529 / connection errors with backoff and honours the
+# API's retry-after. Four tries rides out a short rate-limit spike.
+AI_MAX_RETRIES = int(os.environ.get("AI_MAX_RETRIES", "4"))
+_ai_slots = threading.BoundedSemaphore(AI_MAX_INFLIGHT)
 
 
 def _get_client():
@@ -72,8 +113,17 @@ def _get_client():
     clean 'not configured' result instead of crashing)."""
     global _client
     if _client is None:
-        _client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+        with _client_lock:
+            if _client is None:
+                _client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"),
+                                    timeout=AI_TIMEOUT_S, max_retries=AI_MAX_RETRIES)
     return _client
+
+
+def _create(**kwargs):
+    """messages.create behind the in-flight gate."""
+    with _ai_slots:
+        return _get_client().messages.create(**kwargs)
 
 
 def _extract_json_object(raw: str) -> str:
@@ -94,16 +144,21 @@ def _extract_json_object(raw: str) -> str:
 
 
 def _call(system, user_content, max_tokens=1500, model=None):
+    """system and user_content may be plain strings or content-block lists
+    (the block form is how score_events marks the shared catalog prefix with
+    cache_control, so a hundred people analysed in the same window pay for
+    those input tokens roughly once instead of a hundred times)."""
     # NOTE: do NOT pass `temperature` here. It is deprecated on this model and
     # the API rejects the request outright with a 400, which takes down every
     # analysis (extract_profile included, so uploads come back as "not a CV").
     # Sampling variance near the 65 threshold has to be handled some other way.
-    resp = _get_client().messages.create(
+    resp = _create(
         model=model or MODEL,
         max_tokens=max_tokens,
         system=system,
         messages=[{"role": "user", "content": user_content}],
     )
+    _note_usage(resp)
     raw = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
     candidate = _extract_json_object(raw)
     try:
@@ -475,6 +530,11 @@ each. Specific beats long.
 Return ONLY valid JSON - no markdown, no backticks, no preamble - in EXACTLY this schema:
 {
   "input_kind": string,            // "cv" | "self_description" | "unusable"
+  "person_name": string,           // the person's own name as the document states it
+                                    // (from the CV header / contact block, or "my name
+                                    // is X" in a self-description). "" if no name is
+                                    // given. NEVER invent or guess a name; a company or
+                                    // university name is not a person's name.
   "confidence": number,            // 0-1, how sure you are of the classification
   "document_type": string,         // "cv" | "self_description" | "other"
   "message_if_not_cv": string,     // short friendly note, ONLY if input_kind="unusable", else ""
@@ -515,6 +575,7 @@ def _empty_result(message: str, failed: bool = False) -> dict:
         "confidence": 0.0,
         "document_type": "unknown",
         "message_if_not_cv": message,
+        "person_name": "",
         "analysis_failed": failed,
         "profile": {"summary": "", "strengths": [], "gaps": [], "interests": [],
                     "seniority": "", "aspiration": "", "trajectory": ""},
@@ -535,6 +596,7 @@ def extract_profile(file_text: str) -> dict:
     data["is_cv"] = kind in ("cv", "self_description")
     data.setdefault("evidence_level", "rich" if kind == "cv" else "thin")
     data.setdefault("field", "")
+    data["person_name"] = str(data.get("person_name") or "").strip()[:120]
     data.setdefault("clarifying_questions", [])
     data.setdefault("recommendations", [])
     data.setdefault("profile", {})
@@ -611,7 +673,34 @@ Return ONLY valid JSON - no markdown, no backticks, no preamble - in EXACTLY thi
 # change hour to hour. Cache per field for the day - a Railway dyno holds this fine,
 # and a cold start just means one more search.
 _ORIENTATION_TTL = 12 * 3600
+# A failed orientation is remembered briefly too: when fifty people in the same
+# field arrive together and search is down, they should not each wait 90s for
+# the same failure in turn.
+_ORIENTATION_FAIL_TTL = 10 * 60
 _orientation_cache: dict = {}
+# One in-flight search per field. The first person in a field runs the web
+# search; anyone else in that field who arrives meanwhile waits for it and
+# reuses the answer, instead of firing an identical 60-90s search each.
+_orientation_locks: dict = {}
+_orientation_locks_guard = threading.Lock()
+
+
+def _orientation_lock(key):
+    with _orientation_locks_guard:
+        lock = _orientation_locks.get(key)
+        if lock is None:
+            lock = _orientation_locks[key] = threading.Lock()
+        return lock
+
+
+def _orientation_cached(key):
+    hit = _orientation_cache.get(key)
+    if not hit:
+        return False, None
+    ttl = _ORIENTATION_TTL if hit["data"] is not None else _ORIENTATION_FAIL_TTL
+    if (time.time() - hit["at"]) < ttl:
+        return True, hit["data"]
+    return False, None
 
 
 def _call_with_search(system: str, user_content: str, max_tokens: int = 8000) -> dict:
@@ -626,13 +715,12 @@ def _call_with_search(system: str, user_content: str, max_tokens: int = 8000) ->
     produced an empty text block and a confusing "Expecting value" JSON error
     that masked the real cause (verified live: happened on every orientation
     call in production)."""
-    client = _get_client()
     tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": 5}]
     messages = [{"role": "user", "content": user_content}]
 
     resp = None
     for _ in range(4):  # bounded: a paused turn resumes, it doesn't loop forever
-        resp = client.messages.create(
+        resp = _create(
             model=MODEL, max_tokens=max_tokens, system=system,
             tools=tools, messages=messages,
         )
@@ -660,10 +748,19 @@ def build_orientation(field: str, profile: dict) -> dict:
     if not key:
         return None
 
-    hit = _orientation_cache.get(key)
-    if hit and (time.time() - hit["at"]) < _ORIENTATION_TTL:
-        return hit["data"]
+    found, data = _orientation_cached(key)
+    if found:
+        return data
+    with _orientation_lock(key):
+        found, data = _orientation_cached(key)      # filled while we waited
+        if found:
+            return data
+        data = _build_orientation_uncached(field, profile)
+        _orientation_cache[key] = {"at": time.time(), "data": data}
+        return data
 
+
+def _build_orientation_uncached(field: str, profile: dict):
     user_content = (
         f"TODAY'S DATE: {date.today().isoformat()}\n"
         f"FIELD THEY WANT TO GET INTO: {field}\n\n"
@@ -684,7 +781,6 @@ def build_orientation(field: str, profile: dict) -> dict:
         s for s in (data.get("sources") or [])
         if isinstance(s, dict) and s.get("url")
     ][:4]
-    _orientation_cache[key] = {"at": time.time(), "data": data}
     return data
 
 
@@ -811,15 +907,30 @@ def score_events(profile: dict, compact_events: list) -> list:
         except Exception as exc:
             log.warning(f"RAG retrieval failed, continuing without it: {exc}")
 
-    user_content = (
+    # Prompt caching: the catalog is identical for everyone between scrapes
+    # and it dwarfs the profile (20k+ tokens vs ~1k), so it goes FIRST, in a
+    # block marked cache_control, with the per-person part after it. The first
+    # analysis after a scrape writes the cache (+25% on those tokens, once);
+    # every analysis in the next few minutes reads it at a tenth of the price.
+    # The system prompt is cached the same way. Order matters: anything that
+    # varies per user must come after the marked blocks or nothing caches.
+    system_blocks = [{"type": "text", "text": build_scoring_prompt(),
+                      "cache_control": {"type": "ephemeral"}}]
+    shared = (
         f"TODAY'S DATE: {date.today().isoformat()}\n\n"
-        "PERSON PROFILE (JSON):\n"
-        f"{json.dumps(profile, ensure_ascii=False)}\n\n"
         "EVENT CATALOG (JSON array):\n"
         f"{json.dumps(catalog, ensure_ascii=False)}"
+    )
+    personal = (
+        "PERSON PROFILE (JSON):\n"
+        f"{json.dumps(profile, ensure_ascii=False)}"
         + (f"\n\n{rag_block}" if rag_block else "")
     )
-    data = _call(build_scoring_prompt(), user_content, max_tokens=4096)
+    user_content = [
+        {"type": "text", "text": shared, "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": personal},
+    ]
+    data = _call(system_blocks, user_content, max_tokens=4096)
     valid_ids = {e["id"] for e in catalog}
     recs = [
         r for r in data.get("recommendations", [])
@@ -878,7 +989,8 @@ def critique_recommendations(profile: dict, recommendations: list) -> list:
         f"{json.dumps(recommendations, ensure_ascii=False)}"
     )
     try:
-        data = _call(CRITIQUE_SYSTEM_PROMPT, user_content, max_tokens=1000)
+        data = _call(CRITIQUE_SYSTEM_PROMPT, user_content, max_tokens=1000,
+                     model=MODEL_CRITIQUE)
     except Exception as exc:
         # Critique failing shouldn't sink the whole analysis - fall back to
         # the unaudited (but already threshold-enforced) recommendations.
@@ -902,6 +1014,10 @@ def critique_recommendations(profile: dict, recommendations: list) -> list:
 _GEOCODE_CACHE: dict = {}          # location text -> {lat,lng} | None (negative-cached too)
 _NOMINATIM_LAST_CALL = [0.0]       # single-element list = mutable closure cell
 _NOMINATIM_MIN_INTERVAL = 1.05     # Nominatim's usage policy: max 1 req/sec
+# The spacing above was not thread-safe: with many analyses finishing at once,
+# every thread read the same "last call" time and they all fired together -
+# exactly the burst that gets an IP blocked by Nominatim. One lookup at a time.
+_NOMINATIM_LOCK = threading.Lock()
 
 
 def geocode_location(location_text: str):
@@ -916,7 +1032,18 @@ def geocode_location(location_text: str):
         return None  # too vague to place a pin - "London" alone isn't a venue
     if text in _GEOCODE_CACHE:
         return _GEOCODE_CACHE[text]
+    # Bounded wait: a map pin is not worth holding an analysis for long.
+    if not _NOMINATIM_LOCK.acquire(timeout=8):
+        return None
+    try:
+        if text in _GEOCODE_CACHE:              # resolved while we waited
+            return _GEOCODE_CACHE[text]
+        return _geocode_uncached(text)
+    finally:
+        _NOMINATIM_LOCK.release()
 
+
+def _geocode_uncached(text: str):
     elapsed = time.time() - _NOMINATIM_LAST_CALL[0]
     if elapsed < _NOMINATIM_MIN_INTERVAL:
         time.sleep(_NOMINATIM_MIN_INTERVAL - elapsed)
@@ -964,8 +1091,16 @@ def directions_url(origin_lat, origin_lng, dest_lat, dest_lng) -> str:
 # --------------------------------------------------------------------------
 # 6. Orchestration - the single entry point the route calls
 # --------------------------------------------------------------------------
-def analyze_upload(file_text: str, events: list, user_location: dict = None) -> dict:
-    """user_location, when the person has granted it, is {"lat":.., "lng":..}
+def analyze_upload(file_text: str, events: list, user_location: dict = None,
+                   identity_gate=None) -> dict:
+    """identity_gate, when given, is called with the extracted data after
+    classification and before any scoring spend. It returns None to proceed or
+    a user-facing refusal string to stop - app.py uses it to hold each account
+    to one person's CV. It runs here, not in the route, because this is the
+    only point where the document is classified but no scoring tokens have
+    been spent yet.
+
+    user_location, when the person has granted it, is {"lat":.., "lng":..}
     - used only to attach a distance and directions link to each
     recommendation. Never required: every path below degrades to no
     distance/no map rather than failing when it's absent or a geocode
@@ -1007,6 +1142,13 @@ def analyze_upload(file_text: str, events: list, user_location: dict = None) -> 
         data.setdefault("orientation", None)
         data.setdefault("clarifying_questions", [])
         return data
+
+    if identity_gate is not None:
+        refusal = identity_gate(data)
+        if refusal:
+            out = _empty_result(refusal)
+            out["identity_refused"] = True
+            return out
 
     scored = score_and_enrich(data["profile"], data.get("evidence_level", "rich"),
                                data.get("field", ""), events, user_location)

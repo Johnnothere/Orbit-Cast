@@ -1132,11 +1132,17 @@ def _keyword_aggregate(searches, title_re, source_name, extra_re=None, limit=25)
 # by omission.
 _INTEL_SEARCHES = [("eventbrite", "intelligence"), ("eventbrite", "national-security"),
                    ("eventbrite", "counter-terrorism"), ("eventbrite", "security"),
-                   ("eventbrite", "investigation")]
+                   ("eventbrite", "investigation"),
+                   # Oct 2026: the two categories OrbitCast is named for were the
+                   # thinnest in the live catalogue (4 and 13 events), so the
+                   # searches got wider. The title regexes still gate quality.
+                   ("eventbrite", "osint"), ("eventbrite", "espionage")]
 
 _GEOPOL_SEARCHES = [("eventbrite", "geopolitics"), ("eventbrite", "defence"),
                     ("eventbrite", "foreign-policy"),
-                    ("eventbrite", "international-relations"), ("eventbrite", "war")]
+                    ("eventbrite", "international-relations"), ("eventbrite", "war"),
+                    ("eventbrite", "nato"), ("eventbrite", "military"),
+                    ("eventbrite", "diplomacy")]
 
 
 @source("Intelligence & Security Search", "🔎", "Intelligence & Security")
@@ -1208,6 +1214,25 @@ def scrape_frontline_club():
         events.append({"title": title, "date": iso, "url": url,
                        "source": "Frontline Club", "location": "London"})
     return events[:15]
+
+
+@source("Henry Jackson Society", "🏛️", "Defence & Geopolitics")
+def scrape_hjs():
+    """Henry Jackson Society - a foreign-policy think tank whose events page
+    (WordPress + The Events Calendar) emits clean schema.org JSON-LD with
+    dates, venues and per-event URLs. Verified live 16 Oct 2026: 4 upcoming
+    events, all dated. Mostly in-person in Westminster or online briefings,
+    so the catalog-level London filter keeps what belongs.
+
+    Added in the Oct 2026 push to feed the two starving flagship categories;
+    the ones that did NOT survive the same live check, so nobody re-adds them
+    on a hunch: Gresham College, IWM, Royal Institution, British Academy, UCL
+    and City St George's all 403 any datacenter fetch (Cloudflare class, like
+    IISS/Chatham above); the Royal Society and ECFR listing pages carry no
+    JSON-LD and render client-side."""
+    return _scrape_jsonld_source("https://henryjacksonsociety.org/events/",
+                                  "Henry Jackson Society",
+                                  base="https://henryjacksonsociety.org", limit=15)
 
 
 @source("Council on Geostrategy", "🗺️", "Defence & Geopolitics")

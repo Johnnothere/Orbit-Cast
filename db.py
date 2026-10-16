@@ -16,13 +16,128 @@ import hashlib
 import json
 import logging
 import os
+import queue
+import threading
+import time
 from contextlib import contextmanager
 
 log = logging.getLogger("orbitcast.db")
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
+# Connection pool, sized for one process serving many threads at once.
+#
+# This used to be psycopg2's SimpleConnectionPool(1, 10). Three problems, the
+# first of which mattered most:
+#  - psycopg2's pools keep only `minconn` idle connections (1 here) and CLOSE
+#    every other connection when it is handed back. As soon as two requests
+#    overlapped, nearly every query opened a brand-new connection - TCP, TLS,
+#    pooler auth - to a database on the other side of the world, while holding
+#    the pool's lock, so every other thread queued behind that handshake.
+#  - SimpleConnectionPool is documented as not thread-safe; this process runs
+#    dozens of threads.
+#  - When all 10 were in use, getconn() raised at once instead of waiting.
+#
+# This pool keeps every connection it opens (up to DB_POOL_MAX) and reuses it,
+# opens new ones outside any lock, and makes a thread that finds them all busy
+# wait up to DB_POOL_WAIT_S. Connections idle longer than DB_IDLE_MAX_S are
+# replaced rather than reused, so one the pooler quietly dropped is not handed
+# to a request.
+#
+# Keep DB_POOL_MAX inside what the Supabase connection string allows. The app
+# connects through Supavisor: in SESSION mode (pooler port 5432) every client
+# connection holds a database connection and the plan's pool size (15 on the
+# smallest plans) is the hard ceiling for the whole project - so the default
+# stays at the old 10. On the TRANSACTION pooler (port 6543) it can safely go
+# to 20-30.
+DB_POOL_MAX = max(2, int(os.environ.get("DB_POOL_MAX", "10")))
+DB_POOL_WAIT_S = float(os.environ.get("DB_POOL_WAIT_S", "15"))
+DB_IDLE_MAX_S = float(os.environ.get("DB_IDLE_MAX_S", "240"))
+
+
+class _Pool:
+    def __init__(self, dsn, maxconn):
+        self.dsn = dsn
+        self.maxconn = maxconn
+        self._slots = threading.BoundedSemaphore(maxconn)
+        self._idle = []                     # [(conn, last_used_monotonic)] - LIFO
+        self._lock = threading.Lock()
+        self.in_use = 0
+        self.opened = 0
+
+    def _connect(self):
+        import psycopg2
+        conn = psycopg2.connect(
+            self.dsn, connect_timeout=10,
+            # TCP keepalives, so a connection the network or the pooler
+            # silently dropped is noticed instead of hanging a query.
+            keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=3,
+            application_name="orbitcast-web")
+        with self._lock:
+            self.opened += 1
+        return conn
+
+    def acquire(self):
+        if not self._slots.acquire(timeout=DB_POOL_WAIT_S):
+            raise RuntimeError(f"database pool busy: no connection free after {DB_POOL_WAIT_S:.0f}s")
+        try:
+            now = time.monotonic()
+            stale = []
+            conn = None
+            with self._lock:
+                while self._idle:
+                    c, used = self._idle.pop()
+                    if c.closed or now - used > DB_IDLE_MAX_S:
+                        stale.append(c)
+                        continue
+                    conn = c
+                    break
+                self.in_use += 1
+            for c in stale:
+                try:
+                    c.close()
+                except Exception:
+                    pass
+            if conn is None:
+                conn = self._connect()      # outside the lock
+            return conn
+        except Exception:
+            with self._lock:
+                self.in_use -= 1
+            self._slots.release()
+            raise
+
+    def release(self, conn, broken=False):
+        try:
+            if conn is not None and not broken and not conn.closed:
+                import psycopg2.extensions as ext
+                status = conn.info.transaction_status
+                if status == ext.TRANSACTION_STATUS_UNKNOWN:
+                    broken = True
+                elif status != ext.TRANSACTION_STATUS_IDLE:
+                    conn.rollback()
+            if conn is not None:
+                if broken or conn.closed:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                else:
+                    with self._lock:
+                        self._idle.append((conn, time.monotonic()))
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        finally:
+            with self._lock:
+                self.in_use -= 1
+            self._slots.release()
+
+
 _pool = None
+_pool_lock = threading.Lock()
 
 
 def _get_pool():
@@ -30,13 +145,23 @@ def _get_pool():
     if not DATABASE_URL:
         return None
     if _pool is None:
-        from psycopg2.pool import SimpleConnectionPool
-        _pool = SimpleConnectionPool(1, 10, dsn=DATABASE_URL)
+        with _pool_lock:
+            if _pool is None:
+                _pool = _Pool(DATABASE_URL, DB_POOL_MAX)
     return _pool
 
 
 def is_configured() -> bool:
     return bool(DATABASE_URL)
+
+
+def pool_stats() -> dict:
+    """For /api/health: connections checked out now, and opened since boot
+    (a number that keeps climbing means connections are being dropped)."""
+    if _pool is None:
+        return {"max": DB_POOL_MAX, "in_use": 0, "opened": 0}
+    return {"max": DB_POOL_MAX, "in_use": _pool.in_use, "opened": _pool.opened,
+            "idle": len(_pool._idle)}
 
 
 @contextmanager
@@ -45,13 +170,88 @@ def _cursor():
     if pool is None:
         yield None
         return
-    conn = pool.getconn()
+    import psycopg2
+    conn = pool.acquire()
+    broken = False
     try:
-        with conn:
+        with conn:                          # commit on success, rollback on error
             with conn.cursor() as cur:
                 yield cur
+    except (psycopg2.OperationalError, psycopg2.InterfaceError):
+        broken = True
+        raise
     finally:
-        pool.putconn(conn)
+        pool.release(conn, broken)
+
+
+# ── Small in-process caches for the hottest, rarely-changing reads ──────────
+# get_account runs on every signed-in request and get_config on every scoring
+# call. Both rows change rarely and only through functions in this module,
+# which clear the cache when they do. Single process (see Procfile), so a
+# clear here is seen by every later request at once.
+_TTL_ACCOUNT_S = 60
+_TTL_CONFIG_S = 60
+_account_cache: dict = {}
+_config_cache: dict = {}
+_cache_lock = threading.Lock()
+
+
+def _cache_get(cache, key, ttl):
+    with _cache_lock:
+        hit = cache.get(key)
+    if hit and (time.monotonic() - hit[0]) < ttl:
+        return True, hit[1]
+    return False, None
+
+
+def _cache_put(cache, key, value):
+    with _cache_lock:
+        if len(cache) > 5000:
+            cache.clear()
+        cache[key] = (time.monotonic(), value)
+
+
+def _clear_account_cache():
+    with _cache_lock:
+        _account_cache.clear()
+
+
+def _clear_config_cache():
+    with _cache_lock:
+        _config_cache.clear()
+
+
+@contextmanager
+def _read_cursor():
+    """For a single SELECT. Runs in autocommit, so it costs one network round
+    trip instead of three (psycopg2 otherwise sends BEGIN, the query, and
+    COMMIT separately). The database is a long way from the web server, so
+    each round trip is ~100 ms: on /api/me, which makes several of these reads
+    per signed-in page load, that was the bulk of the response time.
+
+    Only for functions that run exactly one SELECT - anything that writes, or
+    reads twice and needs both reads consistent, keeps using _cursor()."""
+    pool = _get_pool()
+    if pool is None:
+        yield None
+        return
+    import psycopg2
+    conn = pool.acquire()
+    broken = False
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            yield cur
+    except (psycopg2.OperationalError, psycopg2.InterfaceError):
+        broken = True
+        raise
+    finally:
+        try:
+            if not conn.closed:
+                conn.autocommit = False      # back to normal for the next borrower
+        except Exception:
+            broken = True
+        pool.release(conn, broken)
 
 
 # --------------------------------------------------------------------------
@@ -62,7 +262,7 @@ def get_consent(oc_uid: str):
     if not oc_uid:
         return None
     try:
-        with _cursor() as cur:
+        with _read_cursor() as cur:
             if cur is None:
                 return None
             cur.execute("select consented from consent where oc_uid = %s", (oc_uid,))
@@ -113,7 +313,7 @@ def get_location_consent(oc_uid: str):
     if not oc_uid:
         return None
     try:
-        with _cursor() as cur:
+        with _read_cursor() as cur:
             if cur is None:
                 return None
             cur.execute("select location_consented from consent where oc_uid = %s", (oc_uid,))
@@ -173,7 +373,7 @@ def get_latest_location(oc_uid: str):
     if not oc_uid:
         return None
     try:
-        with _cursor() as cur:
+        with _read_cursor() as cur:
             if cur is None:
                 return None
             cur.execute(
@@ -234,7 +434,7 @@ def get_latest_analysis(oc_uid: str):
     if not oc_uid:
         return None
     try:
-        with _cursor() as cur:
+        with _read_cursor() as cur:
             if cur is None:
                 return None
             cur.execute(
@@ -332,7 +532,7 @@ def get_cv_status(oc_uid: str):
     if not oc_uid:
         return None
     try:
-        with _cursor() as cur:
+        with _read_cursor() as cur:
             if cur is None:
                 return None
             cur.execute(
@@ -1006,14 +1206,20 @@ def delete_labeled_example(example_id: int) -> bool:
 # Admin config (key/value overrides, e.g. custom scoring rules)
 # --------------------------------------------------------------------------
 def get_config(key: str):
-    """Returns the stored value for `key`, or None if unset/unconfigured."""
+    """Returns the stored value for `key`, or None if unset/unconfigured.
+    Cached for a minute (cleared on set/delete): read on every scoring call."""
+    found, value = _cache_get(_config_cache, key, _TTL_CONFIG_S)
+    if found:
+        return value
     try:
-        with _cursor() as cur:
+        with _read_cursor() as cur:
             if cur is None:
                 return None
             cur.execute("select value from ai_config where key = %s", (key,))
             row = cur.fetchone()
-            return row[0] if row else None
+            value = row[0] if row else None
+            _cache_put(_config_cache, key, value)
+            return value
     except Exception as exc:
         log.warning(f"get_config failed: {exc}")
         return None
@@ -1051,7 +1257,8 @@ def set_config(key: str, value: str) -> bool:
                 """,
                 (key, value),
             )
-            return True
+        _clear_config_cache()
+        return True
     except Exception as exc:
         log.warning(f"set_config failed: {exc}")
         return False
@@ -1064,7 +1271,8 @@ def delete_config(key: str) -> bool:
             if cur is None:
                 return False
             cur.execute("delete from ai_config where key = %s", (key,))
-            return True
+        _clear_config_cache()
+        return True
     except Exception as exc:
         log.warning(f"delete_config failed: {exc}")
         return False
@@ -1086,7 +1294,7 @@ def delete_config(key: str) -> bool:
 def get_events_cache():
     """The stored catalog snapshot, or None if unavailable/never written."""
     try:
-        with _cursor() as cur:
+        with _read_cursor() as cur:
             if cur is None:
                 return None
             cur.execute("select payload from events_cache where id = 1")
@@ -1697,8 +1905,13 @@ def recommendation_belongs_to(recommendation_id, oc_uid: str) -> bool:
 
 
 def get_account(account_id):
+    """Cached for a minute per id; every function here that changes or deletes
+    an account clears the cache."""
+    found, acct = _cache_get(_account_cache, account_id, _TTL_ACCOUNT_S)
+    if found:
+        return dict(acct) if acct else None
     try:
-        with _cursor() as cur:
+        with _read_cursor() as cur:
             if cur is None:
                 return None
             cur.execute(
@@ -1707,12 +1920,53 @@ def get_account(account_id):
                 (account_id,),
             )
             row = cur.fetchone()
-            if not row:
-                return None
-            return {"id": row[0], "email": row[1], "oc_uid": row[2], "created_at": _iso(row[3]),
-                    "name": row[4], "avatar_url": row[5]}
+            acct = None if not row else {
+                "id": row[0], "email": row[1], "oc_uid": row[2], "created_at": _iso(row[3]),
+                "name": row[4], "avatar_url": row[5]}
+        _cache_put(_account_cache, account_id, acct)
+        return dict(acct) if acct else None
     except Exception as exc:
         log.warning(f"get_account failed: {exc}")
+        return None
+
+
+def get_cv_identity(account_id):
+    """The name this account's analyses are locked to, or None."""
+    try:
+        with _read_cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute("select cv_identity from accounts where id = %s", (account_id,))
+            row = cur.fetchone()
+            return row[0] if row else None
+    except Exception as exc:
+        log.warning(f"get_cv_identity failed: {exc}")
+        return None
+
+
+def set_cv_identity_if_absent(account_id, name: str):
+    """First named document wins. Atomic: if two uploads race, both get back
+    whichever name actually landed, and the gate judges against that. Returns
+    the locked name, or None when the database is unavailable (the gate then
+    judges against the submitted name alone for this one run)."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute(
+                """
+                update accounts
+                   set cv_identity = %s, cv_identity_set_at = now()
+                 where id = %s and cv_identity is null
+                """,
+                ((name or "").strip()[:120], account_id),
+            )
+        with _read_cursor() as cur:
+            cur.execute("select cv_identity from accounts where id = %s", (account_id,))
+            row = cur.fetchone()
+            return row[0] if row else None
+    except Exception as exc:
+        log.warning(f"set_cv_identity_if_absent failed: {exc}")
         return None
 
 
@@ -1725,7 +1979,8 @@ def delete_account(oc_uid: str) -> bool:
             if cur is None:
                 return False
             cur.execute("delete from accounts where oc_uid = %s", (oc_uid,))
-            return True
+        _clear_account_cache()
+        return True
     except Exception as exc:
         log.warning(f"delete_account failed: {exc}")
         return False
@@ -1748,7 +2003,7 @@ def _digest_row(row):
 
 def get_digest_prefs(account_id):
     try:
-        with _cursor() as cur:
+        with _read_cursor() as cur:
             if cur is None:
                 return None
             cur.execute(f"select {_DIGEST_COLS} from digest_prefs where account_id = %s",
@@ -1996,7 +2251,7 @@ def list_saved_events(account_id):
     """None means 'could not read' (no database, or 0013 not applied) - the
     caller keeps the browser's own list rather than treating it as empty."""
     try:
-        with _cursor() as cur:
+        with _read_cursor() as cur:
             if cur is None:
                 return None
             cur.execute(f"select {_SAVED_COLS} from saved_events "
@@ -2054,7 +2309,7 @@ def delete_saved_event(account_id, event_id: str) -> bool:
 
 def list_dismissed(account_id):
     try:
-        with _cursor() as cur:
+        with _read_cursor() as cur:
             if cur is None:
                 return []
             cur.execute("select event_id, title, created_at from dismissed_events "
@@ -2089,7 +2344,7 @@ def get_digest_extras(account_id) -> dict:
     purpose: that query is on the scheduler's critical path and must keep
     working on a database where 0013 has not been applied."""
     try:
-        with _cursor() as cur:
+        with _read_cursor() as cur:
             if cur is None:
                 return {}
             cur.execute("select categories, snooze_until from digest_prefs where account_id = %s",
@@ -2121,7 +2376,7 @@ def recent_digest_sends(account_id, limit: int = 6):
     """What was actually sent, most recent first. 'claimed' rows are sends
     in flight and are left out."""
     try:
-        with _cursor() as cur:
+        with _read_cursor() as cur:
             if cur is None:
                 return []
             cur.execute(
@@ -2238,7 +2493,7 @@ def get_account_meta(account_id) -> dict:
     rotated - the same model as an API key."""
     out = {"google_linked": False, "last_login_at": None, "cal_feed_active": False}
     try:
-        with _cursor() as cur:
+        with _read_cursor() as cur:
             if cur is None:
                 return out
             cur.execute("select google_sub is not null, last_login_at, "
@@ -2290,10 +2545,53 @@ def account_id_by_cal_token(token: str):
 # --------------------------------------------------------------------------
 # Audit log (migration 0014)
 # --------------------------------------------------------------------------
+# Audit rows are written by one background thread, not inside the request:
+# each insert is a full transaction (three round trips to a database ~100 ms
+# away), and under load the request was waiting on it for no benefit to the
+# person. Bounded queue; if it ever fills, rows are written inline instead of
+# being dropped.
+_audit_q: "queue.Queue" = queue.Queue(maxsize=2000)
+_audit_thread = None
+_audit_thread_lock = threading.Lock()
+
+
+def _audit_writer():
+    while True:
+        args = _audit_q.get()
+        try:
+            _audit_write(*args)
+        finally:
+            _audit_q.task_done()
+
+
 def audit(account_id, action: str, resource: str = None, detail: dict = None,
           ip: str = None, user_agent: str = None) -> bool:
     """Records who did what to sensitive data. Never raises; a failed audit
     write is logged but must not block the action it describes."""
+    global _audit_thread
+    if not DATABASE_URL:
+        return False
+    if _audit_thread is None:
+        with _audit_thread_lock:
+            if _audit_thread is None:
+                _audit_thread = threading.Thread(target=_audit_writer, daemon=True,
+                                                 name="audit-writer")
+                _audit_thread.start()
+    try:
+        _audit_q.put_nowait((account_id, action, resource, detail, ip, user_agent))
+        return True
+    except queue.Full:
+        return _audit_write(account_id, action, resource, detail, ip, user_agent)
+
+
+def flush_audit(timeout: float = 5.0):
+    """Wait (briefly) for queued audit rows to be written - used at shutdown."""
+    end = time.monotonic() + timeout
+    while _audit_q.unfinished_tasks and time.monotonic() < end:
+        time.sleep(0.05)
+
+
+def _audit_write(account_id, action, resource, detail, ip, user_agent) -> bool:
     try:
         with _cursor() as cur:
             if cur is None:
@@ -2314,7 +2612,7 @@ def audit(account_id, action: str, resource: str = None, detail: dict = None,
 
 
 # --------------------------------------------------------------------------
-# Source health  (migration 0015)
+# Source health  (migration 0015_admin_operability)
 # --------------------------------------------------------------------------
 # The coverage view used to render a per-source count and nothing else, and
 # its own hint admitted the problem: "a source on 0 is either dormant or
@@ -2740,3 +3038,21 @@ def list_audit(limit: int = 50, offset: int = 0, action: str = None):
     except Exception as exc:
         log.warning(f"list_audit failed: {exc}")
         return [], 0, []
+
+
+# ── Account-cache invalidation for the functions that change accounts ───────
+# Wrapped here rather than edited inline so every return path is covered.
+def _clears_account_cache(fn):
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _clear_account_cache()
+    return wrapper
+
+
+get_or_create_account_by_google = _clears_account_cache(get_or_create_account_by_google)
+forget = _clears_account_cache(forget)

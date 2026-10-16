@@ -38,7 +38,7 @@ import sys
 import time
 from functools import wraps
 
-from flask import jsonify, request
+from flask import g, has_request_context, jsonify, request
 
 import db
 
@@ -151,11 +151,31 @@ def current_session():
     return read_session(request.cookies.get(SESSION_COOKIE))
 
 
-def current_account():
+def current_session_id():
+    """Signed-in account id from the cookie alone (HMAC check, no database).
+    Used to key rate limits per person instead of per network address."""
     sess = current_session()
-    if not sess:
-        return None
-    return db.get_account(sess.get("aid"))
+    return sess.get("aid") if sess else None
+
+
+def current_account():
+    """The signed-in account row, looked up once per request. Several routes
+    call this two or three times (and so did the login check and the audit
+    log), which was one database round trip each; now it is one per request.
+    The answer cannot change mid-request: it depends only on the request's
+    own cookie."""
+    if has_request_context():
+        cached = g.get("_oc_account", _MISSING)
+        if cached is not _MISSING:
+            return cached
+    sess = current_session()
+    acct = db.get_account(sess.get("aid")) if sess else None
+    if has_request_context():
+        g._oc_account = acct
+    return acct
+
+
+_MISSING = object()
 
 
 def login_required(fn):

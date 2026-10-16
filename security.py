@@ -13,6 +13,8 @@ Then decorate your /api/refresh route:
         ...
 """
 
+import os
+
 from flask import request, jsonify, render_template
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -25,14 +27,33 @@ def init_security(app):
     """
 
     # ── Rate limiter ──────────────────────────────────────────────────────────
+    def _client_key():
+        """Signed-in visitors are counted per account, everyone else per
+        address. A university, office or event Wi-Fi puts hundreds of people
+        behind one public IP; keyed on IP alone they shared one allowance and
+        a busy room got 429s on ordinary page loads. The account id comes from
+        the signed session cookie (an HMAC check, no database)."""
+        try:
+            import auth
+            aid = auth.current_session_id()
+            if aid:
+                return f"acct:{aid}"
+        except Exception:
+            pass
+        return f"ip:{get_remote_address()}"
+
     limiter = Limiter(
         app=app,
-        key_func=get_remote_address,
+        key_func=_client_key,
         # A ceiling on every route that has no limit of its own. Per-route
-        # limits below are stricter where it matters. Keyed on the real client
-        # address: app.py wraps the WSGI app in ProxyFix before this runs.
-        default_limits=["600 per hour", "60 per minute"],
-        storage_uri="memory://",    # single worker; swap for redis:// if workers > 1
+        # limits are stricter where it matters. Generous on purpose: for
+        # anonymous visitors this is per network address, which can be a
+        # whole campus. Real client address: app.py wraps the WSGI app in
+        # ProxyFix before this runs.
+        default_limits=["3000 per hour", "300 per minute"],
+        # In-process counters: correct for the single Gunicorn worker. With
+        # more than one worker set RATELIMIT_STORAGE_URI to a redis:// URL.
+        storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
     )
 
     # ── Security response headers ─────────────────────────────────────────────
@@ -126,7 +147,16 @@ def init_security(app):
 
     @app.errorhandler(429)
     def rate_limited(e):
-        return jsonify(error="too many requests — slow down"), 429
+        # Routes can carry a plain-English message (e.g. the analysis limits);
+        # everything else gets the generic one.
+        limit = getattr(e, "limit", None)
+        msg = getattr(limit, "error_message", None) if limit is not None else None
+        if callable(msg):
+            msg = msg()
+        resp = jsonify(error=msg or "Too many requests. Please slow down and try again shortly.",
+                       reason="rate_limited")
+        resp.status_code = 429
+        return resp
 
     @app.errorhandler(413)
     def too_large(e):
