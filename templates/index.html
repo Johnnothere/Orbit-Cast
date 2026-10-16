@@ -840,6 +840,11 @@ details.past[open]>summary .i{transform:rotate(180deg)}
 /* ---------- formats, filters, sort ---------- */
 .pill.fmt{background:transparent;border:1px solid var(--line-2);color:var(--tx-3)}
 .pill.fmt.inf{border-style:dashed}
+/* Pitch events get a specific accent (warm, not alarm). The research
+   says they aren't bad per se — some people want them — but the format
+   deserves to be visible at a glance so the people who DON'T want them
+   can see what they're skipping and reach for Hide pitches. */
+.pill.fmt.pitch{color:var(--warm);border-color:var(--warm-dim,color-mix(in oklab,var(--warm) 45%,transparent))}
 .row.compact .pill.fmt{height:18px;font-size:11px;padding:0 6px}
 .hc-foot .pill.fmt{margin-left:6px}
 .row-time .d{display:block;font-size:11.5px;color:var(--tx-3);margin-bottom:2px;white-space:nowrap}
@@ -851,6 +856,16 @@ details.past[open]>summary .i{transform:rotate(180deg)}
 .fp-sec h4{font:600 12.5px var(--f-body);color:var(--tx-3);text-transform:uppercase;letter-spacing:.04em}
 .fp-sec .chips .chip{height:30px;font-size:12.5px}
 .fp-sec .chips .chip .n{opacity:.6}
+/* Prominent single-click opt-outs that sit above the chip-list filters.
+   The research insight is that scanning 11 format chips for the single
+   one you want to exclude costs more than a dedicated row for the
+   complaint the chip-list is answering. */
+.fp-toggle label{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;border:1px solid var(--line-2);background:var(--s2);cursor:pointer;transition:background-color .15s,border-color .15s}
+.fp-toggle label:hover{background:var(--s1);border-color:var(--line)}
+.fp-toggle input[type=checkbox]{width:18px;height:18px;accent-color:var(--ac);flex:none;cursor:pointer}
+.fp-toggle span{display:grid;gap:2px;line-height:1.3}
+.fp-toggle span b{font:500 14px var(--f-body);color:var(--tx);letter-spacing:-.005em}
+.fp-toggle span em{font:400 12.5px var(--f-body);color:var(--tx-3);font-style:normal}
 .fp-hint{font-size:12px;color:var(--tx-3)}
 .fp-sec .set-row b{font-size:14px}
 .fp-foot{display:flex;justify-content:flex-end;padding-top:4px;border-top:1px solid var(--line)}
@@ -886,6 +901,8 @@ details.past[open]>summary .i{transform:rotate(180deg)}
 .mc-when{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font:400 13px var(--f-body);color:var(--tx-2)}
 .mc-when .i{color:var(--tx-3)}
 .mc-why{font-size:14px;line-height:1.5;color:var(--tx-2);display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.mc-fmt{color:inherit}
+.mc-fmt.pitch{color:var(--warm);font-weight:500}
 /* Weakness line: the one honest limitation. Deliberately quieter than the
    match reason, with a muted left rule so it reads as self-check, not
    headline. If the model couldn't name a specific limit, this never
@@ -1302,7 +1319,7 @@ const FORMATS=['Conference','Talk','Workshop','Course','Meetup','Networking','So
 const TODS=[['any','Any time'],['morning','Morning'],['afternoon','Afternoon'],['evening','Evening']];
 const DOWS=[['any','Any day'],['weekday','Weekdays'],['weekend','Weekends']];
 const S={view:'home',q:'',where:store.get('oc_where','london'),range:'all',cat:'all',savedOnly:false,showHidden:false,winDays:7,
-  sort:'soon',fmt:new Set(),tod:'any',dow:'any',timed:false,
+  sort:'soon',fmt:new Set(),tod:'any',dow:'any',timed:false,hidePitch:!!store.get('oc_hide_pitch',0),
   calMode:'weeks',calOff:0,calY:TODAY.getFullYear(),calM:TODAY.getMonth(),calSel:null,
   pendingRun:false,matches:null,file:null,pane:'cv',keep:true,locOn:false,result:null};
 let ME={signed_in:false,google_enabled:true,email_signin_enabled:false};
@@ -1325,12 +1342,18 @@ function passes(e,o){
   if(o.range!==false&&!inRange(e))return false;
   if(o.saved!==false&&S.savedOnly&&!saved.has(e.id))return false;
   if(S.fmt.size&&!S.fmt.has(e.fmt||'Other'))return false;
+  /* "Hide pitches": one-click opt-out of pitch nights, demo days, VC
+     competitions and the like. Research (gap-analysis): a top-complaint
+     across event aggregators is "sales pitches disguised as meetups";
+     labelling helps, letting people hide the whole format in one click
+     helps more. Scraper already tags format=Pitch; this just filters. */
+  if(S.hidePitch&&e.fmt==='Pitch')return false;
   if(S.tod!=='any'&&e.tod!==S.tod)return false;
   if(S.dow!=='any'&&e.dow!==S.dow)return false;
   if(S.timed&&e.mins==null)return false;
   return true;
 }
-const extraFilterCount=()=>S.fmt.size+(S.tod!=='any'?1:0)+(S.dow!=='any'?1:0)+(S.timed?1:0);
+const extraFilterCount=()=>S.fmt.size+(S.tod!=='any'?1:0)+(S.dow!=='any'?1:0)+(S.timed?1:0)+(S.hidePitch?1:0);
 function inRange(e){
   const r=S.range;if(r==='all')return true;if(!e.date)return false;const d=e.date;
   if(r==='today')return e.dk===dkey(TODAY);
@@ -1388,7 +1411,7 @@ function rowHTML(it,compact,withDate){
   if(it.more&&it.more.length)pills+='<span class="pill" title="Also on '+esc(it.more.slice(0,4).map(x=>fmtDay(x.date)).join(', '))+'">+'+it.more.length+' date'+(it.more.length>1?'s':'')+'</span>';
   if(m)pills+='<span class="pill match">'+ic('spark','s14')+'Match '+m.fit+'</span>';
   if(e.gate)pills+='<span class="pill hid">'+esc(e.gate)+'</span>';
-  if(e.fmt)pills+='<span class="pill fmt'+(e.fmtInf?' inf':'')+'" title="'+(e.fmtInf?'Format judged from the category; the listing doesn’t say':'Format from the listing')+'">'+esc(e.fmt)+'</span>';
+  if(e.fmt)pills+='<span class="pill fmt'+(e.fmtInf?' inf':'')+(e.fmt==='Pitch'?' pitch':'')+'" title="'+(e.fmtInf?'Format judged from the category; the listing doesn’t say':'Format from the listing')+'">'+esc(e.fmt)+'</span>';
   let t=e.time?'<span>'+e.time+'</span>'+(e.end&&!compact?'<span class="end">'+e.end+'</span>':''):'<span class="tbc" title="The organiser hasn’t listed a start time">TBC</span>';
   if(withDate)t='<span class="d">'+(e.date?fmtDM(e.date):'TBC')+'</span>'+t;
   return '<div class="row'+(compact?' compact':'')+(e.gate?' is-hidden':'')+'" data-id="'+esc(e.id)+'">'
@@ -1476,7 +1499,10 @@ function renderToolbar(){
 function filterPanelHTML(){
   const cnt={};const base=S.view==='hackathons'?(e=>e.cat==='Hackathons'):(e=>true);for(const e of EV){if(!upcoming(e)||e.gate||!base(e))continue;const k=e.fmt||'Other';cnt[k]=(cnt[k]||0)+1;}
   const fmts=FORMATS.concat(['Other']).filter(f=>cnt[f]||S.fmt.has(f));
-  return'<div class="fp-sec"><h4>Format</h4><div class="chips">'+fmts.map(f=>'<button class="chip" data-fmt="'+esc(f)+'" aria-pressed="'+S.fmt.has(f)+'">'+esc(f)+(cnt[f]?' <span class="n">'+cnt[f]+'</span>':'')+'</button>').join('')+'</div></div>'
+  const pitchN=cnt['Pitch']||0;
+  const pitchSec='<div class="fp-sec"><div class="fp-toggle"><label><input type="checkbox" data-toggle="hidePitch"'+(S.hidePitch?' checked':'')+'><span><b>Hide pitches</b><em>Pitch nights, demo days, VC competitions'+(pitchN?' — '+pitchN+' in the list':'')+'</em></span></label></div></div>';
+  return pitchSec
+   +'<div class="fp-sec"><h4>Format</h4><div class="chips">'+fmts.map(f=>'<button class="chip" data-fmt="'+esc(f)+'" aria-pressed="'+S.fmt.has(f)+'">'+esc(f)+(cnt[f]?' <span class="n">'+cnt[f]+'</span>':'')+'</button>').join('')+'</div></div>'
     +'<div class="fp-sec"><h4>Time of day</h4><div class="seg" role="group" aria-label="Time of day">'+TODS.map(([k,l])=>'<button data-tod="'+k+'" aria-pressed="'+(S.tod===k)+'">'+l+'</button>').join('')+'</div><p class="fp-hint">Morning is before 12:00, evening from 17:00.</p></div>'
     +'<div class="fp-sec"><h4>Day</h4><div class="seg" role="group" aria-label="Day of week">'+DOWS.map(([k,l])=>'<button data-dow="'+k+'" aria-pressed="'+(S.dow===k)+'">'+l+'</button>').join('')+'</div></div>'
     +'<div class="fp-sec"><div class="set-row"><div><b>Only events with a start time</b><span>Hides listings where the organiser hasn’t said when.</span></div><button class="switch" role="switch" data-act="timed" aria-checked="'+S.timed+'" aria-label="Only events with a start time"></button></div></div>'
@@ -1618,7 +1644,7 @@ function renderHack(){
     const df=daysFrom(e.date);const soon=df!==null&&df<=3?(df===0?'Today':df===1?'Tomorrow':'In '+df+' days'):'';
     return'<article class="hcard"><div class="hc-top"><span class="hc-date">'+(e.date?fmtDay(e.date):'Date TBC')+(e.time?' · '+e.time:'')+'</span>'+(soon?'<span class="pill soon">'+soon+'</span>':'')+'</div>'
       +'<button class="hc-open" data-open="'+esc(e.id)+'"><span class="hc-title">'+esc(e.title)+'</span></button>'
-      +'<div class="hc-foot"><span class="where">'+ic(e.online?'globe':'pin','s14')+(e.online?'Online':esc(e.loc.kind==='venue'?e.loc.text:'London'))+(e.fmt&&e.fmt!=='Hackathon'?' <span class="pill fmt">'+esc(e.fmt)+'</span>':'')+'</span>'+saveBtn(e.id)+'</div></article>';
+      +'<div class="hc-foot"><span class="where">'+ic(e.online?'globe':'pin','s14')+(e.online?'Online':esc(e.loc.kind==='venue'?e.loc.text:'London'))+(e.fmt&&e.fmt!=='Hackathon'?' <span class="pill fmt'+(e.fmt==='Pitch'?' pitch':'')+'">'+esc(e.fmt)+'</span>':'')+'</span>'+saveBtn(e.id)+'</div></article>';
   };
   let h=list.length?'<div class="hgrid">'+list.map(card).join('')+'</div>':emptyHTML();
   if(S.where==='london'&&onl.length)h+='<div class="hidden-note">'+ic('globe')+'<div><b>'+onl.length+' online hackathons aren’t shown.</b> Most are run from outside the UK. <button class="linkish" data-where="online">Show online</button></div></div>';
@@ -1828,7 +1854,7 @@ function deckHTML(items,key){
     return'<article class="mcard'+(hot?' hot':'')+(m.muted?' muted':'')+'" role="listitem" aria-label="'+esc(e.title)+', '+esc(band)+'">'
       +'<div class="mc-top"><span class="mc-rank">#'+(i+1)+'</span><span class="mc-tier">'+esc(band)+'</span><span class="mc-fit" title="Fit score, 0-100"><b>'+m.fit+'</b><i>/100</i></span></div>'
       +'<div class="meter" aria-hidden="true"><i'+(hot?' class="hot"':'')+' style="width:'+m.fit+'%"></i></div>'
-      +'<p class="mc-meta"><span class="dot" style="--c:var('+c.v+')"></span>'+esc(c.label)+(e.fmt?' · '+esc(e.fmt):'')+'</p>'
+      +'<p class="mc-meta"><span class="dot" style="--c:var('+c.v+')"></span>'+esc(c.label)+(e.fmt?' · <span class="mc-fmt'+(e.fmt==='Pitch'?' pitch':'')+'">'+esc(e.fmt)+'</span>':'')+'</p>'
       +'<h3 class="mc-title"><button class="row-open" data-open="'+esc(e.id)+'">'+esc(e.title)+'</button></h3>'
       +'<p class="mc-when">'+ic('calendar','s14')+(e.date?fmtDay(e.date):'Date TBC')+(e.time?' · '+e.time:'')+'<span class="sep">·</span>'+ic(e.online?'globe':'pin','s14')+esc(where)+'</p>'
       +'<p class="mc-why">'+esc(m.why)+'</p>'
@@ -2482,7 +2508,7 @@ function closeMenu(){
   if(!menuOpen)return;const [ms,bs]=MENUS[menuOpen];const m=$(ms),b=$(bs);
   if(m)m.hidden=true;if(b)b.setAttribute('aria-expanded','false');menuOpen=false;
 }
-function clearExtra(){S.fmt=new Set();S.tod='any';S.dow='any';S.timed=false;S.sort='soon';}
+function clearExtra(){S.fmt=new Set();S.tod='any';S.dow='any';S.timed=false;S.sort='soon';S.hidePitch=false;store.set('oc_hide_pitch',0);}
 function resetFilters(){S.q='';S.range='all';S.cat='all';S.savedOnly=false;S.where='london';store.set('oc_where','london');clearExtra();const q=$('#q');if(q)q.value='';}
 const filtersOpen=()=>$('#drawer').classList.contains('open')&&$('#drawer').getAttribute('aria-label')==='Filters';
 // Re-renders the list under an open filter drop-down without closing it,
@@ -2495,6 +2521,20 @@ function refilter(){
 }
 function scrollToConsole(){setTimeout(()=>{$('#console').scrollIntoView({behavior:REDUCE?'auto':'smooth',block:'start'});},40);}
 
+/* Toggle (checkbox) handler. Separate from the click dispatcher so the
+   browser's native checked-state updates FIRST, then we read it, which
+   avoids the "clicked but unchecked" visual flicker that happens if you
+   set checked state yourself from a click handler. */
+document.addEventListener('change',ev=>{
+  const inp=ev.target.closest('input[type=checkbox][data-toggle]');
+  if(!inp)return;
+  const k=inp.dataset.toggle;
+  if(k==='hidePitch'){
+    S.hidePitch=!!inp.checked;
+    store.set('oc_hide_pitch',S.hidePitch?1:0);
+    S.winDays=7;refilter();
+  }
+});
 document.addEventListener('click',ev=>{
   const t=ev.target.closest('[data-view],[data-act],[data-open],[data-save],[data-ics],[data-cat],[data-where],[data-range],[data-day],[data-pane],[data-mode],[data-freq],[data-ex],[data-track],[data-dcat],[data-snooze],[data-menu],[data-sort],[data-fmt],[data-tod],[data-dow],[data-deckstep]');
   if(menuOpen&&!ev.target.closest('.menu-wrap'))closeMenu();
