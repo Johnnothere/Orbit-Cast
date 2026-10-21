@@ -304,7 +304,7 @@ kbd{font:500 11px/1 var(--f-mono);color:var(--tx-3);border:1px solid var(--line-
 
 .catrail{display:none;gap:6px;overflow-x:auto;scrollbar-width:none;margin:-6px 0 16px;padding-bottom:2px}
 .catrail::-webkit-scrollbar{display:none}
-.shell.chips .catrail{display:flex;flex-wrap:wrap}
+.shell.chiprail .catrail{display:flex;flex-wrap:wrap}
 
 /* ---------- event list ---------- */
 .days{display:grid;gap:14px}
@@ -330,6 +330,9 @@ kbd{font:500 11px/1 var(--f-mono);color:var(--tx-3);border:1px solid var(--line-
 .row-meta .i{width:13px;height:13px}
 .row-meta .sep{opacity:.55}
 .row-meta .loc{overflow:hidden;text-overflow:ellipsis}
+.row-meta .mc,.row-meta .ml{display:inline-flex;align-items:center;gap:6px;min-width:0}
+.row-meta .mc{flex:none}
+.row-meta .ml{overflow:hidden}
 .row-actions{position:relative;z-index:1;display:flex;gap:2px}
 .row-actions .icon-btn{opacity:0;transition:opacity .12s,background-color .15s,color .15s}
 .row:hover .row-actions .icon-btn,.row:focus-within .row-actions .icon-btn,.row-actions .icon-btn[aria-pressed="true"]{opacity:1}
@@ -385,41 +388,93 @@ kbd{font:500 11px/1 var(--f-mono);color:var(--tx-3);border:1px solid var(--line-
 .opt .i{color:var(--ac);opacity:0}
 .opt[aria-checked="true"] .i{opacity:1}
 
-/* ---------- calendar ---------- */
-.cal-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.cal-title{font:600 30px/1.1 var(--f-display);letter-spacing:-.03em;margin-right:4px}
+/* ---------- calendar ----------
+   Modelled on Apple Calendar / Google Calendar month views: on a desktop the
+   grid fills the window (no page scroll), every week row gets an equal share
+   of the height, and each day shows as many events as fit, then "+N more".
+   The selected day's agenda sits beside the grid on wide screens and below it
+   on phones (iPhone Calendar's month + list split). */
+.cal-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.cal-title{font:600 26px/1.1 var(--f-display);letter-spacing:-.03em;margin:0 6px 0 2px;min-width:0}
 .cal-title span{color:var(--tx-3);font-weight:500}
-.cal{display:grid;grid-template-columns:minmax(0,1fr) 344px;gap:18px;align-items:start}
-.grid{background:var(--s1);border:1px solid var(--line-2);border-radius:18px;overflow:clip}
-.wd{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border-bottom:1px solid var(--line)}
-.wd span{padding:10px 10px 9px;font:500 12px var(--f-body);color:var(--tx-3)}
-.cells{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
-.cell{all:unset;box-sizing:border-box;position:relative;display:flex;flex-direction:column;gap:3px;min-width:0;min-height:118px;padding:7px 7px 8px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);cursor:pointer;transition:background-color .12s}
+.cal-top .icon-btn[disabled]{opacity:.3;pointer-events:none}
+.cal-hint{margin-left:auto;display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;font:400 13px/1.4 var(--f-body);color:var(--tx-3)}
+.cal-hint b{font-weight:500;color:var(--tx-2)}
+.cal-hint .sep{opacity:.6}
+.cal-hint kbd,.cal-foot kbd{padding:2px 5px;font-size:10.5px}
+.cal-foot{flex:none;display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;padding:0 4px;font:400 12.5px/1.5 var(--f-body);color:var(--tx-3)}
+.cal-foot b{font-weight:500;color:var(--tx-2)}
+.cal-foot .sep{opacity:.6}
+.cal-foot .i{width:14px;height:14px}
+.cal{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:start}
+.grid{display:flex;flex-direction:column;min-width:0;background:var(--s1);border:1px solid var(--line-2);border-radius:18px;overflow:clip}
+.wd{flex:none;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border-bottom:1px solid var(--line)}
+.wd span{padding:8px 10px 7px;font:600 11px/1.2 var(--f-body);letter-spacing:.06em;text-transform:uppercase;color:var(--tx-3)}
+.cells{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-auto-rows:122px}
+.cell{position:relative;display:flex;flex-direction:column;gap:2px;min-width:0;min-height:0;padding:4px 5px 5px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);overflow:hidden;container-type:inline-size;transition:background-color .12s}
+.cell[data-day]{cursor:pointer}
 .cell:nth-child(7n){border-right:0}
 .cells .cell:nth-last-child(-n+7){border-bottom:0}
-.cell:hover{background:var(--s2)}
-.cell:focus-visible{outline:2px solid var(--ring);outline-offset:-2px}
-.cell[aria-selected="true"]{background:var(--ac-soft);box-shadow:inset 0 0 0 1.5px color-mix(in oklab,var(--ac) 60%,transparent)}
-.cell .num{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;padding:0 6px;border-radius:999px;font:500 12px/1 var(--f-mono);color:var(--tx-2);align-self:flex-start;margin-bottom:2px}
+.cell[data-day]:hover{background:var(--s2)}
+.cell[aria-selected="true"],.cell[aria-selected="true"]:hover{background:var(--ac-soft);box-shadow:inset 0 0 0 1.5px color-mix(in oklab,var(--ac) 55%,transparent)}
+.cell .num{all:unset;box-sizing:border-box;flex:none;display:inline-flex;align-items:center;justify-content:center;align-self:flex-start;min-width:22px;height:22px;padding:0 7px;border-radius:999px;font:500 12.5px/1 var(--f-mono);font-variant-numeric:tabular-nums;color:var(--tx-2);cursor:pointer}
+.cell .num:focus-visible{outline:2px solid var(--ring);outline-offset:1px}
 .cell .num .m{font-family:var(--f-body);font-weight:600;margin-left:4px;color:var(--tx)}
 .cell.today .num{background:var(--ac-fill);color:var(--ac-fg)}
 .cell.today .num .m{color:inherit}
 .cell.past .num,.cell.out .num{color:var(--tx-3)}
-.cell.past{background:repeating-linear-gradient(135deg,transparent 0 7px,var(--line) 7px 8px)}
-.cell.out{cursor:default}
-.ev-pill{--c:var(--tx-3);display:flex;align-items:center;gap:6px;height:21px;padding:0 6px 0 0;border-radius:6px;background:color-mix(in oklab,var(--c) 15%,transparent);font:500 12px/1 var(--f-body);color:var(--tx);white-space:nowrap;overflow:hidden;min-width:0}
+.cell.past{cursor:default;background:repeating-linear-gradient(135deg,transparent 0 9px,color-mix(in oklab,var(--line) 70%,transparent) 9px 10px)}
+.cell.out:not(.past){background:color-mix(in oklab,var(--s2) 40%,transparent)}
+.cell.out .ev-pill{opacity:.6}
+.ev-pill{all:unset;box-sizing:border-box;--c:var(--tx-3);flex:none;display:flex;align-items:center;gap:5px;height:18px;min-width:0;padding:0 5px 0 0;border-radius:5px;background:color-mix(in oklab,var(--c) 14%,transparent);font:500 11.5px/1 var(--f-body);color:var(--tx);white-space:nowrap;overflow:hidden;cursor:pointer}
+.ev-pill:hover{background:color-mix(in oklab,var(--c) 26%,transparent)}
+.ev-pill:focus-visible{outline:2px solid var(--ring);outline-offset:-1px}
 .ev-pill::before{content:"";flex:none;width:3px;align-self:stretch;border-radius:2px;background:var(--c)}
-.ev-pill .t{flex:none;font:500 11px/1 var(--f-mono);color:var(--tx-2)}
+.ev-pill .t{display:none;flex:none;font:500 10.5px/1 var(--f-mono);color:var(--tx-2)}
 .ev-pill .x{overflow:hidden;text-overflow:ellipsis}
-.cell .more{font:500 12px/1.4 var(--f-body);color:var(--tx-3);padding-left:4px}
+@container (min-width:150px){.ev-pill .t:not(:empty){display:inline}}
+.cell .ev-pill[hidden],.cell .more[hidden]{display:none}
+.cell .more{all:unset;flex:none;align-self:flex-start;padding:0 5px;border-radius:5px;font:500 11.5px/16px var(--f-body);color:var(--tx-2);cursor:pointer}
+.cell .more:hover{background:var(--s3);color:var(--tx)}
+.cell .more:focus-visible{outline:2px solid var(--ring)}
 .cell .dots,.cell .cnt{display:none}
 .daypanel{position:sticky;top:calc(96px + env(safe-area-inset-top,0px));display:flex;flex-direction:column;max-height:calc(100dvh - 120px);background:var(--s1);border:1px solid var(--line-2);border-radius:18px;overflow:clip}
-.dp-hd{padding:16px 16px 14px;border-bottom:1px solid var(--line)}
-.dp-hd h3{font:600 18px/1.25 var(--f-display);letter-spacing:-.01em}
-.dp-hd p{margin-top:4px;font-size:13px;color:var(--tx-3)}
-.dp-body{overflow:auto}
-.dp-empty{padding:28px 18px;color:var(--tx-2);font-size:14px}
+.dp-hd{flex:none;padding:14px 16px 12px;border-bottom:1px solid var(--line)}
+.dp-hd h3{font:600 17px/1.25 var(--f-display);letter-spacing:-.01em}
+.dp-hd p{margin-top:3px;font-size:13px;color:var(--tx-3)}
+.dp-body{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain}
+.dp-empty{padding:24px 16px;color:var(--tx-2);font-size:14px}
 .dp-foot{padding:10px 12px;border-top:1px solid var(--line)}
+/* agenda rows in the day list: the whole title, wrapped, with no reserved
+   space for hover-only buttons (that space is what was squeezing titles to
+   a few letters). Save stays one tap away in the corner. */
+.daypanel .row{grid-template-columns:44px minmax(0,1fr);align-items:start;gap:10px;min-height:0;padding:11px 10px 11px 14px}
+.daypanel .row-time{padding-top:2px;font-size:12.5px}
+.daypanel .row-main{padding-right:30px}
+.daypanel .row-line{flex-wrap:wrap;row-gap:6px}
+.daypanel .row-open{flex:1 1 100%}
+.daypanel .row-title{white-space:normal;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;font-size:14.5px;line-height:1.35}
+.daypanel .row-meta{margin-top:5px;flex-direction:column;align-items:flex-start;gap:3px;white-space:normal;overflow:visible}
+.daypanel .row-meta .ml{max-width:100%}
+.daypanel .row-meta .ml>.sep{display:none}
+.daypanel .row-meta .loc{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;white-space:normal}
+.daypanel .row-actions{position:absolute;top:6px;right:6px}
+.daypanel .row-actions .act-cal,.daypanel .row-actions .act-open{display:none}
+@media (min-width:1100px) and (min-height:600px){
+  .shell.calfit{max-width:1680px;height:100dvh;min-height:0;padding:78px 20px 10px}
+  .shell.calfit .main{display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-rows:auto auto minmax(0,1fr);column-gap:14px;height:100%;min-height:0}
+  .shell.calfit .vhead{grid-column:1;grid-row:1;align-self:center;margin:0}
+  .shell.calfit .toolbar{grid-column:2;grid-row:1;position:relative;top:auto;margin:0;padding:6px}
+  .shell.calfit .toolbar .search{flex:1 1 150px;min-width:140px}
+  .shell.calfit .catrail{grid-column:1/-1;grid-row:2;flex-wrap:nowrap;margin:10px 0}
+  .shell.calfit .catrail .chip{height:30px}
+  .shell.calfit #out{grid-column:1/-1;grid-row:3;min-height:0;display:flex;flex-direction:column;gap:7px}
+  .shell.calfit .cal{flex:1;min-height:0;grid-template-rows:minmax(0,1fr);align-items:stretch}
+  .shell.calfit .grid{min-height:0}
+  .shell.calfit .cells{flex:1;min-height:0;grid-auto-rows:auto;grid-template-rows:repeat(var(--weeks,5),minmax(0,1fr))}
+  .shell.calfit .daypanel{position:relative;top:auto;max-height:none;min-height:0}
+  .shell.calfit .hidden-note{flex:none;margin:0;padding:8px 14px;font-size:12.5px}
+}
 
 /* ---------- hackathons ---------- */
 .hgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(280px,100%),1fr));gap:14px}
@@ -603,15 +658,15 @@ details.card .body{margin-top:14px;display:grid;gap:14px;font-size:14.5px;color:
 @keyframes toast-in{from{opacity:0;transform:translateY(6px)}}
 
 /* ---------- responsive ---------- */
-@media (max-width:1180px){
-  .cal{grid-template-columns:minmax(0,1fr)}
-  .daypanel{display:none}
+@media (max-width:1099px){
+  .cal{grid-template-columns:minmax(0,1fr);gap:12px}
+  .daypanel{position:static;max-height:none}
 }
 @media (max-width:1040px){
   .shell{grid-template-columns:minmax(0,1fr);gap:0}
   .cats{display:none}
-  .catrail,.shell.chips .catrail{display:flex;flex-wrap:nowrap}
-  .shell.no-rail:not(.chips) .catrail{display:none}
+  .catrail,.shell.chiprail .catrail{display:flex;flex-wrap:nowrap}
+  .shell.no-rail:not(.chiprail) .catrail{display:none}
   .cmp{grid-template-columns:minmax(0,1fr)}
   .chg{grid-template-columns:minmax(0,1fr)}
 }
@@ -646,14 +701,26 @@ details.card .body{margin-top:14px;display:grid;gap:14px;font-size:14.5px;color:
   .drawer{top:auto;left:0;right:0;bottom:0;width:auto;max-height:88dvh;border-radius:22px 22px 0 0;padding-bottom:env(safe-area-inset-bottom,0px);transform:translateY(100%)}
   .dr-grab{display:block;width:40px;height:5px;border-radius:5px;background:var(--line-3);margin:8px auto 0}
   .dr-hd{padding-top:6px}
-  .cal-title{font-size:22px}
-  .cell{min-height:64px;padding:5px 3px;align-items:center}
-  .cell .num{margin-bottom:0}
-  .cell .ev-pill,.cell .more{display:none}
-  .cell .dots{display:flex;gap:3px;justify-content:center;margin-top:4px}
+  .cal-top{gap:2px}
+  .cal-title{font-size:19px;margin:0 2px}
+  .cal-top .btn{margin-left:auto}
+  .cal-hint{margin-left:0;width:100%}
+  .cal-hint .kb{display:none}
+  .cells{grid-auto-rows:60px}
+  .cell{padding:5px 2px 4px;align-items:center;gap:0;border-right:0}
+  .cell.past{background:none}
+  .cell.out:not(.past){background:none}
+  .cell .num{align-self:center;min-width:32px;height:32px;padding:0 4px;font:500 15px/1 var(--f-body)}
+  .cell .num .m{display:none}
+  .cell .ev-pill,.cell .more{display:none!important}
+  .cell .dots{display:flex;gap:3px;justify-content:center;margin-top:3px}
   .cell .dots i{width:5px;height:5px;border-radius:50%;background:var(--c)}
-  .cell .cnt{display:block;font:500 10.5px/1 var(--f-mono);color:var(--tx-3);margin-top:4px}
-  .wd span{padding:8px 0;text-align:center}
+  .cell .cnt{display:block;font:500 10px/1 var(--f-mono);color:var(--tx-3);margin-top:3px}
+  .cell[aria-selected="true"],.cell[aria-selected="true"]:hover{background:none;box-shadow:none}
+  .cell[aria-selected="true"] .num{background:var(--ink);color:var(--ink-fg)}
+  .cell.today .num{background:none;color:var(--ac);font-weight:700}
+  .cell.today[aria-selected="true"] .num{background:var(--ac-fill);color:var(--ac-fg)}
+  .wd span{padding:8px 0;text-align:center;letter-spacing:.02em}
   .hero{padding:48px 0 28px}
   .hero-foot{grid-template-columns:minmax(0,1fr)}
   .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -1408,11 +1475,13 @@ const hiddenCount=()=>EV.filter(e=>e.gate&&upcoming(e)).length;
 function metaHTML(e){
   const c=catOf(e.cat);
   let h='<span class="dot" style="--c:var('+c.v+')"></span><span>'+esc(c.label)+'</span>';
+  h='<span class="mc">'+h+'</span>';const m0=h.length;
   if(e.online)h+='<span class="sep">·</span>'+ic('globe')+'<span class="loc">Online</span>';
   else if(e.loc.kind==='venue')h+='<span class="sep">·</span>'+ic('pin')+'<span class="loc">'+esc(e.loc.text)+'</span>';
   else if(e.loc.kind==='hybrid')h+='<span class="sep">·</span>'+ic('pin')+'<span class="loc">London, also online</span>';
   else if(e.loc.kind==='tbc')h+='<span class="sep">·</span><span class="loc">Venue TBC</span>';
   else if(e.loc.kind==='london')h+='<span class="sep">·</span>'+ic('pin')+'<span class="loc">London \u00b7 venue on the organiser\u2019s page</span>';
+  if(h.length>m0)h=h.slice(0,m0)+'<span class="ml">'+h.slice(m0)+'</span>';
   return h;
 }
 function saveBtn(id,cls){
@@ -1547,7 +1616,7 @@ function go(view,opt){
   $$('.nav-link,.tab').forEach(b=>{if(b.dataset.view===view)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
   $('#topTitle').textContent=TITLES[view];
   closeDrawer(true);closeMenu();
-  if(view==='home')renderHome();else{$('#shell').classList.toggle('no-rail',view!=='events');$('#shell').classList.toggle('chips',view==='calendar');renderToolbar();render();}
+  if(view==='home')renderHome();else{$('#shell').classList.toggle('no-rail',view!=='events');$('#shell').classList.toggle('chiprail',view==='calendar');$('#shell').classList.toggle('calfit',view==='calendar');renderToolbar();render();}
   if(opt.push!==false){try{history.pushState(null,'',view==='home'?location.pathname:'#'+view);}catch(e){}}
   if(opt.scroll!==false)window.scrollTo(0,0);
 }
@@ -1594,41 +1663,99 @@ function renderEvents(){
 }
 
 /* ---------- calendar ---------- */
-let CAL_DAYS={};
+let CAL_DAYS={},CAL_RO=null;
+const CAL_SIDE='(min-width:1100px)';
 function calRange(){
   if(S.calMode==='weeks'){const start=addDays(mondayOf(TODAY),S.calOff*35);return{start,weeks:5,month:null};}
   const first=new Date(S.calY,S.calM,1),start=mondayOf(first),last=new Date(S.calY,S.calM+1,0);
   return{start,weeks:Math.ceil((Math.round((last-start)/864e5)+1)/7),month:S.calM};
 }
+// Everything before today is greyed out, so paging back past the current
+// block only ever showed empty hatched weeks. The back arrow stops here.
+function calAtStart(){
+  if(S.calMode==='weeks')return S.calOff<=0;
+  return S.calY<TODAY.getFullYear()||(S.calY===TODAY.getFullYear()&&S.calM<=TODAY.getMonth());
+}
+function calStep(n){
+  if(n<0&&calAtStart())return;
+  if(S.calMode==='weeks')S.calOff=Math.max(0,S.calOff+n);
+  else{const d=new Date(S.calY,S.calM+n,1);S.calY=d.getFullYear();S.calM=d.getMonth();}
+  S.calSel=null;render();
+}
+function calToday(){S.calOff=0;S.calY=TODAY.getFullYear();S.calM=TODAY.getMonth();S.calSel=dkey(TODAY);render();const b=$('#out .num[data-day="'+S.calSel+'"]');b&&b.focus({preventScroll:true});}
+// Arrow keys move the selected day; walking off the edge pages the view.
+function calMove(k,n){
+  const d=addDays(fromKey(k),n);if(d<TODAY)return;
+  const t=dkey(d);
+  if($('#out .num[data-day="'+t+'"]')){selectDay(t,true);return;}
+  if(S.calMode==='weeks')S.calOff+=n>0?1:-1;else{S.calY=d.getFullYear();S.calM=d.getMonth();}
+  S.calOff=Math.max(0,S.calOff);S.calSel=t;render();
+  const b=$('#out .num[data-day="'+t+'"]');b&&b.focus();
+}
 function renderCal(){
   const r=calRange(),end=addDays(r.start,r.weeks*7);
   const list=EV.filter(e=>e.date&&e.date>=r.start&&e.date<end&&passes(e,{range:false,saved:false})).sort(cmp);
   CAL_DAYS={};list.forEach(e=>{(CAL_DAYS[e.dk]=CAL_DAYS[e.dk]||[]).push(e);});
-  const inView=k=>{const d=fromKey(k);return d>=r.start&&d<end&&(r.month===null||d.getMonth()===r.month)&&d>=TODAY;};
-  if(!S.calSel||!inView(S.calSel)){const ks=Object.keys(CAL_DAYS).sort();S.calSel=ks.find(k=>fromKey(k)>=TODAY)||(inView(dkey(TODAY))?dkey(TODAY):null);}
+  const live=k=>{const d=fromKey(k);return d>=r.start&&d<end&&d>=TODAY;};
+  // Only count what is actually on screen: past days in the first week used
+  // to be counted even though their events are hidden.
+  const shown=list.filter(e=>live(e.dk)).length;
+  const inMonth=k=>r.month===null||fromKey(k).getMonth()===r.month;
+  if(!S.calSel||!live(S.calSel)){const ks=Object.keys(CAL_DAYS).sort();S.calSel=ks.find(k=>live(k)&&inMonth(k))||ks.find(live)||(live(dkey(TODAY))?dkey(TODAY):(r.start>=TODAY?dkey(r.start):dkey(TODAY)));}
   const lastDay=addDays(end,-1);
   const title=r.month===null?fmtDM(r.start)+' – '+fmtDM(lastDay)+' <span>'+lastDay.getFullYear()+'</span>':new Date(S.calY,S.calM,1).toLocaleDateString('en-GB',{month:'long'})+' <span>'+S.calY+'</span>';
-  $('#vhead').innerHTML='<div style="width:100%"><div class="cal-top"><button class="icon-btn" data-act="calprev" aria-label="Previous">'+ic('chevron-left')+'</button><h1 class="cal-title">'+title+'</h1><button class="icon-btn" data-act="calnext" aria-label="Next">'+ic('chevron-right')+'</button><button class="btn btn-secondary sm" data-act="caltoday">Today</button></div>'
-    +'<p class="vsub"><span><b>'+list.length+'</b> events in view</span><span class="sep">·</span><span>'+(narrow('(max-width:1180px)')?'tap a day to see it':'select a day to see it on the right')+'</span>'+(extraFilterCount()?'<span class="sep">·</span><button class="linkish" data-act="clearextra">clear filters</button>':'')+'</p></div>';
+  const side=narrow(CAL_SIDE),nh=hiddenCount();
+  const hint='<span><b>'+shown+'</b> event'+(shown===1?'':'s')+' in view</span><span class="sep">·</span><span>'+(side?'Click a day for its list, an event to open it':'Tap a day to see its events below')+'</span>'
+    +(extraFilterCount()?'<span class="sep">·</span><button class="linkish" data-act="clearextra">clear filters</button>':'');
+  $('#vhead').innerHTML='<div class="cal-top" style="width:100%">'
+    +'<button class="icon-btn" data-act="calprev" aria-label="Previous"'+(calAtStart()?' disabled':'')+' title="Previous (P)">'+ic('chevron-left')+'</button>'
+    +'<h1 class="cal-title">'+title+'</h1>'
+    +'<button class="icon-btn" data-act="calnext" aria-label="Next" title="Next (N)">'+ic('chevron-right')+'</button>'
+    +'<button class="btn btn-secondary sm" data-act="caltoday" title="Jump to today (T)">Today</button>'
+    +(side?'':'<p class="cal-hint">'+hint+'</p>')+'</div>';
+  // On a desktop the hint and the off-topic note share one slim line under
+  // the grid, so the grid keeps the height.
+  const foot=side?'<div class="cal-foot">'+hint+'<span class="sep">·</span><span><kbd>T</kbd> today · <kbd>←</kbd><kbd>→</kbd> move · <kbd>N</kbd><kbd>P</kbd> page</span>'
+    +(nh?'<span class="sep">·</span>'+ic('eye-off')+'<span>'+(S.showHidden?'Showing '+nh+' off-topic listings':nh+' off-topic listings hidden')+'</span><button class="linkish" data-act="hidden">'+(S.showHidden?'hide':'show')+'</button>':'')+'</div>':hiddenNote();
   let cells='';
   for(let i=0;i<r.weeks*7;i++){
     const d=addDays(r.start,i),k=dkey(d),evs=CAL_DAYS[k]||[];
-    const out=r.month!==null&&d.getMonth()!==r.month,past=d<TODAY,today=k===dkey(TODAY);
+    const out=r.month!==null&&d.getMonth()!==r.month,past=d<TODAY,today=k===dkey(TODAY),sel=k===S.calSel;
     const mon=d.getDate()===1?'<span class="m">'+d.toLocaleDateString('en-GB',{month:'short'})+'</span>':'';
     const cls='cell'+(today?' today':'')+(past?' past':'')+(out?' out':'');
-    const dis=out||past;
-    let inner='<span class="num">'+d.getDate()+mon+'</span>';
-    if(!dis){
-      inner+=evs.slice(0,3).map(e=>'<span class="ev-pill" style="--c:var('+catOf(e.cat).v+')" title="'+esc((e.time?e.time+'  ':'')+e.title)+'"><span class="x">'+esc(e.title)+'</span></span>').join('');
-      if(evs.length>3)inner+='<span class="more">+'+(evs.length-3)+' more</span>';
-      if(evs.length)inner+='<span class="dots" aria-hidden="true">'+evs.slice(0,3).map(e=>'<i style="--c:var('+catOf(e.cat).v+')"></i>').join('')+'</span><span class="cnt" aria-hidden="true">'+evs.length+'</span>';
+    let inner;
+    if(past){inner='<span class="num">'+d.getDate()+mon+'</span>';}
+    else{
+      const label=fmtLong(d)+(today?', today':'')+', '+(evs.length?evs.length+' event'+(evs.length===1?'':'s'):'no events');
+      inner='<button class="num" data-day="'+k+'" tabindex="'+(sel?0:-1)+'" aria-pressed="'+sel+'" aria-label="'+esc(label)+'">'+d.getDate()+mon+'</button>';
+      inner+=evs.map(e=>'<button class="ev-pill" data-open="'+esc(e.id)+'" style="--c:var('+catOf(e.cat).v+')" title="'+esc((e.time?e.time+'  ':'')+e.title)+'"><span class="t">'+esc(e.time||'')+'</span><span class="x">'+esc(e.title)+'</span></button>').join('');
+      if(evs.length)inner+='<button class="more" data-day="'+k+'" hidden></button><span class="dots" aria-hidden="true">'+evs.slice(0,3).map(e=>'<i style="--c:var('+catOf(e.cat).v+')"></i>').join('')+'</span><span class="cnt" aria-hidden="true">'+evs.length+'</span>';
     }
-    const label=fmtLong(d)+', '+(dis?'past':evs.length+' event'+(evs.length===1?'':'s'));
-    cells+='<button class="'+cls+'" '+(dis?'aria-disabled="true" tabindex="-1"':'data-day="'+k+'"')+' aria-selected="'+(k===S.calSel)+'" aria-label="'+esc(label)+'">'+inner+'</button>';
+    cells+='<div class="'+cls+'"'+(past?'':' data-day="'+k+'"')+' aria-selected="'+sel+'">'+inner+'</div>';
   }
   const wds=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-  $('#out').innerHTML='<div class="cal"><div class="grid"><div class="wd" aria-hidden="true">'+wds.map(w=>'<span>'+w+'</span>').join('')+'</div><div class="cells">'+cells+'</div></div>'
-    +'<aside class="daypanel" id="daypanel" aria-live="polite">'+dayPanelHTML(S.calSel)+'</aside></div>'+hiddenNote();
+  $('#out').innerHTML='<div class="cal"><div class="grid"><div class="wd" aria-hidden="true">'+wds.map(w=>'<span>'+w+'</span>').join('')+'</div><div class="cells" style="--weeks:'+r.weeks+'">'+cells+'</div></div>'
+    +'<aside class="daypanel" id="daypanel" aria-live="polite" aria-label="Events on the selected day">'+dayPanelHTML(S.calSel)+'</aside></div>'+foot;
+  fitPills();
+  if(window.ResizeObserver){if(!CAL_RO)CAL_RO=new ResizeObserver(()=>requestAnimationFrame(fitPills));CAL_RO.disconnect();CAL_RO.observe($('#out .cells'));}
+}
+// Shows as many events as the day's box can hold and folds the rest into
+// "+N more" (which selects the day). Row height depends on the window, so
+// this runs after every render and on resize.
+function fitPills(){
+  if(S.view!=='calendar'||narrow('(max-width:860px)'))return;
+  const cells=$$('#out .cell[data-day]');if(!cells.length)return;
+  const c0=cells[0],num=$('.num',c0);
+  const avail=c0.clientHeight-(num?num.offsetHeight:22)-9; // cell padding
+  const PH=20,MORE=18;                                      // pill 18 + 2 gap; "+N more" line 16 + 2 gap
+  const all=Math.max(0,Math.floor((avail+2)/PH)),withMore=Math.max(0,Math.floor((avail+2-MORE)/PH));
+  for(const c of cells){
+    const pills=$$('.ev-pill',c);if(!pills.length)continue;
+    const cap=pills.length<=all?pills.length:withMore,rest=pills.length-cap;
+    pills.forEach((p,i)=>{p.hidden=i>=cap;});
+    const m=$('.more',c);
+    if(m){m.hidden=rest<=0;m.textContent=rest<=0?'':cap?'+'+rest+' more':rest+' event'+(rest===1?'':'s');m.setAttribute('aria-label',rest+' more on '+fmtLong(fromKey(c.dataset.day)));}
+  }
 }
 function dayPanelHTML(k){
   if(!k)return'<div class="dp-empty">Select a day.</div>';
@@ -1638,13 +1765,16 @@ function dayPanelHTML(k){
   else{const nk=Object.keys(CAL_DAYS).sort().find(x=>x>k);h+='<div class="dp-empty">Nothing is listed for this day with your current filters.'+(nk?' <button class="linkish" data-day="'+nk+'">Next day with events: '+fmtDay(fromKey(nk))+'</button>':'')+'</div>';}
   return h;
 }
-function selectDay(k){
+if(window.matchMedia){try{matchMedia(CAL_SIDE).addEventListener('change',()=>{if(S.view==='calendar')render();});}catch(e){}}
+function selectDay(k,focus){
   S.calSel=k;
-  $$('.cell[data-day]').forEach(c=>c.setAttribute('aria-selected',String(c.dataset.day===k)));
-  if(narrow('(max-width:1180px)')){
-    const d=fromKey(k),evs=CAL_DAYS[k]||[];
-    openDrawer('<div class="dr-grab"></div><div class="dr-hd"><span class="dr-cat">'+ic('calendar','s16')+(evs.length?evs.length+' event'+(evs.length===1?'':'s'):'Nothing listed')+'</span><button class="icon-btn" data-act="close" aria-label="Close">'+ic('x')+'</button></div><div class="dr-body"><h2 class="dr-title">'+fmtLong(d)+'</h2><div class="dr-daylist">'+(evs.map(e=>rowHTML({ev:e,more:[]},true)).join('')||'<p class="dp-empty">Nothing is listed for this day with your current filters.</p>')+'</div></div>',fmtLong(d));
-  }else{const p=$('#daypanel');if(p)p.innerHTML=dayPanelHTML(k);}
+  $$('#out .cell').forEach(c=>{const on=c.dataset.day===k;c.setAttribute('aria-selected',String(on));const n=$('.num[data-day]',c);if(n){n.tabIndex=on?0:-1;n.setAttribute('aria-pressed',String(on));}});
+  const p=$('#daypanel');if(!p)return;
+  p.innerHTML=dayPanelHTML(k);
+  if(focus){const n=$('#out .num[data-day="'+k+'"]');n&&n.focus({preventScroll:true});}
+  // Below the grid (phones, narrow windows): bring the list into view if the
+  // tap left it off-screen, as iPhone Calendar keeps it visible under the month.
+  if(!narrow(CAL_SIDE)){const rc=p.getBoundingClientRect();if(rc.top>innerHeight-120)p.scrollIntoView({block:'start',behavior:REDUCE?'auto':'smooth'});}
 }
 
 /* ---------- hackathons ---------- */
@@ -2625,9 +2755,9 @@ document.addEventListener('click',ev=>{
 
     case'filters':openFilters();break;
     case'close':closeDrawer();break;
-    case'calprev':if(S.calMode==='weeks')S.calOff--;else{S.calM--;if(S.calM<0){S.calM=11;S.calY--;}}S.calSel=null;render();{const b=$('[data-act="calprev"]');b&&b.focus();}break;
-    case'calnext':if(S.calMode==='weeks')S.calOff++;else{S.calM++;if(S.calM>11){S.calM=0;S.calY++;}}S.calSel=null;render();{const b=$('[data-act="calnext"]');b&&b.focus();}break;
-    case'caltoday':S.calOff=0;S.calY=TODAY.getFullYear();S.calM=TODAY.getMonth();S.calSel=null;render();break;
+    case'calprev':calStep(-1);{const b=$('[data-act="calprev"]');b&&!b.disabled?b.focus():($('[data-act="calnext"]')||{focus(){}}).focus();}break;
+    case'calnext':calStep(1);{const b=$('[data-act="calnext"]');b&&b.focus();}break;
+    case'caltoday':calToday();break;
     case'pickfile':$('#cvFile').click();break;
     case'replacecv':closeModal();if(S.view!=='home')go('home',{scroll:false});setPane('cv');scrollToConsole();toast('Upload a new CV. It replaces what is on file when the analysis runs.');break;
     case'delcv':deleteCv();break;
@@ -2719,6 +2849,14 @@ document.addEventListener('keydown',ev=>{
   if(menuOpen&&menuOpen!=='filter'&&(ev.key==='ArrowDown'||ev.key==='ArrowUp')){ev.preventDefault();const items=$$(MENUS[menuOpen][0]+' button');const i=items.indexOf(document.activeElement);const n=(i+(ev.key==='ArrowDown'?1:-1)+items.length)%items.length;items[n].focus();return;}
   if(typing||ev.metaKey||ev.ctrlKey||ev.altKey)return;
   if(ev.key==='/'&&S.view!=='home'){const q=$('#q');if(q){ev.preventDefault();q.focus();}}
+  if(S.view==='calendar'&&LOADED&&!menuOpen&&$('#modal').hidden&&!$('#drawer').classList.contains('open')){
+    const k=ev.key,t=ev.target;
+    const step={ArrowLeft:-1,ArrowRight:1,ArrowUp:-7,ArrowDown:7}[k];
+    if(step&&t.classList&&t.classList.contains('num')&&t.dataset.day){ev.preventDefault();calMove(t.dataset.day,step);return;}
+    if(k==='t'||k==='T'){ev.preventDefault();calToday();return;}
+    if(k==='n'||k==='N'){ev.preventDefault();calStep(1);return;}
+    if(k==='p'||k==='P'){ev.preventDefault();calStep(-1);return;}
+  }
   if((ev.key==='Enter'||ev.key===' ')&&ev.target.id==='drop'){ev.preventDefault();$('#cvFile').click();}
 });
 function trap(ev,root){const f=$$('a[href],button:not([disabled]),input,select,textarea,[tabindex="0"]',root).filter(x=>x.offsetParent!==null);if(!f.length)return;const a=f[0],z=f[f.length-1];if(ev.shiftKey&&document.activeElement===a){ev.preventDefault();z.focus();}else if(!ev.shiftKey&&document.activeElement===z){ev.preventDefault();a.focus();}}
