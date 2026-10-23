@@ -504,7 +504,7 @@ kbd{font:500 11px/1 var(--f-mono);color:var(--tx-3);border:1px solid var(--line-
 .hero-foot{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:28px;align-items:end;margin-top:44px;padding-top:28px;border-top:1px solid var(--line-2)}
 .hero-foot p{max-width:58ch;font-size:17px;line-height:1.6;color:var(--tx-2)}
 .hero-cta{display:flex;gap:10px;flex-wrap:wrap}
-.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin-top:36px;border-radius:18px;border:1px solid var(--line-2);background:var(--s1)}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin-top:36px;border-radius:18px;border:1px solid var(--line-2);background:var(--s1)}
 .stat{padding:20px 22px}
 .stat+.stat{border-left:1px solid var(--line)}
 .stat b{display:block;font:600 34px/1 var(--f-display);letter-spacing:-.03em;font-variant-numeric:tabular-nums}
@@ -724,7 +724,7 @@ details.card .body{margin-top:14px;display:grid;gap:14px;font-size:14.5px;color:
   .hero{padding:48px 0 28px}
   .hero-foot{grid-template-columns:minmax(0,1fr)}
   .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .stat:nth-child(3){border-left:0}
+  .stat:nth-child(3){border-left:0;grid-column:1/-1}
   .stat:nth-child(n+3){border-top:1px solid var(--line)}
   .tiles{grid-template-columns:minmax(0,1fr)}
   .sec{padding-top:56px}
@@ -1101,7 +1101,6 @@ details.past[open]>summary .i{transform:rotate(180deg)}
           <div class="stat"><b id="stUp">0</b><span>upcoming events in London</span></div>
           <div class="stat"><b>65</b><span>minimum score to be shown</span></div>
           <div class="stat"><b>≤5</b><span>matches, never padded</span></div>
-          <div class="stat"><b>0</b><span>paid or promoted placements</span></div>
         </div>
       </div>
 
@@ -1799,7 +1798,7 @@ function renderHack(){
 function renderHome(){
   const n=EV.filter(e=>!e.gate&&!e.online&&upcoming(e)).length;
   $('#stUp').textContent=LOADED?n:'—';
-  $('#heroStamp').textContent='London · '+NOW.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'})+(LAST_RUN?' · catalogue updated '+ago(LAST_RUN):'');
+  heroClock();
   syncRun();
 }
 function syncRun(){
@@ -2882,6 +2881,15 @@ function toggleTheme(){const t=effTheme()==='dark'?'light':'dark';document.docum
 if(window.matchMedia){try{matchMedia('(prefers-color-scheme: light)').addEventListener('change',syncTheme);}catch(e){}}
 
 /* ================= clock ================= */
+// Hero line: the current time in London, whatever the viewer's own time zone.
+// Re-aligned to the start of each minute so it never lags the real clock.
+const LDN_FMT=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/London',weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hour12:false});
+function heroClock(){
+  const el=$('#heroStamp');if(!el)return;
+  const p={};for(const x of LDN_FMT.formatToParts(new Date()))p[x.type]=x.value;
+  el.textContent='London · '+p.weekday+' '+p.day+' '+p.month+' · '+p.hour+':'+p.minute;
+}
+(function minuteTick(){heroClock();setTimeout(minuteTick,60000-Date.now()%60000+50);})();
 function tick(){const n=new Date();if(dkey(n)!==dkey(TODAY)){NOW=n;TODAY=day0(n);}else NOW=n;}
 setInterval(()=>{const before=dkey(TODAY);tick();if(dkey(TODAY)!==before)render();else if(S.view==='home')renderHome();},60000);
 
