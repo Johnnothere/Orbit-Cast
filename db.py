@@ -1319,6 +1319,47 @@ def get_events_cache():
         return None
 
 
+# --------------------------------------------------------------------------
+# Event details (event_details.py): what each event page says about itself
+# --------------------------------------------------------------------------
+# Missing table (migration 0020 not applied) or no database: reads return
+# None and writes return False, and event_details keeps the record in memory.
+
+def get_event_details(event_id: str):
+    try:
+        with _read_cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute("select payload from event_details where id = %s", (event_id,))
+            row = cur.fetchone()
+            if not row or not row[0]:
+                return None
+            return json.loads(row[0]) if isinstance(row[0], str) else row[0]
+    except Exception as exc:
+        log.debug(f"get_event_details failed: {exc}")
+        return None
+
+
+def save_event_details(event_id: str, url: str, payload: dict) -> bool:
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                """
+                insert into event_details (id, url, payload, fetched_at)
+                values (%s, %s, %s, now())
+                on conflict (id) do update
+                  set url = excluded.url, payload = excluded.payload, fetched_at = now()
+                """,
+                (event_id, url, json.dumps(payload)),
+            )
+            return True
+    except Exception as exc:
+        log.debug(f"save_event_details failed: {exc}")
+        return False
+
+
 def save_events_cache(payload: dict) -> bool:
     """Replace the stored catalog in one atomic swap.
 

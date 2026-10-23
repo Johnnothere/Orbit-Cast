@@ -27,6 +27,7 @@ import ai_engine
 import auth
 import db
 import digest
+import event_details
 import identity
 import jobs
 import mailer
@@ -422,6 +423,10 @@ def run_scrape_background():
             return
         save_events_cache(all_events, summary_data)
         log.info(f"Scrape done: {len(all_events)} events ({dupes} cross-source duplicates removed)")
+        # Read each upcoming event's own page in the background (about, venue,
+        # organiser contacts), so the event drawer opens with them ready.
+        threading.Thread(target=event_details.warm, args=(list(all_events),),
+                         name="details-warm", daemon=True).start()
 
         # Save the catalog FIRST, then go looking for what's missing from it.
         # Discovery makes extra HTTP calls and is the newest code here, so it
@@ -536,6 +541,26 @@ def api_events():
             if _events_body_memo["obj"] is cache and len(bodies) < 16:
                 bodies[key] = body
     return app.response_class(body, mimetype="application/json")
+
+@app.route("/api/events/<event_id>/details")
+@limiter.limit("600 per hour;60 per minute")
+def api_event_details(event_id):
+    """About / good fit for / venue / organiser contacts for one catalogue
+    event, read from the event's own page (event_details.py). Only ids in the
+    current catalogue are accepted, so this can't be pointed at an arbitrary
+    URL. The first open of a page that hasn't been read yet takes a few
+    seconds; after that it is served from the cache and refreshed every few
+    hours."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", event_id or ""):
+        return jsonify({"ok": False}), 404
+    ev = next((e for e in load_events_cache().get("events", []) if e.get("id") == event_id), None)
+    if ev is None:
+        return jsonify({"ok": False}), 404
+    rec = event_details.get_details(ev)
+    resp = jsonify(event_details.public_view(rec))
+    resp.headers["Cache-Control"] = "private, max-age=300"
+    return resp
+
 
 @app.route("/api/summary")
 def api_summary():

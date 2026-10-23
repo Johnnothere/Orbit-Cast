@@ -229,6 +229,8 @@ h1,h2,h3,h4,p{margin:0}
 .pill.match{background:var(--ac-soft);color:var(--ac)}
 .pill.hid{background:color-mix(in oklab,var(--danger) 16%,transparent);color:var(--danger)}
 .pill.soon{background:var(--ac-soft);color:var(--ac)}
+.pill.now{background:color-mix(in oklab,var(--ok) 16%,transparent);color:var(--ok)}
+.row.is-over .row-time,.row.is-over .row-title,.row.is-over .row-meta{opacity:.55}
 
 kbd{font:500 11px/1 var(--f-mono);color:var(--tx-3);border:1px solid var(--line-2);border-bottom-width:2px;border-radius:6px;padding:3px 6px;background:var(--s2)}
 
@@ -368,6 +370,15 @@ kbd{font:500 11px/1 var(--f-mono);color:var(--tx-3);border:1px solid var(--line-
 .facts .i{margin-top:2px;color:var(--tx-3)}
 .facts b{display:block;font-weight:500;color:var(--tx)}
 .facts span{display:block;font-size:13.5px;color:var(--tx-3)}
+.dt-about{font-size:14.5px;line-height:1.55;color:var(--tx)}
+.fit{display:flex;flex-wrap:wrap;gap:6px}
+.fit-tag{display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:999px;background:var(--ac-soft);color:var(--ac);font:500 12.5px/1 var(--f-body)}
+.dt-org{font-weight:500;color:var(--tx);margin-bottom:8px}
+.contacts{display:flex;flex-wrap:wrap;gap:6px}
+.contact{display:inline-flex;align-items:center;gap:6px;max-width:100%;height:30px;padding:0 10px;border-radius:999px;border:1px solid var(--line-2);background:var(--s1);color:var(--tx-2);font:500 12.5px/1 var(--f-body);text-decoration:none}
+.contact span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.contact:hover{border-color:var(--line-3);color:var(--tx)}
+.contact .i{flex:none;color:var(--tx-3)}
 .dr-block{margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}
 .dr-block h4{font:600 13px var(--f-body);color:var(--tx-2);margin-bottom:8px}
 .dr-block p,.dr-block li{font-size:14px;color:var(--tx-2)}
@@ -522,11 +533,14 @@ kbd{font:500 11px/1 var(--f-mono);color:var(--tx-3);border:1px solid var(--line-
 
 .console{max-width:820px;margin:0 auto;padding:22px;border-radius:26px;background:var(--glass);border:1px solid var(--line-2);box-shadow:var(--sh-3),var(--rim);-webkit-backdrop-filter:blur(16px) saturate(140%);backdrop-filter:blur(16px) saturate(140%);display:grid;gap:18px}
 .console .seg{justify-self:start}
-.drop{display:grid;justify-items:center;align-content:center;gap:8px;min-height:210px;padding:24px;border-radius:18px;border:1.5px dashed var(--line-3);background:var(--s1);text-align:center;cursor:pointer;transition:border-color .15s,background-color .15s}
+.drop{display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-rows:auto auto;column-gap:14px;row-gap:2px;align-items:center;min-height:0;padding:14px 18px;border-radius:14px;border:1.5px dashed var(--line-3);background:var(--s1);text-align:left;cursor:pointer;transition:border-color .15s,background-color .15s}
 .drop:hover,.drop.drag{border-color:var(--ac);background:var(--ac-soft)}
-.drop .ico{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;background:var(--ink);color:var(--ink-fg)}
-.drop h3{margin-top:6px;font:600 18px/1.3 var(--f-display)}
-.drop p{font-size:13.5px;color:var(--tx-3)}
+.drop .ico{grid-row:1/3;width:38px;height:38px;border-radius:10px;display:grid;place-items:center;background:var(--ink);color:var(--ink-fg)}
+.drop h3{font:600 15px/1.3 var(--f-display)}
+.drop p{font-size:12.5px;color:var(--tx-3)}
+.seg button .soon{font:600 10.5px/1 var(--f-body);letter-spacing:.02em;padding:3px 6px;border-radius:999px;background:var(--s3);color:var(--tx-3)}
+.seg button[disabled]{color:var(--tx-3);cursor:not-allowed}
+.seg button[disabled]:hover{color:var(--tx-3)}
 .file-row{display:flex;align-items:center;gap:12px;padding:12px 12px 12px 16px;border-radius:14px;background:var(--s1);border:1px solid var(--line-2)}
 .file-row .nm{flex:1;min-width:0;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .file-row .sz{font:500 12px var(--f-mono);color:var(--tx-3)}
@@ -1105,12 +1119,12 @@ details.past[open]>summary .i{transform:rotate(180deg)}
       </div>
 
       <section class="sec" id="console" aria-labelledby="consoleH">
-        <div class="sec-h"><h2 id="consoleH">Start with your <em>CV</em></h2><p>Or describe yourself in a few lines. Only events scoring 65 or more come back.</p></div>
+        <div class="sec-h"><h2 id="consoleH">Start with your <em>CV</em></h2><p>Upload a CV or your LinkedIn PDF. Only events scoring 65 or more come back.</p></div>
         <div class="console">
           <div class="seg lg" role="tablist" aria-label="How to share your background">
             <button role="tab" id="tab-cv" aria-selected="true" aria-controls="pane-cv" data-pane="cv">Upload a CV</button>
             <button role="tab" id="tab-li" aria-selected="false" aria-controls="pane-li" data-pane="li">LinkedIn PDF</button>
-            <button role="tab" id="tab-txt" aria-selected="false" aria-controls="pane-txt" data-pane="txt">Describe yourself</button>
+            <button role="tab" id="tab-txt" aria-selected="false" aria-disabled="true" disabled title="Coming soon">Describe yourself <span class="soon">Coming soon</span></button>
           </div>
 
           <div class="returning" id="returning" hidden>
@@ -1126,7 +1140,7 @@ details.past[open]>summary .i{transform:rotate(180deg)}
               <h3>Drop your CV here, or choose a file</h3>
               <p>PDF, DOCX or TXT, up to 5 MB</p>
             </div>
-            <p class="promise"><svg class="i s14"><use href="#i-check"/></svg>Analysed once. Never shared, sold, or used to train anything. Delete it any time &mdash; or <button class="linkish" data-pane="txt">describe yourself instead</button>, no file needed.</p>
+            <p class="promise"><svg class="i s14"><use href="#i-check"/></svg>Analysed once. Never shared, sold, or used to train anything. Delete it any time.</p>
             <div class="file-row" id="fileRow" hidden>
               <svg class="i"><use href="#i-file"/></svg><span class="nm" id="fileName"></span><span class="sz" id="fileSize"></span>
               <button class="icon-btn sm" data-act="clearfile" aria-label="Remove file"><svg class="i s16"><use href="#i-x"/></svg></button>
@@ -1152,10 +1166,6 @@ details.past[open]>summary .i{transform:rotate(180deg)}
             <div class="ta-foot"><span id="aiCount">0 / 5000</span></div>
           </div>
 
-          <div class="keep">
-            <button class="switch" role="switch" aria-checked="true" id="keepSw" aria-labelledby="keepLbl"></button>
-            <div id="keepLbl"><b>Keep my CV and profile</b><span>Saved to your account so you don't upload again and can get the email digest. Off means nothing from this run is stored. Delete any time.</span></div>
-          </div>
 
           <div class="console-foot">
             <p id="runNote"></p>
@@ -1439,12 +1449,28 @@ function cmpSorted(a,b){
   if(S.sort==='time'){const am=a.mins==null?1e4:a.mins,bm=b.mins==null?1e4:b.mins;return (am-bm)||cmp(a,b);}
   return cmp(a,b);
 }
+// Listed times are London times, so "now" is London's clock, not the viewer's.
+const LDN_HM=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/London',hour:'2-digit',minute:'2-digit',hour12:false});
+function ldnMins(){const p={};for(const x of LDN_HM.formatToParts(new Date()))p[x.type]=x.value;return (+p.hour%24)*60+(+p.minute);}
+// Where an event sits in today's list: 0 happening now, 1 later today,
+// 2 time not listed, 3 already over. Other days are all "1".
+// No listed end time: assume a typical length for the format.
+const RUN_MINS={Hackathon:600,Conference:480,Expo:480,Course:360,Workshop:180};
+function phase(e,nowM){
+  if(!e.date||e.dk!==dkey(TODAY))return e.mins==null?2:1;
+  if(e.mins==null)return 2;
+  let end=e.endMins!=null?e.endMins:e.mins+(RUN_MINS[e.fmt]||120);if(end<=e.mins)end+=24*60;
+  if(nowM>=end)return 3;
+  return nowM>=e.mins?0:1;
+}
 function cmp(a,b){
   if(!a.date||!b.date){if(a.date)return -1;if(b.date)return 1;return a.title.localeCompare(b.title);}
   if(a.dk!==b.dk)return a.date-b.date;
-  if(a.online!==b.online)return a.online?1:-1;
+  const nowM=ldnMins(),pa=phase(a,nowM),pb=phase(b,nowM);
+  if(pa!==pb)return pa-pb;
   const am=a.mins==null?1e4:a.mins,bm=b.mins==null?1e4:b.mins;
   if(am!==bm)return am-bm;
+  if(a.online!==b.online)return a.online?1:-1;
   return a.title.localeCompare(b.title);
 }
 function collapse(list){
@@ -1469,8 +1495,7 @@ function metaHTML(e){
   if(e.online)h+='<span class="sep">·</span>'+ic('globe')+'<span class="loc">Online</span>';
   else if(e.loc.kind==='venue')h+='<span class="sep">·</span>'+ic('pin')+'<span class="loc">'+esc(e.loc.text)+'</span>';
   else if(e.loc.kind==='hybrid')h+='<span class="sep">·</span>'+ic('pin')+'<span class="loc">London, also online</span>';
-  else if(e.loc.kind==='tbc')h+='<span class="sep">·</span><span class="loc">Venue TBC</span>';
-  else if(e.loc.kind==='london')h+='<span class="sep">·</span>'+ic('pin')+'<span class="loc">London \u00b7 venue on the organiser\u2019s page</span>';
+  else if(e.loc.kind==='tbc'||e.loc.kind==='london')h+='<span class="sep">·</span>'+ic('pin')+'<span class="loc">London</span>';
   if(h.length>m0)h=h.slice(0,m0)+'<span class="ml">'+h.slice(m0)+'</span>';
   return h;
 }
@@ -1481,13 +1506,16 @@ function saveBtn(id,cls){
 function rowHTML(it,compact,withDate){
   const e=it.ev;const m=S.matches&&S.matches[e.id];
   let pills='';
+  const ph=e.date&&e.dk===dkey(TODAY)?phase(e,ldnMins()):1;
+  if(ph===0)pills+='<span class="pill now">Happening now</span>';
+  else if(ph===3)pills+='<span class="pill">Ended</span>';
   if(it.more&&it.more.length)pills+='<span class="pill" title="Also on '+esc(it.more.slice(0,4).map(x=>fmtDay(x.date)).join(', '))+'">+'+it.more.length+' date'+(it.more.length>1?'s':'')+'</span>';
   if(m)pills+='<span class="pill match">'+ic('spark','s14')+'Match '+m.fit+'</span>';
   if(e.gate)pills+='<span class="pill hid">'+esc(e.gate)+'</span>';
   if(e.fmt)pills+='<span class="pill fmt'+(e.fmtInf?' inf':'')+(e.fmt==='Pitch'?' pitch':'')+'" title="'+(e.fmtInf?'Format judged from the category; the listing doesn’t say':'Format from the listing')+'">'+esc(e.fmt)+'</span>';
   let t=e.time?'<span>'+e.time+'</span>'+(e.end&&!compact?'<span class="end">'+e.end+'</span>':''):'<span class="tbc" title="The organiser hasn’t listed a start time">TBC</span>';
   if(withDate)t='<span class="d">'+(e.date?fmtDM(e.date):'TBC')+'</span>'+t;
-  return '<div class="row'+(compact?' compact':'')+(e.gate?' is-hidden':'')+'" data-id="'+esc(e.id)+'">'
+  return '<div class="row'+(compact?' compact':'')+(e.gate?' is-hidden':'')+(ph===3?' is-over':'')+'" data-id="'+esc(e.id)+'">'
     +'<div class="row-time">'+t+'</div>'
     +'<div class="row-main"><div class="row-line"><button class="row-open" data-open="'+esc(e.id)+'"><span class="row-title">'+esc(e.title)+'</span></button>'+pills+'</div>'
     +'<div class="row-meta">'+metaHTML(e)+'</div></div>'
@@ -1793,13 +1821,11 @@ function renderHome(){
   syncRun();
 }
 function syncRun(){
-  const both=S.file&&$('#aiText').value.trim().length>=10;
-  const using=both?(S.pane==='txt'?' Using your written description, not the file.':' Using your CV, not the written description.'):'';
-  const usingFile=S.file&&S.pane!=='txt';
+  const using='';
+  const usingFile=true; /* files only while "Describe yourself" is off */
   $('#runNote').textContent=(ME.signed_in
       ?'Only events scoring 65 or more are shown. Often that is none. Members run up to 20 analyses an hour - OrbitCast is free, the AI behind it isn\u2019t.'
-      :(usingFile?'Sign in with Google to analyse a file. No password - or just describe yourself, no account needed.'
-                 :'Try it free, no account: type who you are and run. Nothing you write is stored.'))+using;
+      :'Sign in with Google to analyse your CV. No password.')+using;
   $('#runBtn').innerHTML=((ME.signed_in||!usingFile)?(S.result?'Run again':'Run the analysis'):'Sign in and run')+' '+ic('arrow-right','s16');
   const first=(ME.name||'').trim().split(/\s+/)[0]||'Account';
   const av=ME.avatar_url?'<img class="nav-avatar" src="'+esc(ME.avatar_url)+'" alt="" referrerpolicy="no-referrer">':'<span class="avatar">'+esc(first.charAt(0).toUpperCase()||'A')+'</span>';
@@ -1817,6 +1843,7 @@ const EXAMPLES=[
   ['Founder','I’m building [product] for [customer]. We are at [stage] and I need [co-founder / investors / first customers].']
 ];
 function setPane(p){
+  if(p==='txt')p='cv'; /* "Describe yourself" is switched off for now */
   S.pane=p;
   $$('[data-pane]').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.pane===p)));
   ['cv','li','txt'].forEach(k=>{$('#pane-'+k).hidden=k!==p;});
@@ -1835,12 +1862,10 @@ function clearFile(){S.file=null;$('#fileRow').hidden=true;$('#drop').hidden=fal
 function showErr(m){const e=$('#runErr');e.textContent=m;e.hidden=false;}
 function hideErr(){$('#runErr').hidden=true;}
 function inputReady(){
-  const txt=$('#aiText').value.trim();
-  if(S.pane==='txt')return txt.length>=10;
-  return !!S.file||txt.length>=10;
+  return !!S.file;
 }
 function wantRun(){
-  if(!inputReady()){showErr(S.pane==='txt'?'Write a few lines about yourself first.':'Add a CV, or describe yourself in a few lines, first.');return;}
+  if(!inputReady()){showErr('Add your CV or LinkedIn PDF first.');return;}
   hideErr();
   /* The free look: a typed description runs without an account and stores
      nothing. Files stay behind sign-in - the stored-CV promises and the
@@ -1915,10 +1940,8 @@ async function runAnalysis(opts){
     if(opts.reuse){r=await fetch('/api/analyze/reuse',{method:'POST'});}
     else{
       const fd=new FormData();
-      const txt=$('#aiText').value.trim();
-      const useFile=S.file&&S.pane!=='txt';
-      if(useFile)fd.append('file',S.file,S.file.name);
-      let text=useFile?'':txt;
+      if(S.file)fd.append('file',S.file,S.file.name);
+      let text='';
       if(opts.extra)text=(text?text+'\n\n':'')+'Also, answering your follow-ups:\n'+opts.extra;
       if(text)fd.append('text',text);
       r=await fetch('/api/analyze',{method:'POST',body:fd});
@@ -2104,7 +2127,7 @@ async function checkReturning(){
 let lastFocus=null;
 function openDrawer(html,label){
   const d=$('#drawer');lastFocus=document.activeElement;
-  d.innerHTML=html;d.setAttribute('aria-label',label||'Details');
+  d.innerHTML=html;d.dataset.ev='';d.setAttribute('aria-label',label||'Details');
   d.removeAttribute('inert');d.classList.add('open');$('#scrim').classList.add('open');
   setTimeout(()=>{const c=d.querySelector('[data-act="close"]');if(c)c.focus();},30);
 }
@@ -2117,10 +2140,10 @@ function openEvent(id){
   const e=BY[id];if(!e)return;const c=catOf(e.cat),m=S.matches&&S.matches[id];
   const series=e.key.length>=6?EV.filter(x=>x.key===e.key&&x.id!==e.id&&x.date&&upcoming(x)).sort(cmp):[];
   const timeLine=e.time?(e.end?e.time+'–'+e.end:'Starts '+e.time):'Start time not listed. Check the organiser’s page.';
-  const where=e.online?['globe','Online','Joining details on the organiser’s page']:e.loc.kind==='venue'?['pin',e.loc.text,'London']:e.loc.kind==='hybrid'?['pin','London','In person, also streamed online']:e.loc.kind==='london'?['pin','London','Exact venue on the organiser’s page']:['pin','Venue TBC','Not listed yet'];
+  const where=whereFact(e,DETAILS[id]);
   let h='<div class="dr-grab"></div><div class="dr-hd"><span class="dr-cat"><span class="dot" style="--c:var('+c.v+')"></span>'+esc(c.label)+'</span><button class="icon-btn" data-act="close" aria-label="Close">'+ic('x')+'</button></div>'
    +'<div class="dr-body"><h2 class="dr-title">'+esc(e.title)+'</h2>'
-   +'<ul class="facts"><li>'+ic('calendar')+'<div><b>'+(e.date?fmtLong(e.date):'Date TBC')+'</b><span>'+esc(timeLine)+'</span></div></li><li>'+ic(where[0])+'<div><b>'+esc(where[1])+'</b><span>'+esc(where[2])+'</span></div></li>'
+   +'<ul class="facts"><li>'+ic('calendar')+'<div><b>'+(e.date?fmtLong(e.date):'Date TBC')+'</b><span>'+esc(timeLine)+'</span></div></li><li id="drWhere">'+whereHTML(where)+'</li>'
    +(e.fmt?'<li>'+ic('target')+'<div><b>'+esc(e.fmt)+(e.fmtInf?' <span class="muted">(probably)</span>':'')+'</b><span>'+esc(c.label)+(e.recat?' · filed here from the title, not the source':'')+(e.fmtInf?' · the listing doesn’t say what kind of event it is':'')+'</span></div></li>':'')+'</ul>';
   if(m){
     const wk=(m.weakness||'').trim();
@@ -2136,14 +2159,58 @@ function openEvent(id){
        +(m.directions_url?'<a class="btn btn-ghost sm" href="'+esc(m.directions_url)+'" target="_blank" rel="noopener">Google Maps</a>':'')
        +'</div>':'')+'</div>';
   }
+  h+='<div id="drDetails">'+detailsHTML(DETAILS[id])+'</div>';
   if(series.length)h+='<div class="dr-block"><h4>Also on</h4><ul>'+series.slice(0,6).map(x=>'<li>'+fmtDay(x.date)+(x.time?' · '+x.time:'')+'</li>').join('')+'</ul></div>';
   if(e.aliases.length)h+='<div class="dr-block"><h4>Also listed as</h4><ul>'+e.aliases.slice(0,3).map(a=>'<li>'+esc(a)+'</li>').join('')+'</ul></div>';
   if(e.recat&&!e.fmt)h+='<div class="dr-block"><p>Filed under '+esc(c.label)+' from its title; its source had it elsewhere.</p></div>';
   if(e.gate)h+='<div class="dr-block"><p>Hidden by default as off-topic ('+esc(e.gate.toLowerCase())+'). You are seeing it because hidden listings are switched on.</p></div>';
   h+='</div><div class="dr-foot"><a class="btn btn-primary" href="'+esc(e.url)+'" target="_blank" rel="noopener">View event '+ic('arrow-up-right','s16')+'</a><button class="btn btn-secondary" data-ics="'+esc(e.id)+'">'+ic('calendar-plus','s16')+'Add to calendar</button>'+saveBtn(e.id,'')+'</div>'
    +'<p class="dr-note">From the organiser’s listing. Times and venues change, so check their page before you go.</p>';
-  openDrawer(h,e.title);
+  openDrawer(h,e.title);$('#drawer').dataset.ev=id;
   $$('#drawer .match-map').forEach(initMiniMap);
+  loadDetails(id);
+}
+/* ---------- event details (read from the event's own page, server-side) ---------- */
+const DETAILS={};            // id -> details | null while loading | {ok:false}
+function whereFact(e,d){
+  if(e.online)return['globe','Online','Joining details on the organiser’s page'];
+  const v=d&&d.ok&&d.venue;
+  if(v){const i=v.indexOf(',');return['pin',i>0?v.slice(0,i):v,i>0?v.slice(i+1).trim():'London'];}
+  if(e.loc.kind==='venue')return['pin',e.loc.text,'London'];
+  if(e.loc.kind==='hybrid')return['pin','London','In person, also streamed online'];
+  return['pin','London',''];
+}
+function whereHTML(w){return ic(w[0])+'<div><b>'+esc(w[1])+'</b>'+(w[2]?'<span>'+esc(w[2])+'</span>':'')+'</div>';}
+const SOC_LABEL={X:'X',LinkedIn:'LinkedIn',Instagram:'Instagram',Facebook:'Facebook',YouTube:'YouTube',TikTok:'TikTok',Bluesky:'Bluesky',Threads:'Threads',GitHub:'GitHub',Discord:'Discord',Telegram:'Telegram',Mastodon:'Mastodon'};
+const safeHref=u=>/^https?:\/\//i.test(u||'')?u:'';
+function detailsHTML(d){
+  if(d===undefined||d===null)return'<div class="dr-block dt-load" aria-busy="true"><h4>About this event</h4><div class="skel" style="height:14px;width:92%"></div><div class="skel" style="height:14px;width:80%;margin-top:8px"></div><div class="skel" style="height:14px;width:60%;margin-top:8px"></div></div>';
+  if(!d.ok)return'';
+  let h='';
+  if(d.about)h+='<div class="dr-block"><h4>About this event</h4><p class="dt-about">'+esc(d.about)+'</p></div>';
+  if(d.fit_for&&d.fit_for.length)h+='<div class="dr-block"><h4>Good fit for</h4><div class="fit">'+d.fit_for.map(x=>'<span class="fit-tag">'+esc(x)+'</span>').join('')+'</div></div>';
+  const o=d.organiser||{};const soc=(o.socials||[]).filter(x=>safeHref(x.url));
+  if(o.name||o.email||safeHref(o.website)||soc.length){
+    h+='<div class="dr-block"><h4>Organiser</h4>'+(o.name?'<p class="dt-org">'+esc(o.name)+'</p>':'')+'<div class="contacts">'
+      +(o.email?'<a class="contact" href="mailto:'+esc(o.email)+'">'+ic('mail','s14')+'<span>'+esc(o.email)+'</span></a>':'')
+      +(safeHref(o.website)?'<a class="contact" href="'+esc(o.website)+'" target="_blank" rel="noopener nofollow">'+ic('globe','s14')+'<span>'+esc(o.website.replace(/^https?:\/\/(www\.)?/i,'').replace(/\/$/,''))+'</span></a>':'')
+      +soc.map(x=>'<a class="contact" href="'+esc(x.url)+'" target="_blank" rel="noopener nofollow">'+ic(x.kind==='LinkedIn'?'in':'arrow-up-right','s14')+'<span>'+esc(SOC_LABEL[x.kind]||'Profile')+'</span></a>').join('')
+      +'</div></div>';
+  }
+  return h;
+}
+async function loadDetails(id){
+  if(DETAILS[id]&&DETAILS[id].ok)return;      // already have it this visit
+  DETAILS[id]=null;
+  let d={ok:false};
+  try{const r=await fetch('/api/events/'+encodeURIComponent(id)+'/details');if(r.ok)d=await r.json();}catch(e){}
+  DETAILS[id]=d;
+  const e=BY[id];
+  // The page's own venue beats the listing's rough one, everywhere.
+  if(e&&d.ok&&d.venue&&!e.online)e.loc={kind:'venue',text:d.venue.split(',')[0]};
+  const dr=$('#drawer');if(!dr.classList.contains('open')||dr.dataset.ev!==id)return;
+  const box=$('#drDetails');if(box)box.innerHTML=detailsHTML(d);
+  const w=$('#drWhere');if(w&&e)w.innerHTML=whereHTML(whereFact(e,d));
 }
 function openFilters(){
   const v=S.view;const lbl={london:'In London',online:'Online',all:'Both'};
@@ -2164,12 +2231,12 @@ const GLOGO='<svg class="g-logo" viewBox="0 0 48 48" aria-hidden="true"><path fi
 let modalFocus=null;
 function modal(html){modalFocus=document.activeElement;$('#modalBox').classList.remove('wide');$('#modalBox').innerHTML=html;$('#modal').hidden=false;setTimeout(()=>{const f=$('#modalBox input,#modalBox a.btn,#modalBox button:not([data-act="mclose"])');if(f)f.focus();},30);}
 function closeModal(){if($('#modal').hidden)return;$('#modal').hidden=true;$('#modalBox').classList.remove('wide');if(modalFocus&&document.contains(modalFocus))modalFocus.focus();}
-function openSignin(gate){
+function openSignin(gate,why){
   S.pendingRun=!!gate;
   if(gate){saveDraft();store.set('oc_pending',1);}
   const g=ME.google_enabled!==false, e=ME.email_signin_enabled!==false;
-  const title=gate?'Sign in to run your analysis':'Sign in';
-  const intro=gate?'What you entered stays on this page while you sign in, and the analysis starts as soon as you are in.':'Your account keeps your CV and results, and can email you new matches on a schedule you choose.';
+  const title=why?why.title:gate?'Sign in to run your analysis':'Sign in';
+  const intro=why?why.intro:gate?'What you entered stays on this page while you sign in, and the analysis starts as soon as you are in.':'Your account keeps your CV and results, and can email you new matches on a schedule you choose.';
   const googleBtn=g?'<a class="btn btn-primary lg block" href="/auth/login" data-act="google">'+GLOGO+'Continue with Google</a>':'';
   const divider=(g&&e)?'<div class="or"><span>or</span></div>':'';
   const emailForm=e
@@ -2190,6 +2257,27 @@ function openSignin(gate){
   if(form)form.addEventListener('submit',onEmailSigninSubmit);
 }
 
+// Saving and adding to a calendar are account features: a visitor gets the
+// sign-in prompt, and the action they tried is finished once they are in.
+const SIGNIN_WHY={
+  save:{title:'Sign in to save events',intro:'Saved events live on your OrbitCast account, so they follow you to any device and into your calendar feed.'},
+  ics:{title:'Sign in to add to your calendar',intro:'Adding events to your calendar is part of your OrbitCast account. Sign in and this event is added straight away.'}
+};
+function askSignin(kind,id){
+  const e=BY[id];
+  store.set('oc_after_action',{kind,id,title:e?e.title:''});
+  openSignin(false,SIGNIN_WHY[kind]);
+}
+function finishAfterSignin(){
+  const a=store.get('oc_after_action',null);store.del('oc_after_action');
+  if(!a||!ME.signed_in)return;
+  const go=()=>{
+    if(!BY[a.id]){if(!LOADED)return setTimeout(go,250);return;}
+    if(a.kind==='save'){if(!saved.has(a.id))toggleSave(a.id);toast('Saved: '+BY[a.id].title);}
+    else if(a.kind==='ics')dlICS(a.id);
+  };
+  setTimeout(go,400);
+}
 async function onEmailSigninSubmit(ev){
   ev.preventDefault();
   const inp=$('#siEmail'), btn=ev.target.querySelector('button[type=submit]'), status=$('#siStatus');
@@ -2712,8 +2800,8 @@ document.addEventListener('click',ev=>{
   if(d.deckstep){deckStep(t.closest('.deck-wrap'),+d.deckstep);return;}
   if(d.view){ev.preventDefault();closeModal();go(d.view);return;}
   if(d.open){openEvent(d.open);return;}
-  if(d.save){ev.preventDefault();toggleSave(d.save);return;}
-  if(d.ics){dlICS(d.ics);return;}
+  if(d.save){ev.preventDefault();if(!ME.signed_in){askSignin('save',d.save);return;}toggleSave(d.save);return;}
+  if(d.ics){if(!ME.signed_in){askSignin('ics',d.ics);return;}dlICS(d.ics);return;}
   if(d.cat){S.cat=d.cat;S.winDays=7;render();const a=$('#catrail [data-cat="'+CSS.escape(d.cat)+'"]');if(a&&a.scrollIntoView)a.scrollIntoView({block:'nearest',inline:'center',behavior:REDUCE?'auto':'smooth'});return;}
   if(d.where){S.where=d.where;store.set('oc_where',d.where);S.winDays=7;render();if(filtersOpen())openFilters();return;}
   if(d.range){S.range=d.range;S.winDays=7;closeMenu();render();if(filtersOpen())openFilters();else{const b=$('#rangeBtn');b&&b.focus();}return;}
@@ -2863,7 +2951,6 @@ $('#cvFile').addEventListener('change',ev=>{const f=ev.target.files&&ev.target.f
 function updCount(){$('#aiCount').textContent=$('#aiText').value.length+' / 5000';}
 $('#aiText').addEventListener('input',()=>{updCount();hideErr();saveDraft();syncRun();});
 $('#examples').insertAdjacentHTML('beforeend',EXAMPLES.map((x,i)=>'<button class="chip" data-ex="'+i+'">'+esc(x[0])+'</button>').join(''));
-$('#keepSw').addEventListener('click',()=>{setKeep(!S.keep);});
 
 /* ================= theme ================= */
 function effTheme(){const a=document.documentElement.getAttribute('data-theme');if(a==='light'||a==='dark')return a;return window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}
@@ -2882,7 +2969,7 @@ function heroClock(){
 }
 (function minuteTick(){heroClock();setTimeout(minuteTick,60000-Date.now()%60000+50);})();
 function tick(){const n=new Date();if(dkey(n)!==dkey(TODAY)){NOW=n;TODAY=day0(n);}else NOW=n;}
-setInterval(()=>{const before=dkey(TODAY);tick();if(dkey(TODAY)!==before)render();else if(S.view==='home')renderHome();},60000);
+setInterval(()=>{const before=dkey(TODAY);tick();if(dkey(TODAY)!==before)render();else if(S.view==='home')renderHome();else if(S.view==='events'&&S.sort==='soon'&&!$('#drawer').classList.contains('open')&&!menuOpen)render();},60000);
 
 /* ================= boot ================= */
 buildCats();syncTheme();syncRun();
@@ -2905,6 +2992,7 @@ go(fromHash(),{push:false,scroll:false});
   if(signin){
     const msg={ok:'Signed in',failed:'That sign-in link didn\'t work. It may have expired or already been used. Request a new one.',google_off:'Sign-in is not available right now.',unavailable:'Accounts are unavailable right now. Try again shortly.',not_allowed:'That address can\'t sign in here. Access is by invitation.',email_bad:'That link is malformed. Request a new one.'}[signin];
     if(msg)setTimeout(()=>toast(msg),300);
+    if(signin==='ok')finishAfterSignin();else store.del('oc_after_action');
     if(signin==='ok'&&ME.signed_in&&store.get('oc_after_signin',null)){const tab=store.get('oc_after_signin',null);store.del('oc_after_signin');setTimeout(()=>openAccount(tab),350);}
     if(signin==='ok'&&ME.signed_in&&store.get('oc_pending',0)){
       store.del('oc_pending');
