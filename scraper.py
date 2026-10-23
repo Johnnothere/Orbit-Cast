@@ -1761,10 +1761,11 @@ def _scrape_meetup_group(slug: str, source_name: str, limit: int = 12):
             continue
         seen.add(eid)
         start = ev.get("dateTime") or ""
+        iso, when = _london_when(start)
         events.append({
             "title": title,
             "date": iso,
-            "time": start[11:16] if len(start) >= 16 else None,
+            "time": when,
             "url": ev.get("eventUrl") or f"https://www.meetup.com/{slug}/events/",
             "source": source_name,
             # ONLINE events from a London community are still relevant to a
@@ -2348,6 +2349,37 @@ def _luma_event_url(ev):
     return f"https://lu.ma/{slug}"
 
 
+def _london_when(start, end=""):
+    """(date, "HH:MM" or "HH:MM–HH:MM") in London time from ISO timestamps.
+
+    Luma sends UTC ("...T11:00:00.000Z"). Slicing the string, as this did,
+    showed every Luma event an hour early for the whole of British Summer
+    Time. Timestamps with an offset are converted too; a bare local time
+    (no zone) is taken as already London."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    ldn = ZoneInfo("Europe/London")
+
+    def conv(v):
+        v = (v or "").strip()
+        if len(v) < 16:
+            return None
+        try:
+            d = datetime.fromisoformat(v.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return d.astimezone(ldn) if d.tzinfo else d
+
+    a = conv(start)
+    if a is None:
+        return ((start or "")[:10], (start or "")[11:16] or None) if len(start or "") >= 16 else ((start or "")[:10], None)
+    b = conv(end)
+    t = a.strftime("%H:%M")
+    if b is not None and b.date() == a.date() and b > a:
+        t += "–" + b.strftime("%H:%M")
+    return a.date().isoformat(), t
+
+
 def _luma_event_record(ev, source_name):
     """Shared Luma entry -> catalog event, or None when the guardrail refuses.
 
@@ -2364,10 +2396,11 @@ def _luma_event_record(ev, source_name):
     if not keep:
         return None
     start = ev.get("start_at", "")
+    iso, when = _london_when(start, ev.get("end_at", ""))
     return {
         "title": title,
         "date": iso,
-        "time": start[11:16] if len(start) >= 16 else None,
+        "time": when,
         "url": _luma_event_url(ev),
         "source": source_name,
         "location": location or "London",
@@ -2892,10 +2925,14 @@ def scrape_unicorn_mafia():
             continue
         url = e.get("externalUrl") or e.get("htmlLink") or "https://www.unicrnmafia.com/e"
         start = e.get("start", {}).get("dateTime", "")
+        if start:
+            iso, when = _london_when(start, e.get("end", {}).get("dateTime", ""))
+        else:
+            when = None
         events.append({
             "title": title,
             "date": iso,
-            "time": start[11:16] if len(start) >= 16 else None,
+            "time": when,
             "url": url,
             "source": "Unicorn Mafia",
             "location": e.get("location") or "London",

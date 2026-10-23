@@ -373,7 +373,11 @@ kbd{font:500 11px/1 var(--f-mono);color:var(--tx-3);border:1px solid var(--line-
 .dt-about{font-size:14.5px;line-height:1.55;color:var(--tx)}
 .fit{display:flex;flex-wrap:wrap;gap:6px}
 .fit-tag{display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:999px;background:var(--ac-soft);color:var(--ac);font:500 12.5px/1 var(--f-body)}
-.dt-org{font-weight:500;color:var(--tx);margin-bottom:8px}
+.dt-org{font-weight:500;color:var(--tx);margin-bottom:10px}
+.dt-role{display:block;font-weight:400;font-size:13px;color:var(--tx-3);margin-top:2px}
+.dt-hl{margin:14px 0 0;padding:12px 14px 12px 30px;display:grid;gap:6px;border-radius:12px;background:var(--s2)}
+.dt-hl li{font-size:13.5px;color:var(--tx-2)}
+.contacts+.contacts{margin-top:8px}
 .contacts{display:flex;flex-wrap:wrap;gap:6px}
 .contact{display:inline-flex;align-items:center;gap:6px;max-width:100%;height:30px;padding:0 10px;border-radius:999px;border:1px solid var(--line-2);background:var(--s1);color:var(--tx-2);font:500 12.5px/1 var(--f-body);text-decoration:none}
 .contact span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1040,6 +1044,7 @@ details.past[open]>summary .i{transform:rotate(180deg)}
 <noscript><div class="nojs">OrbitCastAI needs JavaScript to load the catalogue.</div></noscript>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></symbol>
   <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></symbol>
   <symbol id="i-calendar-plus" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4M12 12.5v5M9.5 15h5"/></symbol>
   <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M7 3.5h10a1 1 0 0 1 1 1V21l-6-4-6 4V4.5a1 1 0 0 1 1-1z"/></symbol>
@@ -2143,8 +2148,8 @@ function openEvent(id){
   const where=whereFact(e,DETAILS[id]);
   let h='<div class="dr-grab"></div><div class="dr-hd"><span class="dr-cat"><span class="dot" style="--c:var('+c.v+')"></span>'+esc(c.label)+'</span><button class="icon-btn" data-act="close" aria-label="Close">'+ic('x')+'</button></div>'
    +'<div class="dr-body"><h2 class="dr-title">'+esc(e.title)+'</h2>'
-   +'<ul class="facts"><li>'+ic('calendar')+'<div><b>'+(e.date?fmtLong(e.date):'Date TBC')+'</b><span>'+esc(timeLine)+'</span></div></li><li id="drWhere">'+whereHTML(where)+'</li>'
-   +(e.fmt?'<li>'+ic('target')+'<div><b>'+esc(e.fmt)+(e.fmtInf?' <span class="muted">(probably)</span>':'')+'</b><span>'+esc(c.label)+(e.recat?' · filed here from the title, not the source':'')+(e.fmtInf?' · the listing doesn’t say what kind of event it is':'')+'</span></div></li>':'')+'</ul>';
+   +'<ul class="facts"><li>'+ic('calendar')+'<div><b>'+(e.date?fmtLong(e.date):'Date TBC')+'</b><span id="drWhen">'+esc(timeLine)+'</span></div></li><li id="drWhere">'+whereHTML(where)+'</li>'
+   +(e.fmt?'<li id="drFmt">'+ic('target')+'<div><b>'+esc(e.fmt)+'</b>'+(sameKind(e.fmt,c.label)?'':'<span>'+esc(c.label)+'</span>')+'</div></li>':'')+'</ul>';
   if(m){
     const wk=(m.weakness||'').trim();
     const showWk=wk && wk.toLowerCase().replace(/[.\s]/g,'')!=='nonematerial';
@@ -2162,7 +2167,6 @@ function openEvent(id){
   h+='<div id="drDetails">'+detailsHTML(DETAILS[id])+'</div>';
   if(series.length)h+='<div class="dr-block"><h4>Also on</h4><ul>'+series.slice(0,6).map(x=>'<li>'+fmtDay(x.date)+(x.time?' · '+x.time:'')+'</li>').join('')+'</ul></div>';
   if(e.aliases.length)h+='<div class="dr-block"><h4>Also listed as</h4><ul>'+e.aliases.slice(0,3).map(a=>'<li>'+esc(a)+'</li>').join('')+'</ul></div>';
-  if(e.recat&&!e.fmt)h+='<div class="dr-block"><p>Filed under '+esc(c.label)+' from its title; its source had it elsewhere.</p></div>';
   if(e.gate)h+='<div class="dr-block"><p>Hidden by default as off-topic ('+esc(e.gate.toLowerCase())+'). You are seeing it because hidden listings are switched on.</p></div>';
   h+='</div><div class="dr-foot"><a class="btn btn-primary" href="'+esc(e.url)+'" target="_blank" rel="noopener">View event '+ic('arrow-up-right','s16')+'</a><button class="btn btn-secondary" data-ics="'+esc(e.id)+'">'+ic('calendar-plus','s16')+'Add to calendar</button>'+saveBtn(e.id,'')+'</div>'
    +'<p class="dr-note">From the organiser’s listing. Times and venues change, so check their page before you go.</p>';
@@ -2180,22 +2184,37 @@ function whereFact(e,d){
   if(e.loc.kind==='hybrid')return['pin','London','In person, also streamed online'];
   return['pin','London',''];
 }
+// "Hackathon" under "Hackathons" says the same thing twice: show it once.
+const sameKind=(a,b)=>{const n=x=>String(x||'').toLowerCase().replace(/[^a-z]/g,'').replace(/s$/,'');return n(a)===n(b);};
+const fmtPhone=p=>{const d=String(p||'');let m;
+  if((m=d.match(/^\+44(20|2\d|1\d{3}|7\d{3})(\d+)$/)))return'+44 '+m[1]+' '+m[2].replace(/(\d{3,4})(\d{4})$/,'$1 $2');
+  if((m=d.match(/^0(20|2\d|1\d{3}|7\d{3})(\d+)$/)))return'0'+m[1]+' '+m[2].replace(/(\d{3,4})(\d{4})$/,'$1 $2');
+  return d;};
 function whereHTML(w){return ic(w[0])+'<div><b>'+esc(w[1])+'</b>'+(w[2]?'<span>'+esc(w[2])+'</span>':'')+'</div>';}
 const SOC_LABEL={X:'X',LinkedIn:'LinkedIn',Instagram:'Instagram',Facebook:'Facebook',YouTube:'YouTube',TikTok:'TikTok',Bluesky:'Bluesky',Threads:'Threads',GitHub:'GitHub',Discord:'Discord',Telegram:'Telegram',Mastodon:'Mastodon'};
 const safeHref=u=>/^https?:\/\//i.test(u||'')?u:'';
 function detailsHTML(d){
-  if(d===undefined||d===null)return'<div class="dr-block dt-load" aria-busy="true"><h4>About this event</h4><div class="skel" style="height:14px;width:92%"></div><div class="skel" style="height:14px;width:80%;margin-top:8px"></div><div class="skel" style="height:14px;width:60%;margin-top:8px"></div></div>';
+  if(d===undefined||d===null)return'<div class="dr-block dt-load" aria-busy="true"><h4>About this event</h4><div class="skel" style="height:14px;width:92%"></div><div class="skel" style="height:14px;width:86%;margin-top:8px"></div><div class="skel" style="height:14px;width:70%;margin-top:8px"></div><div class="skel" style="height:14px;width:78%;margin-top:8px"></div></div>';
   if(!d.ok)return'';
   let h='';
-  if(d.about)h+='<div class="dr-block"><h4>About this event</h4><p class="dt-about">'+esc(d.about)+'</p></div>';
+  if(d.about||(d.highlights&&d.highlights.length)){
+    h+='<div class="dr-block"><h4>About this event</h4>'+(d.about?'<p class="dt-about">'+esc(d.about)+'</p>':'');
+    if(d.highlights&&d.highlights.length)h+='<ul class="dt-hl">'+d.highlights.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>';
+    h+='</div>';
+  }
   if(d.fit_for&&d.fit_for.length)h+='<div class="dr-block"><h4>Good fit for</h4><div class="fit">'+d.fit_for.map(x=>'<span class="fit-tag">'+esc(x)+'</span>').join('')+'</div></div>';
-  const o=d.organiser||{};const soc=(o.socials||[]).filter(x=>safeHref(x.url));
-  if(o.name||o.email||safeHref(o.website)||soc.length){
-    h+='<div class="dr-block"><h4>Organiser</h4>'+(o.name?'<p class="dt-org">'+esc(o.name)+'</p>':'')+'<div class="contacts">'
-      +(o.email?'<a class="contact" href="mailto:'+esc(o.email)+'">'+ic('mail','s14')+'<span>'+esc(o.email)+'</span></a>':'')
-      +(safeHref(o.website)?'<a class="contact" href="'+esc(o.website)+'" target="_blank" rel="noopener nofollow">'+ic('globe','s14')+'<span>'+esc(o.website.replace(/^https?:\/\/(www\.)?/i,'').replace(/\/$/,''))+'</span></a>':'')
-      +soc.map(x=>'<a class="contact" href="'+esc(x.url)+'" target="_blank" rel="noopener nofollow">'+ic(x.kind==='LinkedIn'?'in':'arrow-up-right','s14')+'<span>'+esc(SOC_LABEL[x.kind]||'Profile')+'</span></a>').join('')
-      +'</div></div>';
+  const o=d.organiser||{};const soc=(o.socials||[]).filter(x=>safeHref(x.url));const web=safeHref(o.website);
+  if(o.name||o.contact_name||o.phone||o.email||web||soc.length){
+    // Order: who (name, role), how to reach them (phone, email), their socials, their website.
+    h+='<div class="dr-block"><h4>Organiser</h4>';
+    if(o.contact_name)h+='<p class="dt-org">'+esc(o.contact_name)+(o.contact_role?'<span class="dt-role">'+esc(o.contact_role)+'</span>':'')+(o.name?'<span class="dt-role">'+esc(o.name)+'</span>':'')+'</p>';
+    else if(o.name)h+='<p class="dt-org">'+esc(o.name)+'</p>';
+    const reach=(o.phone?'<a class="contact" href="tel:'+esc(o.phone)+'">'+ic('phone','s14')+'<span>'+esc(fmtPhone(o.phone))+'</span></a>':'')
+      +(o.email?'<a class="contact" href="mailto:'+esc(o.email)+'">'+ic('mail','s14')+'<span>'+esc(o.email)+'</span></a>':'');
+    if(reach)h+='<div class="contacts">'+reach+'</div>';
+    if(soc.length)h+='<div class="contacts">'+soc.map(x=>'<a class="contact" href="'+esc(x.url)+'" target="_blank" rel="noopener nofollow">'+ic(x.kind==='LinkedIn'?'in':'arrow-up-right','s14')+'<span>'+esc(SOC_LABEL[x.kind]||'Profile')+'</span></a>').join('')+'</div>';
+    if(web)h+='<div class="contacts"><a class="contact" href="'+esc(web)+'" target="_blank" rel="noopener nofollow">'+ic('globe','s14')+'<span>'+esc(web.replace(/^https?:\/\/(www\.)?/i,'').replace(/\/$/,''))+'</span></a></div>';
+    h+='</div>';
   }
   return h;
 }
@@ -2208,9 +2227,20 @@ async function loadDetails(id){
   const e=BY[id];
   // The page's own venue beats the listing's rough one, everywhere.
   if(e&&d.ok&&d.venue&&!e.online)e.loc={kind:'venue',text:d.venue.split(',')[0]};
+  // The listing's category stands; the page itself says what kind of event it is.
+  if(e&&d.ok&&d.format&&d.format!==e.fmt){e.fmt=d.format;e.fmtInf=false;}
+  // No time on the listing, but the event's own page gives one.
+  let timeChanged=false;
+  if(e&&d.ok&&d.start_time&&e.mins==null){
+    const hm=x=>{const[a,b]=x.split(':');return +a*60+ +b;};
+    e.time=d.start_time;e.mins=hm(d.start_time);e.end=d.end_time||null;e.endMins=d.end_time?hm(d.end_time):null;
+    e.tod=e.mins<720?'morning':e.mins<1020?'afternoon':'evening';timeChanged=true;
+  }
   const dr=$('#drawer');if(!dr.classList.contains('open')||dr.dataset.ev!==id)return;
   const box=$('#drDetails');if(box)box.innerHTML=detailsHTML(d);
   const w=$('#drWhere');if(w&&e)w.innerHTML=whereHTML(whereFact(e,d));
+  const tl=$('#drWhen');if(tl&&e&&timeChanged)tl.textContent=e.end?e.time+'–'+e.end:'Starts '+e.time;
+  const f=$('#drFmt');if(f&&e&&e.fmt){const c=catOf(e.cat);f.innerHTML=ic('target')+'<div><b>'+esc(e.fmt)+'</b>'+(sameKind(e.fmt,c.label)?'':'<span>'+esc(c.label)+'</span>')+'</div>';}
 }
 function openFilters(){
   const v=S.view;const lbl={london:'In London',online:'Online',all:'Both'};

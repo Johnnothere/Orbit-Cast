@@ -45,7 +45,10 @@ log = logging.getLogger("event_details")
 FRESH_S = int(os.environ.get("OC_DETAILS_FRESH_S", str(6 * 3600)))   # re-read pages this often
 FAIL_RETRY_S = 20 * 60                                               # a page that failed: try again after
 WARM_DAYS = int(os.environ.get("OC_DETAILS_WARM_DAYS", "14"))        # pre-read events this far ahead
-TEXT_CAP = 6000                                                      # page text handed to the model
+TEXT_CAP = 12000
+PROMPT_VERSION = 3
+FORMATS = ("Conference", "Talk", "Workshop", "Course", "Meetup", "Networking", "Social", "Pitch",
+           "Hackathon", "Expo", "Webinar")                                                   # bump to re-run the model on every event                                                     # page text handed to the model
 
 _mem: dict = {}                    # id -> record (process cache in front of the database)
 _mem_lock = threading.Lock()
@@ -70,6 +73,7 @@ PLATFORM_HOSTS = ("eventbrite.", "meetup.com", "allevents.in", "lu.ma", "luma.co
                   "devpost.com", "dorahacks.io", "devfolio.co", "hackathonhub", "ti.to", "tito.io")
 JUNK_PATHS = ("/sharer", "/share", "intent/tweet", "/tr?", "/tr/", "/plugins", "/dialog/", "fbml",
               "/hashtag/", "/search", "/home?status", "/login", "/signup", "/policies", "/legal")
+PHONE_RE = re.compile(r"(?:\+44\s?\(?0?\)?\s?|\b0)(?:\d[\s-]?){9,10}\b")
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 NOREPLY_RE = re.compile(r"no-?reply|donotreply|privacy|abuse|webmaster|postmaster|example\.", re.I)
 
@@ -186,6 +190,11 @@ def _luma_source(url):
     cal = data.get("calendar") or {}
     if cal.get("website"):
         links.append(cal["website"])
+    hosts = "; ".join(f"{h.get('name')}" + (f" ({h['bio_short']})" if h.get("bio_short") else "")
+                      for h in (data.get("hosts") or [])[:5] if h.get("name"))
+    about_org = (cal.get("description_short") or "").strip()
+    if hosts or about_org:
+        text = (f"HOSTED BY: {hosts}\n" if hosts else "") + (f"ABOUT THE ORGANISER: {about_org}\n" if about_org else "") + "\n" + text
     for m in EMAIL_RE.findall(text):
         emails.append(m)
     return {"text": text, "desc": text[:600], "venue": venue, "org_name": org_name,
@@ -298,6 +307,9 @@ def _page_source(url):
         if href.lower().startswith("mailto:"):
             emails.append(href[7:].split("?")[0])
             continue
+        if href.lower().startswith("tel:"):
+            links.append(href)
+            continue
         links.append(urljoin(url, href))
     if org_email:
         emails.append(org_email.removeprefix("mailto:"))
@@ -321,28 +333,33 @@ def _page_source(url):
 
 # ── model pass ────────────────────────────────────────────────────────────────
 
-SYSTEM = """You write the details panel for one professional event in London, from the event's own page.
+SYSTEM = """You write the details panel for one event in London, from the event's own page. The reader has never heard of the event or the organiser and is deciding whether to go.
 
 Return JSON only:
-{"about": "...", "fit_for": ["...", "..."], "organiser": "...", "email": "...", "website": "...", "socials": ["..."], "venue": "..."}
+{"format": "...", "start_time": "HH:MM", "end_time": "HH:MM", "about": "...", "highlights": ["..."], "fit_for": ["..."], "organiser": "...", "contact_name": "...", "contact_role": "...", "phone": "...", "email": "...", "website": "...", "socials": ["..."], "venue": "..."}
 
-about: 2-3 plain sentences on what happens at the event and what someone gets from it. Facts from the page only. No hype, no marketing words, no "join us", no dates or prices.
-fit_for: 2-4 short labels (2-4 words each) naming who it is genuinely right for, e.g. "Policy researchers", "Early-career security analysts", "Seed-stage founders". Specific to this event, not generic ("Professionals", "Anyone").
-organiser: the organising group's name as the page gives it, or "".
-email, website, socials: copy ONLY from the CANDIDATE LINKS list, exactly as written, and only ones that belong to the organiser or the event (not the ticketing platform, not a sponsor, not a speaker's personal page). "" or [] if none fit.
+format: what kind of event this actually is, judged from the page: exactly one of Conference, Talk, Workshop, Course, Meetup, Networking, Social, Pitch, Hackathon, Expo, Webinar.
+start_time / end_time: the event's start and end time in London on its first day, 24-hour "HH:MM", only if the page states them; otherwise "".
+about: 3-5 sentences (60-110 words) for someone who has never heard of the organiser or the event. Say who the organiser is and what they do, what the event is and how it runs (the format and flow of the day), and what someone walks away with. Plain English. No hype or marketing words ("exciting", "world-class", "don't miss"), no "join us", no exclamation marks. Leave dates, times, prizes and names of partners to the highlights: do not repeat a fact in both.
+highlights: 3-6 short factual lines a reader can scan, each under 90 characters: when it runs (days and hours), tracks or themes, named speakers or partners, prizes, cost, eligibility or invitation rules, what to bring. Only facts stated on the page. [] if the page is thin.
+fit_for: 2-4 labels (2-4 words) naming the people who would genuinely attend THIS event, judged from its format and content. A hackathon is for people who build (e.g. "Software developers", "AI engineers", "Product designers", "Technical founders"); a policy talk is for analysts and researchers; a networking evening for the people its topic names. Never a group that would not realistically be in the room. Never generic ("Professionals", "Anyone interested").
+organiser: the organisation that runs the event (a company, society, university, institute, community), as the page names it. Not the event series or programme name (e.g. "Council on Geostrategy", not "Whitehall Briefings"). "" if unclear.
+contact_name / contact_role: a named contact person for the event and their job title or role, exactly as on the page (e.g. "Dr Ioannis Karmpadakis", "Senior Lecturer in Coastal Engineering"). "" if no contact person is named. Never a speaker unless the page says they are the contact.
+phone, email, website, socials: copy ONLY from the CANDIDATE LINKS list, exactly as written, and only ones that belong to the organiser or the event (not the ticketing platform, a sponsor, or a speaker). "" or [] if none fit.
 venue: the exact venue name and street address if the page states one, copied from the page; otherwise "". Never a city on its own."""
 
 
-def _ai_pass(ev, src, emails, links):
+def _ai_pass(ev, src, emails, links, phones=()):
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return None
-    cand = "\n".join(["EMAIL " + e for e in emails[:10]] + ["LINK " + l for l in links[:30]]) or "(none)"
+    cand = "\n".join(["EMAIL " + e for e in emails[:10]] + ["PHONE " + p for p in phones[:5]]
+                     + ["LINK " + l for l in links[:30]]) or "(none)"
     user = (f"TITLE: {ev.get('title','')}\nCATEGORY: {ev.get('category','')}\nFORMAT: {ev.get('format','')}\n"
             f"DATE: {ev.get('date','')}\nLISTED PLACE: {ev.get('location','')}\n\n"
             f"PAGE SUMMARY: {src.get('desc','')}\n\nPAGE TEXT:\n{src.get('text','')[:TEXT_CAP]}\n\n"
             f"CANDIDATE LINKS:\n{cand}")
     try:
-        return ai_engine._call(SYSTEM, user, max_tokens=600, model=ai_engine.MODEL_EXTRACT)
+        return ai_engine._call(SYSTEM, user, max_tokens=1100, model=ai_engine.MODEL_EXTRACT)
     except Exception as e:
         log.info(f"details model pass failed {ev.get('id')}: {e}")
         return None
@@ -354,6 +371,23 @@ def _words_on_page(s, text):
         return False
     low = text.lower()
     return sum(w in low for w in words) / len(words) >= 0.8
+
+
+def _page_time(t, text):
+    """'08:15' if the page states that time in any common form (08:15, 8.15,
+    8:15am, 8.15pm for 20:15), else None. Stops the model inventing a time."""
+    m = re.fullmatch(r"\s*(\d{1,2}):(\d{2})\s*", str(t or ""))
+    if not m:
+        return None
+    h, mi = int(m.group(1)), m.group(2)
+    if h > 23 or int(mi) > 59:
+        return None
+    h12 = h % 12 or 12
+    forms = [rf"\b0?{h}[:.]{mi}\b", rf"\b{h12}[:.]{mi}\s*{'pm' if h >= 12 else 'am'}\b"]
+    if mi == "00":
+        forms.append(rf"\b{h12}\s*{'pm' if h >= 12 else 'am'}\b")
+    low = (text or "").lower()
+    return f"{h:02d}:{mi}" if any(re.search(f, low) for f in forms) else None
 
 
 def _clip(s, n):
@@ -386,17 +420,27 @@ def _build(ev, prev):
     if src.get("org_url"):
         websites.append(src["org_url"])
     cand_links = socials + websites
+    phones = []
+    for raw in [l[4:] for l in src["links"] if l.lower().startswith("tel:")] + PHONE_RE.findall(src.get("text") or ""):
+        p = re.sub(r"[^\d+]", "", raw)
+        if p.startswith("+440"):
+            p = "+44" + p[4:]
+        if 10 <= len(p.lstrip("+")) <= 13 and p not in phones:
+            phones.append(p)
 
     content_hash = hashlib.sha256(json.dumps(
-        [ev.get("title"), src.get("desc"), src.get("text", "")[:2500], src.get("venue"), emails, cand_links],
+        [PROMPT_VERSION, ev.get("title"), src.get("desc"), src.get("text", "")[:2500], src.get("venue"), emails, cand_links],
         ensure_ascii=False).encode()).hexdigest()[:20]
 
     reuse = prev and prev.get("content_hash") == content_hash and prev.get("ai")
-    out = dict(prev.get("ai") or {}) if reuse else (_ai_pass(ev, src, emails, cand_links) or {})
+    out = dict(prev.get("ai") or {}) if reuse else (_ai_pass(ev, src, emails, cand_links, phones) or {})
     ai_ok = bool(out)
 
     page_text = (src.get("text") or "") + " " + (src.get("desc") or "")
-    about = _clip(out.get("about") or src.get("desc") or "", 600)
+    about = _clip(out.get("about") or src.get("desc") or "", 1100)
+    fmt = out.get("format") if out.get("format") in FORMATS else None
+    t0, t1 = _page_time(out.get("start_time"), page_text), _page_time(out.get("end_time"), page_text)
+    highlights = [_clip(x, 110) for x in (out.get("highlights") or []) if isinstance(x, str) and x.strip()][:6]
     fit = [_clip(x, 40) for x in (out.get("fit_for") or []) if isinstance(x, str) and x.strip()][:4]
 
     # Contacts: only what is verbatim in the candidate list.
@@ -412,6 +456,14 @@ def _build(ev, prev):
         # platform page only ever shows the platform's, which are filtered.
         picked = socials if (src.get("links_are_organiser") or not _is_platform_url(url)) else []
     socials_out = [{"kind": _social_kind(p), "url": p} for p in picked[:6]]
+    phone = re.sub(r"[^\d+]", "", out.get("phone") or "")
+    if phone.startswith("+440"):
+        phone = "+44" + phone[4:]
+    phone = phone if phone in phones else (phones[0] if len(phones) == 1 and not email else "")
+    cname = (out.get("contact_name") or "").strip()
+    cname = cname if cname and _words_on_page(cname, page_text) else ""
+    crole = (out.get("contact_role") or "").strip() if cname else ""
+    crole = crole if crole and _words_on_page(crole, page_text) else ""
 
     venue = src.get("venue") if src.get("structured_venue") else None
     if not venue:
@@ -424,11 +476,17 @@ def _build(ev, prev):
         "fetched_at": time.time(),
         "content_hash": content_hash,
         "about": about or None,
+        "highlights": highlights,
+        "format": fmt,
+        "start_time": t0, "end_time": t1 if t0 else None,
         "fit_for": fit,
         "venue": venue,
         "organiser": {"name": _clip(out.get("organiser") or src.get("org_name") or "", 120) or None,
-                      "email": email or None, "website": website or None, "socials": socials_out},
-        "ai": {k: out.get(k) for k in ("about", "fit_for", "organiser", "email", "website", "socials", "venue")} if ai_ok else None,
+                      "contact_name": _clip(cname, 80) or None, "contact_role": _clip(crole, 100) or None,
+                      "phone": phone or None, "email": email or None, "website": website or None,
+                      "socials": socials_out},
+        "ai": {k: out.get(k) for k in ("format", "start_time", "end_time", "about", "highlights", "fit_for", "organiser", "contact_name", "contact_role",
+                                       "phone", "email", "website", "socials", "venue")} if ai_ok else None,
     }
 
 
@@ -495,7 +553,9 @@ def get_details(ev, refresh=True):
 def public_view(rec):
     if not rec or not rec.get("ok"):
         return {"ok": False}
-    return {"ok": True, "about": rec.get("about"), "fit_for": rec.get("fit_for") or [],
+    return {"ok": True, "format": rec.get("format"), "start_time": rec.get("start_time"),
+            "end_time": rec.get("end_time"), "about": rec.get("about"), "highlights": rec.get("highlights") or [],
+            "fit_for": rec.get("fit_for") or [],
             "venue": rec.get("venue"), "organiser": rec.get("organiser") or {},
             "updated_at": datetime.fromtimestamp(rec.get("fetched_at") or time.time(), timezone.utc).isoformat()}
 
