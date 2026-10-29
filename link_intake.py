@@ -32,6 +32,7 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import urlparse, urlunparse
 
+import event_times
 import scraper
 from scraper import luma_calendar_status as luma_status
 
@@ -96,7 +97,9 @@ def _from_jsonld(soup):
     return {
         "title": _first_text(node.get("name")),
         "date": scraper.to_iso_date(start) or "",
-        "time": (start[11:16] if len(start) >= 16 and "T" in start else ""),
+        # London time, with the end if the page gives one; a bare slice of the
+        # stamp was an hour out for the whole of British Summer Time.
+        "time": scraper._time_from_iso(start, _first_text(node.get("endDate"))) or "",
         "location": scraper._jsonld_location(node),
         "description": _first_text(node.get("description"))[:600],
         "via": "schema.org JSON-LD",
@@ -133,7 +136,7 @@ def _from_meta(soup):
     return {
         "title": title,
         "date": scraper.to_iso_date(raw_date) or "",
-        "time": (raw_date[11:16] if len(raw_date) >= 16 and "T" in raw_date else ""),
+        "time": scraper._time_from_iso(raw_date, meta("event:end_time")) or "",
         "location": meta("og:locality", "event:location") or "",
         "description": meta("og:description", "description")[:600],
         "via": "OpenGraph / meta tags",
@@ -352,6 +355,17 @@ def verify_link(url: str, catalog_events=None, manual_urls=None):
     ev = {"title": title, "date": data.get("date") or "", "time": data.get("time") or "",
           "location": location, "description": data.get("description") or "",
           "url": fetch_url}
+    # The structured data may carry the date but not the time ("2026-11-05");
+    # the page usually states it somewhere. Same reader as the catalogue's
+    # own backfill, so a hand-added event is no worse off than a scraped one.
+    if not event_times.usable_time(ev["time"]):
+        try:
+            hit = event_times.extract(soup, ev["date"] or None, fetch_url)
+            if hit and hit.get("start") and (not ev["date"] or not hit.get("date")
+                                             or hit["date"] == ev["date"]):
+                ev["time"] = event_times.label(hit["start"], hit.get("end"))
+        except Exception as e:
+            log.info(f"time read skipped for {fetch_url}: {e}")
 
     # Rule 1 - a date is mandatory. "Some Thursday" is not a catalog entry.
     if not ev["date"]:

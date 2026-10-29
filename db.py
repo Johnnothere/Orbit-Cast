@@ -1360,6 +1360,56 @@ def save_event_details(event_id: str, url: str, payload: dict) -> bool:
         return False
 
 
+# --------------------------------------------------------------------------
+# Event times (event_times.py): the start/end time each event page states
+# --------------------------------------------------------------------------
+# One row per event URL. Missing table (migration 0021 not applied) or no
+# database: reads return {} and writes return False, and event_times keeps
+# its records in process memory, re-reading pages after a deploy.
+
+def get_event_times(urls: list) -> dict:
+    """{url: record} for the URLs that have a row."""
+    if not urls:
+        return {}
+    try:
+        with _read_cursor() as cur:
+            if cur is None:
+                return {}
+            cur.execute("select url, payload from event_times where url = any(%s)", (list(urls),))
+            out = {}
+            for url, payload in cur.fetchall():
+                rec = json.loads(payload) if isinstance(payload, str) else payload
+                if isinstance(rec, dict):
+                    out[url] = rec
+            return out
+    except Exception as exc:
+        log.debug(f"get_event_times failed: {exc}")
+        return {}
+
+
+def save_event_time(rec: dict) -> bool:
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                """
+                insert into event_times (url, found, start_time, end_time, payload, fetched_at)
+                values (%s, %s, %s, %s, %s, now())
+                on conflict (url) do update
+                  set found = excluded.found, start_time = excluded.start_time,
+                      end_time = excluded.end_time, payload = excluded.payload,
+                      fetched_at = now()
+                """,
+                (rec.get("url"), bool(rec.get("found")), rec.get("start"), rec.get("end"),
+                 json.dumps(rec)),
+            )
+            return True
+    except Exception as exc:
+        log.debug(f"save_event_time failed: {exc}")
+        return False
+
+
 def save_events_cache(payload: dict) -> bool:
     """Replace the stored catalog in one atomic swap.
 

@@ -38,6 +38,7 @@ import requests
 
 import ai_engine
 import db
+import event_times
 from scraper import HEADERS, fetch, _is_public_host
 
 log = logging.getLogger("event_details")
@@ -197,9 +198,10 @@ def _luma_source(url):
         text = (f"HOSTED BY: {hosts}\n" if hosts else "") + (f"ABOUT THE ORGANISER: {about_org}\n" if about_org else "") + "\n" + text
     for m in EMAIL_RE.findall(text):
         emails.append(m)
+    _, t0, t1 = event_times.when_from_iso(ev.get("start_at"), ev.get("end_at"))
     return {"text": text, "desc": text[:600], "venue": venue, "org_name": org_name,
             "org_url": website, "links": links, "emails": emails, "structured_venue": bool(venue),
-            "links_are_organiser": True}
+            "links_are_organiser": True, "start_time": t0, "end_time": t1}
 
 
 # ── generic pages ─────────────────────────────────────────────────────────────
@@ -273,7 +275,7 @@ def _tidy_address(chunks):
     return ", ".join(bits)
 
 
-def _page_source(url):
+def _page_source(url, event_date=None):
     soup = fetch(url)
     if soup is None:
         return None
@@ -320,6 +322,19 @@ def _page_source(url):
             same = o.get("sameAs") or []
             links.extend([same] if isinstance(same, str) else [s for s in same if isinstance(s, str)])
 
+    # Start/end time, read deterministically from the page (JSON-LD, meta,
+    # <time>, labelled text) before the model sees anything, so the drawer's
+    # time is the page's time and never a guess. This prunes nav/forms from
+    # the soup, which the text pass below was about to do anyway.
+    t0 = t1 = None
+    try:
+        hit = event_times.extract(soup, event_date, url)
+        if hit and hit.get("start") and (not event_date or not hit.get("date")
+                                         or hit["date"] == event_times.to_iso_date(event_date)):
+            t0, t1 = hit["start"], hit.get("end")
+    except Exception as e:
+        log.info(f"time read failed {url}: {e}")
+
     for t in soup(["script", "style", "noscript", "svg", "nav", "footer", "header", "form", "iframe"]):
         t.decompose()
     main = soup.find("main") or soup.find("article") or soup.body or soup
@@ -328,7 +343,8 @@ def _page_source(url):
     emails.extend(EMAIL_RE.findall(text))
     return {"text": text[:TEXT_CAP * 2], "desc": desc[:1500], "venue": venue, "org_name": org_name,
             "org_url": org_url if org_url and not _is_platform_url(org_url) else None,
-            "links": links, "emails": emails, "structured_venue": bool(venue)}
+            "links": links, "emails": emails, "structured_venue": bool(venue),
+            "start_time": t0, "end_time": t1}
 
 
 # ── model pass ────────────────────────────────────────────────────────────────
@@ -403,7 +419,7 @@ def _build(ev, prev):
         return None
     src = _luma_source(url) if _host(url) in ("lu.ma", "luma.com") else None
     if src is None:
-        src = _page_source(url)
+        src = _page_source(url, ev.get("date"))
     if src is None:
         return None
 
@@ -439,7 +455,13 @@ def _build(ev, prev):
     page_text = (src.get("text") or "") + " " + (src.get("desc") or "")
     about = _clip(out.get("about") or src.get("desc") or "", 1100)
     fmt = out.get("format") if out.get("format") in FORMATS else None
-    t0, t1 = _page_time(out.get("start_time"), page_text), _page_time(out.get("end_time"), page_text)
+    # The page's own structured time first; the model's reading, checked
+    # against the page text, only when the page has no structured time.
+    if src.get("start_time"):
+        t0, t1 = src["start_time"], src.get("end_time")
+        event_times.remember(url, ev.get("date"), t0, t1)
+    else:
+        t0, t1 = _page_time(out.get("start_time"), page_text), _page_time(out.get("end_time"), page_text)
     highlights = [_clip(x, 110) for x in (out.get("highlights") or []) if isinstance(x, str) and x.strip()][:6]
     fit = [_clip(x, 40) for x in (out.get("fit_for") or []) if isinstance(x, str) and x.strip()][:4]
 

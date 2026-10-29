@@ -471,7 +471,8 @@ def _scrape_article_time_list(url, base, source_name, limit=20, keep=None):
         if title.lower() in seen:
             continue
         seen.add(title.lower())
-        events.append({"title": title, "date": iso, "url": link, "source": source_name})
+        events.append({"title": title, "date": iso, "url": link, "source": source_name,
+                       "time": _time_from_iso(t.get("datetime"))})
     return events[:limit]
 
 
@@ -1652,7 +1653,11 @@ def _scrape_jsonld_source(urls, source_name, base=None, limit=25):
             if key in seen:
                 continue
             seen.add(key)
+            # startDate usually carries the time too ("2026-11-10T08:15:00+00:00").
+            # Slicing it to a date, as this did, threw that away and every
+            # event from these sources showed as TBC.
             events.append({"title": title, "date": iso, "url": link,
+                            "time": _time_from_iso(node.get("startDate"), node.get("endDate")),
                             "source": source_name,
                             "location": _jsonld_location(node)})
         if events:
@@ -2378,6 +2383,19 @@ def _london_when(start, end=""):
     if b is not None and b.date() == a.date() and b > a:
         t += "–" + b.strftime("%H:%M")
     return a.date().isoformat(), t
+
+
+def _time_from_iso(start, end=None):
+    """The catalogue `time` ("18:30" / "18:30–20:30", London) from a source's
+    ISO timestamps, or None when the stamp carries no clock or is the 00:00
+    that date-only feeds pad to. The parsing lives in event_times so the
+    scrapers and the page reader cannot disagree about what a time is."""
+    try:
+        from event_times import when_from_iso, label      # event_times imports this module
+        _, s, e = when_from_iso(start, end)
+        return label(s, e)
+    except Exception:
+        return None
 
 
 def _luma_event_record(ev, source_name):

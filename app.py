@@ -28,6 +28,7 @@ import auth
 import db
 import digest
 import event_details
+import event_times
 import identity
 import jobs
 import mailer
@@ -199,6 +200,9 @@ def load_events_cache():
 def load_last_run():
     return {"last_run": load_events_cache().get("last_run")}
 
+_catalog_write_lock = threading.Lock()   # one writer at a time: scrape, admin edit, time patch
+
+
 def save_events_cache(events, summary, last_run=None):
     global _catalog
     # last_run means "when the catalog was last SCRAPED". Editing the catalog
@@ -211,10 +215,15 @@ def save_events_cache(events, summary, last_run=None):
         "summary":  summary,
         "last_run": last_run or datetime.now(timezone.utc).isoformat(),
     }
-    # Serve the new catalog immediately - a single assignment, so a request
-    # arriving mid-write gets the old catalog or the new one, never a
-    # half-built list.
-    _catalog = data
+    with _catalog_write_lock:
+        # Serve the new catalog immediately - a single assignment, so a request
+        # arriving mid-write gets the old catalog or the new one, never a
+        # half-built list.
+        _catalog = data
+        _persist_catalog(data)
+
+
+def _persist_catalog(data):
     # Database first - it's the only copy that outlives this container. The
     # local file is still written either way: it costs nothing and it is the
     # whole catalog for a deployment with no DATABASE_URL configured.
@@ -226,6 +235,42 @@ def save_events_cache(events, summary, last_run=None):
         # a read-only or full filesystem must not lose a scrape that already
         # landed in the database
         log.warning(f"Local cache write failed (database copy stands): {e}")
+
+
+def _patch_catalog_times(patches):
+    """Write times read from event pages into whatever catalogue is being
+    served NOW, by event id, and persist it. Called by event_times.backfill
+    when it finishes, possibly after a newer scrape has replaced the list it
+    was given - which is why this re-finds each event by id rather than
+    saving the list it started from. Everything else about the catalogue
+    (summary, last_run) is left as it is: this is not a scrape."""
+    global _catalog
+    if not patches:
+        return
+    with _catalog_write_lock:
+        current = load_events_cache()
+        events = current.get("events") or []
+        n = 0
+        for ev in events:
+            p = patches.get(ev.get("id"))
+            if not p or not p.get("time") or ev.get("time") == p["time"]:
+                continue
+            ev["time"] = p["time"]
+            if p.get("date") and not ev.get("date"):
+                ev["date"] = p["date"]
+            n += 1
+        if not n:
+            return
+        # A new dict, not a mutation of the old one: /api/events memoises its
+        # response body per catalogue object, so a fresh object is what makes
+        # the next request re-serialise.
+        data = {"events": events, "summary": current.get("summary") or [],
+                "last_run": current.get("last_run")}
+        _catalog = data
+        _persist_catalog(data)
+    cov = event_times.coverage(events)
+    log.info(f"Times patched into the catalogue for {n} event(s); "
+             f"coverage now {cov['with']}/{len(events)} ({cov['pct']}%)")
 
 # ─────────────────────────────────────────────
 # BACKGROUND SCRAPE
@@ -275,6 +320,10 @@ def run_scrape_background():
                     # browse list can hold them back and say how many.
                     cls = classify(ev.get("title", ""), src["category"],
                                    ev.get("location", ""), is_online(ev))
+                    # One `time` field, London time, whatever shape the source
+                    # gave it in (event_times.normalise). Done before dedupe
+                    # so a copy that knows the time outranks one that doesn't.
+                    event_times.normalise(ev)
                     enriched.append({**ev, "id": event_id(ev.get("title", ""), ev.get("url", "")),
                                       "emoji": src["emoji"], "category": cls["category"],
                                       "format": cls["format"], "offtopic": cls["offtopic"],
@@ -421,8 +470,24 @@ def run_scrape_background():
         if not all_events and load_events_cache().get("events"):
             log.error("Scrape returned 0 events - keeping the previous catalogue")
             return
+        # Times already read from event pages on earlier runs go in before the
+        # catalogue is saved (no network: a cache lookup), so a scrape never
+        # publishes a TBC we already have the answer to.
+        try:
+            filled = event_times.apply_cached(all_events)
+        except Exception as e:
+            filled = 0
+            log.warning(f"Cached times not applied: {e}")
+        cov = event_times.coverage(all_events)
         save_events_cache(all_events, summary_data)
-        log.info(f"Scrape done: {len(all_events)} events ({dupes} cross-source duplicates removed)")
+        log.info(f"Scrape done: {len(all_events)} events ({dupes} cross-source duplicates removed); "
+                 f"times: {cov['with']}/{len(all_events)} ({cov['pct']}%), {filled} from cache")
+        # Events still without a time have their own page read now, in the
+        # background, and the catalogue is patched as answers arrive. This is
+        # what keeps "TBC" to events whose organiser has not published a time.
+        threading.Thread(target=event_times.backfill, args=(list(all_events),),
+                         kwargs={"after": _patch_catalog_times},
+                         name="times-backfill", daemon=True).start()
         # Read each upcoming event's own page in the background (about, venue,
         # organiser contacts), so the event drawer opens with them ready.
         threading.Thread(target=event_details.warm, args=(list(all_events),),
@@ -598,10 +663,12 @@ def api_health():
     Public answer is just "up"; queue and pool numbers are admin-only."""
     out = {"ok": True}
     if _admin_authorized():
+        events = load_events_cache().get("events", [])
         out.update({"jobs": JOBS.stats(), "db_pool": db.pool_stats(),
                     "ai_usage": ai_engine.USAGE,
                     "ai_max_inflight": ai_engine.AI_MAX_INFLIGHT,
-                    "catalog_events": len(load_events_cache().get("events", [])),
+                    "catalog_events": len(events),
+                    "catalog_times": event_times.coverage(events),
                     "threads": threading.active_count()})
     return jsonify(out)
 
@@ -2566,11 +2633,21 @@ def api_admin_coverage():
     luma = {s["identifier"]: s for s in db.list_luma_sources()}
     luma_names = {s.get("name") for s in luma.values()}
     rows = []
+    events = cache.get("events", []) or []
+    # Per-source time coverage, so a source that has started shipping
+    # time-less events shows up here before anyone sees TBC on a card.
+    with_t, total_t = {}, {}
+    for e in events:
+        src = e.get("source")
+        total_t[src] = total_t.get(src, 0) + 1
+        if event_times.usable_time(e.get("time")):
+            with_t[src] = with_t.get(src, 0) + 1
     for s in summary:
         h = health.get(s.get("source"), {})
         rows.append({
             "source": s.get("source"), "emoji": s.get("emoji"),
             "category": s.get("category"), "count": s.get("count") or 0,
+            "with_time": with_t.get(s.get("source"), 0),
             "error": s.get("error") or h.get("last_error"),
             "last_error": h.get("last_error"),
             "last_success_at": h.get("last_success_at"),
@@ -2590,7 +2667,8 @@ def api_admin_coverage():
                          "consecutive_zero": h.get("consecutive_zero") or 0,
                          "paused": True, "kind": h.get("kind") or "builtin"})
     return jsonify({"sources": rows, "last_run": cache.get("last_run"),
-                     "total_events": len(cache.get("events", []) or []),
+                     "total_events": len(events),
+                     "times": event_times.coverage(events),
                      "scraping": _scraping})
 
 
