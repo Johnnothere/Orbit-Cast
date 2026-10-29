@@ -1320,6 +1320,53 @@ def get_events_cache():
 
 
 # --------------------------------------------------------------------------
+# Page-read caches: created at boot if missing
+# --------------------------------------------------------------------------
+# event_details and event_times are caches of what public event pages say,
+# rebuilt from the pages whenever they are empty. Both migrations (0020,
+# 0021) are additive "create table if not exists" with no data in them, so
+# the app creates them itself at boot when they are missing: a deploy that
+# runs ahead of the migration files otherwise silently re-reads every page
+# after every restart, and nobody sees why. The migration files stay the
+# record of the schema; this is the same DDL, idempotent, best-effort.
+
+_CACHE_TABLES_DDL = """
+create table if not exists event_details (
+  id          text primary key,
+  url         text not null,
+  payload     jsonb not null,
+  fetched_at  timestamptz not null default now()
+);
+alter table event_details enable row level security;
+create table if not exists event_times (
+  url         text primary key,
+  found       boolean not null default false,
+  start_time  text,
+  end_time    text,
+  payload     jsonb not null,
+  fetched_at  timestamptz not null default now()
+);
+alter table event_times enable row level security;
+"""
+
+
+def ensure_cache_tables() -> bool:
+    """Create the page-read cache tables if they do not exist. Safe to run
+    on every boot; returns False (and logs) when there is no database or
+    the role may not create tables, in which case the caches live in
+    process memory as before."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(_CACHE_TABLES_DDL)
+            return True
+    except Exception as exc:
+        log.warning(f"ensure_cache_tables skipped: {exc}")
+        return False
+
+
+# --------------------------------------------------------------------------
 # Event details (event_details.py): what each event page says about itself
 # --------------------------------------------------------------------------
 # Missing table (migration 0020 not applied) or no database: reads return

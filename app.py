@@ -2898,6 +2898,10 @@ def _refresh_loop():
 # Refresh. Safe to run unconditionally: single gunicorn worker process,
 # so this fires exactly once.
 logging.basicConfig(level=logging.INFO)
+# The page-read caches (event details, event times) are created if missing,
+# before the first scrape can try to write to them. Best-effort: with no
+# database, or a role that cannot create tables, they stay in memory.
+db.ensure_cache_tables()
 threading.Thread(target=_refresh_loop, daemon=True).start()
 # Audit rows are written in the background (db.audit); give the last few a
 # moment to land when Gunicorn stops the worker on a deploy.
