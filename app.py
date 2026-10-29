@@ -18,6 +18,23 @@ import secrets
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+# Logging, before any project module is imported: several of them log at
+# import time. INFO and WARNING go to stdout, ERROR and above to stderr.
+# Railway files every stderr line as "error", so with everything on stderr
+# (the default) a real error was one line in thousands marked the same way
+# and the severity filter in the dashboard was useless. Set here with
+# handlers, so scraper.py's own basicConfig at import becomes a no-op.
+class _BelowError(logging.Filter):
+    def filter(self, record):
+        return record.levelno < logging.ERROR
+
+
+_fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+_out = logging.StreamHandler(sys.stdout); _out.setFormatter(_fmt); _out.addFilter(_BelowError())
+_err = logging.StreamHandler(sys.stderr); _err.setFormatter(_fmt); _err.setLevel(logging.ERROR)
+logging.basicConfig(level=logging.INFO, handlers=[_out, _err], force=True)
+
 from flask import Flask, jsonify, make_response, redirect, render_template, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 from markupsafe import escape
@@ -33,6 +50,7 @@ import identity
 import jobs
 import mailer
 import rag
+import scraper
 
 log = logging.getLogger("orbitcast.web")
 app = Flask(__name__)
@@ -278,6 +296,8 @@ def _patch_catalog_times(patches):
 
 _scrape_lock = threading.Lock()
 _scraping    = False
+DISCOVERY_HOURS = float(os.getenv("DISCOVERY_HOURS", "4"))
+_last_discovery = -1e9                      # so the first scrape after boot discovers
 
 def run_scrape_background():
     global _scraping
@@ -304,6 +324,7 @@ def run_scrape_background():
 
         def scrape_one(src):
             try:
+                scraper.clear_fetch_error()
                 events = src["fn"]()
                 enriched = []
                 for ev in events:
@@ -335,9 +356,13 @@ def run_scrape_background():
                 enriched = collapse_series(enriched, keep=2)
                 # count reflects what actually made it into the catalog, so the
                 # dashboard doesn't claim events that were filtered out
+                # A source that found nothing because its site refused the
+                # fetch says so here, so the coverage view shows "HTTP 403"
+                # (or "paused after ...") instead of an unexplained zero.
+                why = None if events else scraper.last_fetch_error()
                 summary  = {"source": src["name"], "emoji": src["emoji"],
                             "category": src["category"], "count": len(enriched),
-                            "error": None}
+                            "error": (f"0 events: {why}" if why else None)}
                 return enriched, summary
             except Exception as e:
                 log.error(f"Scraper {src['name']} failed: {e}")
@@ -497,6 +522,15 @@ def run_scrape_background():
         # Discovery makes extra HTTP calls and is the newest code here, so it
         # runs after the thing everyone depends on is already stored, inside
         # its own try - a discovery failure must never cost a good scrape.
+        #
+        # Every few hours, not every scrape: it was spending ~35 s of Luma
+        # API calls and 50-odd row writes every 30 minutes to find the same
+        # 57 untracked calendars it found last time. New organisers appear
+        # over days; checking at DISCOVERY_HOURS catches them just as well.
+        global _last_discovery
+        if time.monotonic() - _last_discovery < DISCOVERY_HOURS * 3600:
+            return
+        _last_discovery = time.monotonic()
         try:
             # Two passes, because they reach different things. The first walks
             # events we already ingest, so it can only ever find organisers our
@@ -669,6 +703,8 @@ def api_health():
                     "ai_max_inflight": ai_engine.AI_MAX_INFLIGHT,
                     "catalog_events": len(events),
                     "catalog_times": event_times.coverage(events),
+                    "ai_outage": ai_engine.outage(),
+                    "paused_hosts": scraper.paused_hosts(),
                     "threads": threading.active_count()})
     return jsonify(out)
 
@@ -997,15 +1033,24 @@ def api_me():
         return jsonify({"signed_in": False, "google_enabled": auth.google_enabled(),
                         "email_signin_enabled": auth.email_signin_enabled(),
                         "invite_only": db.signup_gated()})
-    prefs = db.get_digest_prefs(account["id"]) or {}
-    has_profile = bool(db.get_latest_analysis(account["oc_uid"]))
-    # Keyed on the account's oc_uid, which set_session_cookie() has already
-    # re-issued as this browser's cookie - so this is the same stored CV on
-    # every device the person signs in on, without a second id to carry.
-    cv = db.get_cv_status(account["oc_uid"]) or {}
-    extras = db.get_digest_extras(account["id"]) or {}
-    meta = db.get_account_meta(account["id"])
-    pc = db.get_postcode(account["id"])
+    # Seven independent reads, at once rather than one after another: each
+    # is a round trip to the database, and this route was taking two seconds
+    # on a signed-in page load for a few milliseconds of actual query time.
+    # (cv status is keyed on the account's oc_uid, which set_session_cookie()
+    # has already re-issued as this browser's cookie - the same stored CV on
+    # every device the person signs in on, without a second id to carry.)
+    aid, uid = account["id"], account["oc_uid"]
+    prefs, latest, cv, extras, meta, pc, locked_to = db.parallel(
+        lambda: db.get_digest_prefs(aid),
+        lambda: db.get_latest_analysis(uid),
+        lambda: db.get_cv_status(uid),
+        lambda: db.get_digest_extras(aid),
+        lambda: db.get_account_meta(aid),
+        lambda: db.get_postcode(aid),
+        lambda: db.get_cv_identity(aid),
+    )
+    prefs, cv, extras, meta = prefs or {}, cv or {}, extras or {}, meta or {}
+    has_profile = bool(latest)
     snooze = extras.get("snooze_until")
     if snooze and snooze <= datetime.now(timezone.utc):
         snooze = None
@@ -1038,7 +1083,7 @@ def api_me():
             # either - reporting only the upload would tell someone who typed
             # their background that nothing of theirs is stored.
             # locked_to: the one person this account analyses (identity.py).
-            "locked_to": db.get_cv_identity(account["id"]),
+            "locked_to": locked_to,
             "on_file": bool(cv.get("file_count") or cv.get("last_text_at")),
             "file_count": cv.get("file_count", 0),
             "total_bytes": cv.get("total_bytes", 0),
@@ -1696,6 +1741,15 @@ def _analysis_owner():
     return f"anon:{oc_uid}" if oc_uid else None
 
 
+def _ai_unavailable_response():
+    resp = jsonify({"error": "Analysis is temporarily unavailable - this is a problem on our "
+                             "side, not with your CV. Please try again later.",
+                    "reason": "ai_unavailable"})
+    resp.status_code = 503
+    resp.headers["Retry-After"] = "600"
+    return resp
+
+
 def _busy_response():
     resp = jsonify({"error": "OrbitCast is very busy right now. Please try again in a few minutes.",
                     "reason": "busy"})
@@ -1868,6 +1922,11 @@ def api_analyze():
     if not load_events_cache().get("events"):
         return jsonify({"error": "The event catalogue is still loading. Try again in a minute."}), 503
 
+    if ai_engine.outage():
+        # The API is refusing this account (no credit, bad key). Say so now
+        # rather than queue a job that fails the same way in a few seconds,
+        # and don't spend the person's free analysis on it.
+        return _ai_unavailable_response()
     # Signed in, the identity is the ACCOUNT's oc_uid - never a cookie the
     # browser could have carried in from somewhere else. Anonymous, there is
     # no identity at all: oc_uid=None means the job stores NOTHING - no
@@ -1948,6 +2007,11 @@ def api_analyze_reuse():
         return jsonify({"error": "No saved profile for this browser."}), 404
     if not load_events_cache().get("events"):
         return jsonify({"error": "The event catalogue is still loading. Try again in a minute."}), 503
+    if ai_engine.outage():
+        # The API is refusing this account (no credit, bad key). Say so now
+        # rather than queue a job that fails the same way in a few seconds,
+        # and don't spend the person's free analysis on it.
+        return _ai_unavailable_response()
     try:
         view = JOBS.submit(owner, "reuse", _invalidates_owner(_run_reuse_job), owner, oc_uid, last)
     except jobs.QueueFull:
@@ -2006,11 +2070,14 @@ def api_location():
             # A session cookie was presented but is invalid: do not fall back
             # to the anonymous id - that is how a stale cookie read a location.
             return jsonify({"decision": None, "lat": None, "lng": None})
-        decision = db.get_location_consent(oc_uid) if oc_uid else None
         # On a returning visit where location was already granted, hand back
         # the last known fix so the page doesn't have to re-prompt the OS
         # geolocation dialog on every load just to draw the map/distance.
-        loc = db.get_latest_location(oc_uid) if (oc_uid and decision) else None
+        # Both reads at once; the fix is only used when consent is on record.
+        decision, loc = (db.parallel(lambda: db.get_location_consent(oc_uid),
+                                     lambda: db.get_latest_location(oc_uid))
+                         if oc_uid else (None, None))
+        loc = loc if decision else None
         return jsonify({"decision": decision, "lat": loc["lat"] if loc else None,
                          "lng": loc["lng"] if loc else None})
 
@@ -2897,11 +2964,13 @@ def _refresh_loop():
 # ephemeral) and nothing repopulates it until someone manually hits
 # Refresh. Safe to run unconditionally: single gunicorn worker process,
 # so this fires exactly once.
-logging.basicConfig(level=logging.INFO)
 # The page-read caches (event details, event times) are created if missing,
 # before the first scrape can try to write to them. Best-effort: with no
 # database, or a role that cannot create tables, they stay in memory.
 db.ensure_cache_tables()
+# Warm connections for the first requests and keep them alive after that
+# (db.py explains the 1.4 s that cold connections were costing each request).
+db.start_keepalive()
 threading.Thread(target=_refresh_loop, daemon=True).start()
 # Audit rows are written in the background (db.audit); give the last few a
 # moment to land when Gunicorn stops the worker on a deploy.

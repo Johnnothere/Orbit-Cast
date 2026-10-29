@@ -120,10 +120,62 @@ def _get_client():
     return _client
 
 
+# ── Outage breaker ───────────────────────────────────────────────────────────
+# When the API refuses every call for an account-level reason - no credit, a
+# revoked key, a permission problem - nothing in this process can fix it, and
+# every analysis, digest and details pass was still making the call (twice,
+# with retries) and failing the same way. The first such refusal now opens
+# the breaker: for OUTAGE_PAUSE_S every call fails at once, in-process, with
+# the real reason, and /api/health reports it so somebody can act on it.
+# Transient errors (429, 5xx, timeouts) are not account problems and leave
+# the breaker alone - the SDK's own retries handle those.
+OUTAGE_PAUSE_S = float(os.environ.get("AI_OUTAGE_PAUSE_S", "600"))
+_outage = {"until": 0.0, "reason": None, "since": None, "count": 0}
+_outage_lock = threading.Lock()
+_ACCOUNT_ERROR_MARKERS = ("credit balance", "billing", "invalid x-api-key",
+                          "authentication_error", "permission_error", "api key")
+
+
+class AIUnavailable(RuntimeError):
+    """Raised instead of calling the API while the breaker is open."""
+
+
+def outage():
+    """{"reason", "since", "until"} while the breaker is open, else None."""
+    with _outage_lock:
+        if _outage["until"] > time.time():
+            return {"reason": _outage["reason"], "since": _outage["since"],
+                    "until": _outage["until"], "count": _outage["count"]}
+    return None
+
+
+def _note_account_error(exc):
+    msg = str(exc).lower()
+    status = getattr(exc, "status_code", None)
+    if not (status in (400, 401, 403) and any(m in msg for m in _ACCOUNT_ERROR_MARKERS)):
+        return
+    with _outage_lock:
+        first = _outage["until"] <= time.time()
+        _outage["until"] = time.time() + OUTAGE_PAUSE_S
+        _outage["reason"] = str(exc)[:300]
+        _outage["since"] = _outage["since"] if not first and _outage["since"] else time.time()
+        _outage["count"] += 1
+    if first:
+        log.error(f"AI calls paused for {OUTAGE_PAUSE_S / 60:.0f} min - the API is refusing "
+                  f"this account: {str(exc)[:200]}")
+
+
 def _create(**kwargs):
-    """messages.create behind the in-flight gate."""
+    """messages.create behind the in-flight gate and the outage breaker."""
+    o = outage()
+    if o:
+        raise AIUnavailable(f"AI paused: {o['reason']}")
     with _ai_slots:
-        return _get_client().messages.create(**kwargs)
+        try:
+            return _get_client().messages.create(**kwargs)
+        except Exception as exc:
+            _note_account_error(exc)
+            raise
 
 
 def _extract_json_object(raw: str) -> str:

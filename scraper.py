@@ -142,11 +142,20 @@ FETCH_TIMEOUT = (6, 20)                 # (connect, read) seconds
 FETCH_MAX_BYTES = 6 * 1024 * 1024       # 6 MB per response
 
 
+_PUBLIC_HOST_TTL_S = 300
+_public_host_cache: dict = {}            # host -> (verdict, expires_at)
+_public_host_lock = __import__("threading").Lock()
+
+
 def _is_public_host(url: str) -> bool:
     """False for anything that resolves to loopback, link-local, RFC1918,
     cloud-metadata or otherwise non-public addresses. Sources are URLs an
     operator typed in (admin "add by link") or that a scraped page linked to;
-    neither should be able to point this server at its own network."""
+    neither should be able to point this server at its own network.
+
+    The verdict is cached per host for a few minutes: a scrape makes several
+    hundred fetches and resolved every one of them (and again after each
+    redirect) before connecting."""
     import ipaddress, socket
     from urllib.parse import urlparse
     try:
@@ -156,14 +165,89 @@ def _is_public_host(url: str) -> bool:
         host = p.hostname.lower()
         if host in ("localhost",) or host.endswith((".local", ".internal", ".railway.internal")):
             return False
+        now = time.monotonic()
+        with _public_host_lock:
+            hit = _public_host_cache.get(host)
+        if hit and hit[1] > now:
+            return hit[0]
+        verdict = True
         for info in socket.getaddrinfo(host, None):
             ip = ipaddress.ip_address(info[4][0])
             if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
                     or ip.is_reserved or ip.is_unspecified):
-                return False
-        return True
+                verdict = False
+                break
+        with _public_host_lock:
+            if len(_public_host_cache) > 5000:
+                _public_host_cache.clear()
+            _public_host_cache[host] = (verdict, now + _PUBLIC_HOST_TTL_S)
+        return verdict
     except Exception:
         return False
+
+
+# ── Per-host back-off ────────────────────────────────────────────────────────
+# A site that answers 403 answers 403 to every page for hours - Cloudflare
+# blocks the datacenter range, not one URL. Before this, each scrape asked
+# Chatham House seven times, Devpost sixteen, and logged a warning for every
+# one: 260 warnings in five hours for the same fact, and a few seconds spent
+# learning it again. Now the first refusal pauses that host (6 h for a block,
+# 1 h for a dropped connection, doubling each time it recurs, 24 h at most),
+# every fetch to it in that window returns None at once, and the warning is
+# logged once per pause. Sources read the reason through last_fetch_error()
+# so the coverage view can say "paused: 403" rather than show a bare zero.
+_BLOCK_STATUSES = {401, 403, 429, 503}
+_host_blocks: dict = {}                  # host -> (until_monotonic, strikes, reason)
+_host_block_lock = __import__("threading").Lock()
+_tl = __import__("threading").local()
+
+
+def _host_of(url):
+    from urllib.parse import urlparse
+    return (urlparse(url).hostname or "").lower()
+
+
+def host_paused(url):
+    """The reason this host is paused, or None."""
+    host = _host_of(url)
+    with _host_block_lock:
+        b = _host_blocks.get(host)
+    if b and b[0] > time.monotonic():
+        return b[2]
+    return None
+
+
+def paused_hosts():
+    """{host: {"reason", "strikes", "resumes_in_s"}} for the health view."""
+    now = time.monotonic()
+    with _host_block_lock:
+        return {h: {"reason": b[2], "strikes": b[1], "resumes_in_s": int(b[0] - now)}
+                for h, b in _host_blocks.items() if b[0] > now}
+
+
+def _pause_host(url, reason, base_s):
+    host = _host_of(url)
+    now = time.monotonic()
+    with _host_block_lock:
+        prev = _host_blocks.get(host)
+        strikes = (prev[1] + 1) if prev and prev[0] > now - 86400 else 1
+        wait = min(base_s * (2 ** (strikes - 1)), 24 * 3600)
+        _host_blocks[host] = (now + wait, strikes, reason)
+    log.warning(f"{host}: {reason}; pausing fetches to this host for {wait / 3600:.1f} h")
+
+
+def _note_fetch_error(msg):
+    _tl.last_error = msg
+
+
+def last_fetch_error():
+    """The last fetch failure on this thread, for a source that returned
+    nothing. Cleared with clear_fetch_error() before each source runs."""
+    return getattr(_tl, "last_error", None)
+
+
+def clear_fetch_error():
+    _tl.last_error = None
 
 
 def _read_capped(r, cap=FETCH_MAX_BYTES) -> bytes:
@@ -176,18 +260,34 @@ def _read_capped(r, cap=FETCH_MAX_BYTES) -> bytes:
 
 
 def fetch(url, json_mode=False, timeout=None):
+    paused = host_paused(url)
+    if paused:
+        _note_fetch_error(f"paused after {paused}")
+        log.debug(f"Fetch skipped (host paused: {paused}): {url[:120]}")
+        return None
     try:
         if not _is_public_host(url):
             log.warning(f"Fetch refused (non-public host): {url[:120]}")
+            _note_fetch_error("non-public host")
             return None
         h = dict(HEADERS)
         if json_mode:
             h["Accept"] = "application/json"
         r = requests.get(url, headers=h, timeout=timeout or FETCH_TIMEOUT,
                          allow_redirects=True, stream=True)
+        if r.status_code in _BLOCK_STATUSES:
+            r.close()
+            _note_fetch_error(f"HTTP {r.status_code}")
+            # A block (401/403) lasts hours; a rate limit or a 503 is minutes,
+            # and pausing a whole platform (Luma, Eventbrite) for hours over
+            # one 429 would cost far more than the retry it saves.
+            base = 6 * 3600 if r.status_code in (401, 403) else 15 * 60
+            _pause_host(url, f"HTTP {r.status_code} for {url[:100]}", base)
+            return None
         r.raise_for_status()
         if not _is_public_host(r.url):          # a redirect can point inward too
             log.warning(f"Fetch refused after redirect (non-public host): {r.url[:120]}")
+            _note_fetch_error("redirected to a non-public host")
             return None
         body = _read_capped(r)
         if json_mode:
@@ -206,7 +306,14 @@ def fetch(url, json_mode=False, timeout=None):
         # own <meta charset> / BOM, which is the declaration that actually
         # matters, and fall back to sniffing when there isn't one.
         return BeautifulSoup(body, "lxml")
+    except requests.exceptions.ConnectionError as e:
+        # "Remote end closed connection without response" and friends: the
+        # host is refusing this client, not one page. Short pause.
+        _note_fetch_error(f"connection error: {str(e)[:120]}")
+        _pause_host(url, f"connection error for {url[:100]}: {str(e)[:80]}", 3600)
+        return None
     except Exception as e:
+        _note_fetch_error(f"{type(e).__name__}: {str(e)[:120]}")
         log.warning(f"Fetch failed {url}: {e}")
         return None
 

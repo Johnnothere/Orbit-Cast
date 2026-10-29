@@ -52,7 +52,18 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "")
 # to 20-30.
 DB_POOL_MAX = max(2, int(os.environ.get("DB_POOL_MAX", "10")))
 DB_POOL_WAIT_S = float(os.environ.get("DB_POOL_WAIT_S", "15"))
-DB_IDLE_MAX_S = float(os.environ.get("DB_IDLE_MAX_S", "240"))
+# Idle connections are kept warm, not thrown away. The old 240 s limit meant
+# that at a few visitors an hour almost every request opened a brand-new
+# connection - TCP, TLS, pooler auth, three or four round trips to a database
+# on another continent - before running a 5 ms query: /api/consent and
+# /api/me were spending 1.4 s of their 1.5 s on that handshake. A keepalive
+# thread now pings each idle connection every DB_PING_S, so one the pooler
+# dropped is found and replaced in the background, never by a request, and a
+# request almost always finds a live connection waiting. DB_IDLE_MAX_S is
+# the backstop for a connection the pinger somehow missed.
+DB_IDLE_MAX_S = float(os.environ.get("DB_IDLE_MAX_S", "1800"))
+DB_PING_S = float(os.environ.get("DB_PING_S", "45"))
+DB_WARM_CONNS = max(0, int(os.environ.get("DB_WARM_CONNS", "2")))
 
 
 class _Pool:
@@ -135,9 +146,113 @@ class _Pool:
                 self.in_use -= 1
             self._slots.release()
 
+    def ping_idle(self, older_than_s):
+        """Run `select 1` on every idle connection not used in the last
+        `older_than_s` seconds, dropping any that fail. Called by the
+        keepalive thread, so a dead connection is found here rather than by
+        the next request. Each connection is taken out of the idle list
+        while it is pinged, so a request arriving mid-ping gets another."""
+        now = time.monotonic()
+        with self._lock:
+            due = [(c, used) for c, used in self._idle if now - used >= older_than_s]
+            self._idle = [(c, used) for c, used in self._idle if now - used < older_than_s]
+        kept = 0
+        for c, _ in due:
+            ok = False
+            try:
+                if not c.closed:
+                    with c.cursor() as cur:
+                        cur.execute("select 1")
+                        cur.fetchone()
+                    if c.info.transaction_status != 0:       # not IDLE: leave it clean
+                        c.rollback()
+                    ok = True
+            except Exception:
+                ok = False
+            if ok:
+                with self._lock:
+                    self._idle.append((c, time.monotonic()))
+                kept += 1
+            else:
+                try:
+                    c.close()
+                except Exception:
+                    pass
+        return kept, len(due) - kept
+
+    def warm(self, n):
+        """Open up to `n` connections ahead of demand (deploy time)."""
+        opened = []
+        try:
+            for _ in range(n):
+                with self._lock:
+                    if len(self._idle) + self.in_use >= n:
+                        break
+                opened.append(self._connect())
+        except Exception as exc:
+            log.warning(f"pool warm-up stopped: {exc}")
+        with self._lock:
+            for c in opened:
+                self._idle.append((c, time.monotonic()))
+        return len(opened)
+
 
 _pool = None
 _pool_lock = threading.Lock()
+_keepalive_started = False
+
+
+def _keepalive_loop():
+    """Keep idle connections alive and warm. Runs for the life of the
+    process; every failure is contained so it can never take the app down."""
+    time.sleep(2)
+    while True:
+        try:
+            pool = _get_pool()
+            if pool is not None:
+                # Ping anything idle for a while; then make sure a couple of
+                # warm connections exist for the next request.
+                _, dropped = pool.ping_idle(older_than_s=DB_PING_S * 0.8)
+                if dropped:
+                    log.info(f"db keepalive: replaced {dropped} dead connection(s)")
+                with pool._lock:
+                    idle = len(pool._idle)
+                if idle < DB_WARM_CONNS and pool.in_use + idle < pool.maxconn:
+                    pool.warm(DB_WARM_CONNS)
+        except Exception as exc:
+            log.debug(f"db keepalive tick failed: {exc}")
+        time.sleep(DB_PING_S)
+
+
+def start_keepalive():
+    """Start the keepalive thread once (app.py calls this at boot)."""
+    global _keepalive_started
+    if _keepalive_started or not DATABASE_URL:
+        return False
+    _keepalive_started = True
+    threading.Thread(target=_keepalive_loop, name="db-keepalive", daemon=True).start()
+    return True
+
+
+def parallel(*calls, workers=4):
+    """Run several independent reads at once and return their results in
+    order. Each call is a zero-argument callable (use functools.partial or a
+    lambda). The database is far away, so N sequential reads cost N round
+    trips; this makes them cost about one. Every function here already
+    returns a safe default on failure, so a failed call simply yields that."""
+    from concurrent.futures import ThreadPoolExecutor
+    if len(calls) <= 1:
+        return [c() for c in calls]
+    with ThreadPoolExecutor(max_workers=min(workers, len(calls))) as pool:
+        futures = [pool.submit(c) for c in calls]
+        out = []
+        for f in futures:
+            try:
+                out.append(f.result())
+            except Exception as exc:
+                log.warning(f"parallel read failed: {exc}")
+                out.append(None)
+        return out
 
 
 def _get_pool():

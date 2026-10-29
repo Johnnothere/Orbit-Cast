@@ -537,7 +537,17 @@ def _fresh(rec, url):
     if not rec or rec.get("url") != url:
         return False
     age = time.time() - float(rec.get("fetched_at") or 0)
-    return age < (FRESH_S if rec.get("ok") else FAIL_RETRY_S)
+    if not rec.get("ok"):
+        return age < FAIL_RETRY_S
+    # The page was read but the model pass failed (API outage, no credit):
+    # the record is usable - venue, times, contacts - but has no write-up.
+    # Retry on the short clock so the write-up appears soon after the API
+    # is back, not six hours later.
+    if rec.get("ai") is None and os.environ.get("ANTHROPIC_API_KEY"):
+        if ai_engine.outage():
+            return True                   # re-reading now would change nothing
+        return age < FAIL_RETRY_S
+    return age < FRESH_S
 
 
 def get_details(ev, refresh=True):
