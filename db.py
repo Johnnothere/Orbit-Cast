@@ -2898,23 +2898,47 @@ def set_dismissed(account_id, event_id: str, title: str, dismissed: bool) -> boo
 
 
 def get_digest_extras(account_id) -> dict:
-    """categories + snooze_until. Read separately from get_digest_prefs() on
-    purpose: that query is on the scheduler's critical path and must keep
-    working on a database where 0013 has not been applied."""
+    """categories + snooze_until + the 0023 shape columns. Read separately
+    from get_digest_prefs() on purpose: that query is on the scheduler's
+    critical path and must keep working on a database where a later
+    migration has not been applied.
+
+    Which is the whole reason for the two-step read below. Code deploys and
+    migrations do not land atomically, and if 0023 is a few minutes behind
+    this deploy, a single SELECT naming max_items would fail, be swallowed
+    by the except, and return {} - quietly dropping the category filter for
+    every subscriber until someone noticed the digest had gone broad. The
+    older columns are the ones that matter, so they are read on their own
+    and the newer ones are a best-effort second query."""
+    out = {}
     try:
         with _read_cursor() as cur:
             if cur is None:
                 return {}
-            cur.execute("select categories, snooze_until, max_items, niche_text "
-                        "from digest_prefs where account_id = %s", (account_id,))
+            cur.execute("select categories, snooze_until from digest_prefs "
+                        "where account_id = %s", (account_id,))
             row = cur.fetchone()
             if not row:
                 return {}
-            return {"categories": list(row[0] or []), "snooze_until": row[1],
-                    "max_items": row[2], "niche_text": row[3]}
+            out = {"categories": list(row[0] or []), "snooze_until": row[1]}
     except Exception as exc:
         log.warning(f"get_digest_extras failed: {exc}")
         return {}
+
+    try:
+        with _read_cursor() as cur:
+            if cur is None:
+                return out
+            cur.execute("select max_items, niche_text from digest_prefs "
+                        "where account_id = %s", (account_id,))
+            row = cur.fetchone()
+            if row:
+                out["max_items"], out["niche_text"] = row[0], row[1]
+    except Exception as exc:
+        # Pre-0023 database: no cap and no niche text, which is exactly the
+        # behaviour before the feature existed. Everything else still works.
+        log.info(f"digest shape columns unavailable (migration 0023 pending?): {exc}")
+    return out
 
 
 def set_digest_extras(account_id, categories, snooze_until,
@@ -2928,18 +2952,31 @@ def set_digest_extras(account_id, categories, snooze_until,
         with _cursor() as cur:
             if cur is None:
                 return False
-            sets = ["categories = %s", "snooze_until = %s", "max_items = %s"]
-            args = [list(categories) if categories else None, snooze_until, max_items]
+            cur.execute("update digest_prefs set categories = %s, snooze_until = %s, "
+                        "updated_at = now() where account_id = %s",
+                        (list(categories) if categories else None, snooze_until, account_id))
+    except Exception as exc:
+        log.warning(f"set_digest_extras failed: {exc}")
+        return False
+
+    # Second statement for the same reason as the split read: on a pre-0023
+    # database this one fails and the category change above still sticks,
+    # rather than the whole save being lost because of a column that is not
+    # there yet.
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return True
+            sets, args = ["max_items = %s"], [max_items]
             if touch_niche:
                 sets += ["niche_text = %s", "niche_updated_at = now()"]
                 args.append(niche_text or None)
             args.append(account_id)
             cur.execute("update digest_prefs set " + ", ".join(sets)
-                        + ", updated_at = now() where account_id = %s", tuple(args))
-            return True
+                        + " where account_id = %s", tuple(args))
     except Exception as exc:
-        log.warning(f"set_digest_extras failed: {exc}")
-        return False
+        log.info(f"digest shape columns unavailable (migration 0023 pending?): {exc}")
+    return True
 
 
 def recent_digest_sends(account_id, limit: int = 6):

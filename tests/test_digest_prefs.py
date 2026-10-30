@@ -9,8 +9,60 @@ import unittest
 
 os.environ.setdefault("SESSION_SECRET", "x" * 48)
 
+import contextlib
+
+import db
 import digest
 import mailer
+
+
+class MigrationOrderTests(unittest.TestCase):
+    """A deploy and its migration do not land at the same instant.
+
+    If 0023 is even a few minutes behind this code, a single SELECT naming
+    max_items fails, gets swallowed, and returns {} - which silently drops
+    the category filter for every subscriber and makes the digest go broad
+    with nothing in the logs that looks like a problem. The read and write
+    are split for exactly this, so it is worth a test."""
+
+    def setUp(self):
+        self._read, self._write = db._read_cursor, db._cursor
+
+    def tearDown(self):
+        db._read_cursor, db._cursor = self._read, self._write
+
+    def _patch(self, has_new_columns):
+        class Cur:
+            def __init__(self): self.row = None
+            def execute(self, sql, args=None):
+                if "max_items" in sql and not has_new_columns:
+                    raise Exception('column "max_items" does not exist')
+                self.row = (["Cyber & Infosec"], None) if "categories" in sql else (3, "n")
+            def fetchone(self): return self.row
+
+        @contextlib.contextmanager
+        def cm():
+            yield Cur()
+        db._read_cursor = cm
+        db._cursor = cm
+
+    def test_categories_survive_a_pending_migration(self):
+        self._patch(False)
+        out = db.get_digest_extras(1)
+        self.assertEqual(out["categories"], ["Cyber & Infosec"])
+        self.assertIsNone(out.get("max_items"))
+
+    def test_category_write_still_lands_before_the_migration(self):
+        self._patch(False)
+        self.assertTrue(db.set_digest_extras(1, ["Cyber & Infosec"], None,
+                                             max_items=3, niche_text="n", touch_niche=True))
+
+    def test_new_columns_read_once_the_migration_is_applied(self):
+        self._patch(True)
+        out = db.get_digest_extras(1)
+        self.assertEqual(out["categories"], ["Cyber & Infosec"])
+        self.assertEqual(out["max_items"], 3)
+
 
 
 class MaxItemsTests(unittest.TestCase):
