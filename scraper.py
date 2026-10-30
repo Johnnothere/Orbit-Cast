@@ -318,7 +318,13 @@ def fetch(url, json_mode=False, timeout=None):
         return None
 
 def event_id(title, url):
-    return hashlib.md5(f"{title.lower().strip()}{url}".encode()).hexdigest()[:12]
+    # MD5 here is a dedup fingerprint, not a security primitive: two listings
+    # of the same event collapsing to one id is the whole point, and nothing
+    # trusts this value. usedforsecurity=False says so to the scanners and
+    # keeps it working under a FIPS build; the digest itself is unchanged,
+    # which matters because these ids are stored and shared.
+    return hashlib.md5(f"{title.lower().strip()}{url}".encode(),
+                       usedforsecurity=False).hexdigest()[:12]
 
 def load_seen():
     return json.loads(SEEN_FILE.read_text()) if SEEN_FILE.exists() else {}

@@ -241,6 +241,22 @@ MIN_PDF_TEXT_CHARS = 40
 MAX_PDF_PAGES = 30
 MAX_DOCX_INFLATED_BYTES = 40 * 1024 * 1024
 EXTRACT_TIMEOUT_S = 25
+EXTRACT_WORKERS = int(os.environ.get("OC_EXTRACT_WORKERS", "4"))
+
+# One shared, bounded pool rather than a fresh single-worker pool per upload.
+# A parser that overruns cannot be killed - the thread runs to completion
+# whatever we do - so the old per-call pool leaked one thread per slow file
+# with no ceiling at all, and enough of them would exhaust the 64 Gunicorn
+# threads and take the whole site down with it.
+#
+# Bounding the pool caps the blast radius at EXTRACT_WORKERS stuck threads:
+# uploads then fail fast with an honest message while every other route keeps
+# serving. The real fix is to parse in a subprocess that can be killed
+# outright; this is the cheap version of that, and worth replacing if slow
+# files ever become common.
+_extract_pool = ThreadPoolExecutor(max_workers=EXTRACT_WORKERS,
+                                   thread_name_prefix="extract")
+_extract_slots = threading.BoundedSemaphore(EXTRACT_WORKERS)
 
 
 def _extract_pdf_pdfplumber(file_bytes: bytes) -> str:
@@ -267,21 +283,32 @@ def _check_docx_size(file_bytes: bytes):
 
 
 def extract_text(file_bytes: bytes, filename: str) -> str:
-    """Runs the extractor under a hard time limit. The thread cannot be killed
-    if it overruns, but the request returns and the limiter still applies;
-    the leaked thread ends when the parser does. ValueError messages are
-    user-facing and surface unchanged."""
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as _Timeout
-    ex = ThreadPoolExecutor(max_workers=1)
+    """Runs the extractor under a hard time limit, on a bounded shared pool.
+
+    An overrunning parser cannot be killed, so its slot stays held until the
+    parser itself finishes - which is the point: it is accounted for, and when
+    every slot is held we refuse new uploads rather than quietly spawning more
+    unkillable threads. ValueError messages are user-facing and surface
+    unchanged."""
+    from concurrent.futures import TimeoutError as _Timeout
+    if not _extract_slots.acquire(blocking=False):
+        log.warning("Extraction pool saturated (%d workers all busy); refusing upload.",
+                    EXTRACT_WORKERS)
+        raise ValueError("Too many files are being read right now. "
+                         "Try again in a moment, or paste your CV as text.")
     try:
-        fut = ex.submit(_extract_text_raw, file_bytes, filename)
-        try:
-            text = fut.result(timeout=EXTRACT_TIMEOUT_S)
-        except _Timeout:
-            raise ValueError("That file took too long to read. Try a smaller PDF, "
-                             "or paste your CV as text.")
-    finally:
-        ex.shutdown(wait=False)
+        fut = _extract_pool.submit(_extract_text_raw, file_bytes, filename)
+    except Exception:
+        _extract_slots.release()
+        raise
+    # Release on completion, not on return: a timed-out parser is still
+    # holding a real thread, and the slot has to reflect that.
+    fut.add_done_callback(lambda _f: _extract_slots.release())
+    try:
+        text = fut.result(timeout=EXTRACT_TIMEOUT_S)
+    except _Timeout:
+        raise ValueError("That file took too long to read. Try a smaller PDF, "
+                         "or paste your CV as text.")
     return _strip_nul(text)
 
 

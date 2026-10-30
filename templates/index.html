@@ -1039,6 +1039,16 @@ details.past[open]>summary .i{transform:rotate(180deg)}
   .menu.wide{min-width:0}
 }
 </style>
+{% if turnstile_site_key %}
+<script>
+  /* Turnstile hands the token to this callback; the analyse request reads it
+     off window. Defined before the loader so a fast challenge cannot fire
+     the callback before it exists. */
+  window.OC_TURNSTILE_TOKEN = '';
+  window.ocTurnstileDone = function (t) { window.OC_TURNSTILE_TOKEN = t || ''; };
+</script>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+{% endif %}
 </head>
 <body>
 <noscript><div class="nojs">OrbitCastAI needs JavaScript to load the catalogue.</div></noscript>
@@ -1175,7 +1185,15 @@ details.past[open]>summary .i{transform:rotate(180deg)}
           <div class="console-foot">
             <p id="runNote"></p>
             <div class="acts">
-                            <button class="btn btn-primary lg" id="runBtn" data-act="run"></button>
+              {% if turnstile_site_key %}
+              {# Managed widget: invisible unless Cloudflare decides this
+                 visitor needs to prove something. Only rendered when a site
+                 key is configured, so the default build carries no third
+                 party at all. #}
+              <div class="cf-turnstile" data-sitekey="{{ turnstile_site_key }}"
+                   data-callback="ocTurnstileDone" data-theme="auto" data-size="flexible"></div>
+              {% endif %}
+              <button class="btn btn-primary lg" id="runBtn" data-act="run"></button>
             </div>
           </div>
           <p class="form-err" id="runErr" role="alert" hidden></p>
@@ -1234,6 +1252,30 @@ const store={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.
 const REDUCE=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
 const narrow=q=>window.matchMedia&&matchMedia(q).matches;
 const JSONH={'Content-Type':'application/json'};
+
+/* CSRF. Every mutating request has to echo the oc_csrf cookie back in a
+   header; the server refuses it otherwise. Wrapping fetch once, here, rather
+   than touching each of the twenty-odd call sites, is the difference between
+   a rule that holds and a rule somebody forgets the next time they add a
+   button. Same-origin only - the token must never be attached to a request
+   leaving this site. */
+(function(){
+  const UNSAFE=/^(POST|PUT|PATCH|DELETE)$/i, native=window.fetch.bind(window);
+  const token=()=>{const m=document.cookie.match(/(?:^|;\s*)oc_csrf=([^;]*)/);return m?decodeURIComponent(m[1]):'';};
+  const sameOrigin=u=>!/^[a-z]+:\/\//i.test(u)||u.indexOf(location.origin+'/')===0||u===location.origin;
+  window.fetch=function(input,init){
+    const req=(input&&typeof input==='object')?input:null;
+    const method=(init&&init.method)||(req&&req.method)||'GET';
+    const url=req?req.url:String(input);
+    if(UNSAFE.test(method)&&sameOrigin(url)){
+      const h=new Headers((init&&init.headers)||(req&&req.headers)||{});
+      if(!h.has('X-CSRF-Token'))h.set('X-CSRF-Token',token());
+      init=Object.assign({},init||{},{headers:h});
+    }
+    return native(input,init);
+  };
+})();
+
 const postJSON=(url,body)=>fetch(url,{method:'POST',headers:JSONH,body:JSON.stringify(body||{})});
 
 /* ================= categories ================= */
@@ -1949,6 +1991,9 @@ async function runAnalysis(opts){
       let text='';
       if(opts.extra)text=(text?text+'\n\n':'')+'Also, answering your follow-ups:\n'+opts.extra;
       if(text)fd.append('text',text);
+      // Empty unless Turnstile is configured and has issued a token; the
+      // server treats an absent token as "not configured" and waves it on.
+      if(window.OC_TURNSTILE_TOKEN)fd.append('turnstile_token',window.OC_TURNSTILE_TOKEN);
       r=await fetch('/api/analyze',{method:'POST',body:fd});
     }
     let data=await r.json().catch(()=>({}));
@@ -2318,7 +2363,8 @@ async function onEmailSigninSubmit(ev){
   }
   btn.disabled=true;const orig=btn.textContent;btn.textContent='Sending…';
   try{
-    await fetch('/api/auth/email/request',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email})});
+    await fetch('/api/auth/email/request',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({email,turnstile_token:window.OC_TURNSTILE_TOKEN||''})});
     /* Response is always 200; we always show the same confirmation.
        Not confirming whether the address has an account is the point. */
     $('#modalBox').innerHTML=

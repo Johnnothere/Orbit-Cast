@@ -38,6 +38,7 @@ logging.basicConfig(level=logging.INFO, handlers=[_out, _err], force=True)
 from flask import Flask, jsonify, make_response, redirect, render_template, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 from markupsafe import escape
+import security
 from security import init_security
 from perf import init_perf
 import ai_engine
@@ -711,7 +712,11 @@ def api_health():
 @app.route("/")
 @limiter.exempt     # the page itself; gzipped and ETagged by perf.py
 def dashboard():
-    resp = make_response(render_template("index.html"))
+    # Empty site key means the page renders no widget and sends no token,
+    # which is exactly what verify_turnstile() waves through. Turning bot
+    # protection on is setting two env vars, not a deploy.
+    resp = make_response(render_template(
+        "index.html", turnstile_site_key=security.TURNSTILE_SITE_KEY))
     ensure_oc_uid(resp)
     return resp
 
@@ -892,6 +897,14 @@ def api_auth_email_request():
     if not _valid_email(email):
         return jsonify({"ok": True}), 200
 
+    # fail_open=True here, unlike /api/analyze: a Cloudflare outage must not
+    # lock everyone out of sign-in, and the per-IP and per-address caps above
+    # still bound how much mail anyone can cause. Answer shape is unchanged
+    # either way - this endpoint never reveals whether an address exists.
+    if not security.verify_turnstile(data.get("turnstile_token") or "",
+                                     auth.client_ip(), fail_open=True):
+        return jsonify({"ok": True}), 200
+
     # Per-address cap: at most 3 outstanding tokens in a 15-minute window.
     # A fourth request yields a successful HTTP response and no email sent;
     # the earlier link still works.
@@ -909,6 +922,12 @@ def api_auth_email_request():
         return jsonify({"ok": True}), 200
 
     verify_url = f"{mailer.PUBLIC_URL}/auth/email/verify?token={plain}"
+    # Nothing attacker-controlled reaches this today - PUBLIC_URL is an env
+    # var with a hardcoded default (never the request Host, which is what
+    # would make this injectable) and the token is secrets.token_urlsafe.
+    # Escaped anyway because it is interpolated into an HTML attribute below,
+    # and that should stay safe if PUBLIC_URL is ever misconfigured.
+    verify_url_html = escape(verify_url)
     subject = "Your OrbitCast sign-in link"
     text = (
         "Here's the link you asked for.\n\n"
@@ -925,12 +944,12 @@ def api_auth_email_request():
         "<h2 style=\"margin:0 0 12px;font-size:20px\">Sign in to OrbitCast</h2>"
         "<p style=\"margin:0 0 20px;color:#444\">Click the button to continue. "
         "It works for 15 minutes and only once.</p>"
-        f"<p style=\"margin:0 0 20px\"><a href=\"{verify_url}\" style=\"display:inline-block;"
+        f"<p style=\"margin:0 0 20px\"><a href=\"{verify_url_html}\" style=\"display:inline-block;"
         "padding:12px 22px;background:#0a66ff;color:#fff;text-decoration:none;"
         "border-radius:8px;font-weight:600\">Sign me in</a></p>"
         "<p style=\"margin:0 0 8px;color:#777;font-size:13px\">Or paste this into your browser:</p>"
         f"<p style=\"margin:0 0 24px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;"
-        f"word-break:break-all;color:#555;font-size:13px\">{verify_url}</p>"
+        f"word-break:break-all;color:#555;font-size:13px\">{verify_url_html}</p>"
         "<p style=\"margin:0;color:#999;font-size:12px\">If you didn't ask for this, "
         "you can safely ignore this email.</p></div></body></html>"
     )
@@ -1887,6 +1906,17 @@ def _run_reuse_job(oc_uid, last):
                       error_message="OrbitCast has hit today's analysis limit. Please try again tomorrow.")
 def api_analyze():
     anon = not _signed_in()
+    # Anonymous runs are the ones worth scripting: they cost a model call and
+    # need no account. Signed-in people are already identified and capped per
+    # account, so the challenge only stands in front of the anonymous path.
+    # fail_open=False on purpose: if Cloudflare is down, stop spending.
+    if anon and not security.verify_turnstile(
+            (request.form.get("turnstile_token")
+             or (request.get_json(silent=True) or {}).get("turnstile_token") or ""),
+            auth.client_ip(), fail_open=False):
+        return jsonify({"error": "We couldn't verify that request came from a browser. "
+                                 "Reload the page and try again.",
+                        "reason": "bot_check_failed"}), 403
     if anon and request.files.get("file"):
         # Files stay behind sign-in: the identity lock and the stored-CV
         # promises only mean something on an account.
