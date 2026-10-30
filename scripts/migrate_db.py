@@ -10,6 +10,11 @@ cache tables.
     OLD_DATABASE_URL='postgresql://...' NEW_DATABASE_URL='postgresql://...' \
         python3 scripts/migrate_db.py            # copy
     ... python3 scripts/migrate_db.py --verify   # row counts on both sides only
+    ... python3 scripts/migrate_db.py --overwrite  # source rows replace same-key target rows
+
+Identity columns (GENERATED ALWAYS) keep their source ids (OVERRIDING
+SYSTEM VALUE), so foreign keys stay valid. json/jsonb and array columns
+round-trip intact.
 
 Safe to re-run: rows are inserted with ON CONFLICT DO NOTHING, so an
 interrupted copy picks up where it left off and nothing already in the
@@ -27,12 +32,15 @@ import psycopg2.extras
 from psycopg2.extras import Json
 
 BATCH = 500
+OVERWRITE = "--overwrite" in sys.argv
 
 
-def _adapt(row):
-    """psycopg2 decodes json/jsonb to dict/list on read; wrap those so they
-    are written back as json rather than rejected ("can't adapt type")."""
-    return tuple(Json(v) if isinstance(v, (dict, list)) else v for v in row)
+def _adapt(row, json_cols):
+    """psycopg2 decodes json/jsonb to dict/list on read; wrap those columns
+    so they are written back as json rather than rejected ("can't adapt
+    type"). Only json columns: a text[] column also reads as a list and
+    must stay one."""
+    return tuple(Json(v) if (j and v is not None) else v for v, j in zip(row, json_cols))
 
 
 def connect(url):
@@ -76,6 +84,21 @@ def columns(cur, table):
     return [r[0] for r in cur.fetchall()]
 
 
+def column_types(cur, table):
+    cur.execute("""select column_name, data_type from information_schema.columns
+                    where table_schema='public' and table_name=%s""", (table,))
+    return dict(cur.fetchall())
+
+
+def primary_key(conn, table):
+    with conn.cursor() as cur:
+        cur.execute("""select a.attname from pg_index i
+                        join pg_attribute a on a.attrelid = i.indrelid and a.attnum = any(i.indkey)
+                       where i.indrelid = %s::regclass and i.indisprimary order by a.attnum""",
+                    (f'public."{table}"',))
+        return [r[0] for r in cur.fetchall()]
+
+
 def count(cur, table):
     cur.execute(f'select count(*) from "{table}"')
     return cur.fetchone()[0]
@@ -85,21 +108,34 @@ def copy_table(src, dst, table):
     with src.cursor(name=f"copy_{table}") as rcur, dst.cursor() as wcur:
         with src.cursor() as c:
             cols = columns(c, table)
+            types = column_types(c, table)
         with dst.cursor() as c:
             dst_cols = set(columns(c, table))
         cols = [c for c in cols if c in dst_cols]
         if not cols:
             return 0, "no shared columns"
+        json_cols = [types.get(c) in ("json", "jsonb") for c in cols]
         col_list = ", ".join(f'"{c}"' for c in cols)
         rcur.itersize = BATCH
         rcur.execute(f'select {col_list} from "{table}"')
-        sql = f'insert into "{table}" ({col_list}) values %s on conflict do nothing'
+        # With --overwrite, a row that already exists in the target (same
+        # primary key) is replaced by the source's version, so a stale
+        # partial copy in the target cannot shadow current data. Without it,
+        # existing target rows are left alone.
+        pk = primary_key(dst, table)
+        if OVERWRITE and pk and all(k in cols for k in pk):
+            setters = ", ".join(f'"{c}" = excluded."{c}"' for c in cols if c not in pk)
+            conflict = ", ".join(f'"{k}"' for k in pk)
+            action = f"do update set {setters}" if setters else "do nothing"
+            sql = f'insert into "{table}" ({col_list}) overriding system value values %s on conflict ({conflict}) {action}'
+        else:
+            sql = f'insert into "{table}" ({col_list}) overriding system value values %s on conflict do nothing'
         n = 0
         while True:
             rows = rcur.fetchmany(BATCH)
             if not rows:
                 break
-            psycopg2.extras.execute_values(wcur, sql, [_adapt(r) for r in rows], page_size=BATCH)
+            psycopg2.extras.execute_values(wcur, sql, [_adapt(r, json_cols) for r in rows], page_size=BATCH)
             n += len(rows)
         dst.commit()
         return n, None
