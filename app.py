@@ -725,6 +725,59 @@ def privacy_policy():
     return render_template("privacy.html")
 
 
+# ─────────────────────────────────────────────
+# ABOUT
+# ─────────────────────────────────────────────
+# Fill these in and the "Who made it" section appears on /about. Leave either
+# field empty and the whole section is omitted rather than rendered with
+# placeholder text - a half-written bio shipping to production is the failure
+# mode worth designing out, not a missing one.
+ABOUT_AUTHOR = {
+    "name": "",        # e.g. "Tej Gohil"
+    "bio": "",         # two or three sentences, first person
+    "linkedin": "",    # full https://www.linkedin.com/in/... URL
+}
+
+# Drop a matching file into static/about/ and it replaces the placeholder
+# frame. See static/about/README.md for the size budget.
+ABOUT_PHOTOS = [
+    ("desk.jpg", "Where most of it was written"),
+    ("early.jpg", "An early version"),
+    ("london.jpg", "The city the catalogue covers"),
+]
+_ABOUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "about")
+
+
+@app.route("/about")
+@limiter.limit("240 per hour")
+def about_page():
+    """The story, and who wrote it. A real route rather than a section of the
+    single-page app: this is the page someone links to from a CV or a post,
+    so it needs its own URL, its own title and its own description."""
+    photos = []
+    for filename, caption in ABOUT_PHOTOS:
+        # Checked on disk so a file that has not been added yet renders as a
+        # sized placeholder instead of a broken image.
+        exists = os.path.isfile(os.path.join(_ABOUT_DIR, filename))
+        photos.append({"file": filename, "caption": caption,
+                       "src": f"/static/about/{filename}" if exists else None})
+    # Named adapters only. scraper.SOURCES also holds per-category routing
+    # buckets - "Curated — Cyber & Infosec", "Luma — Hackathons" and so on,
+    # registered in a loop over the category list - which are plumbing, not
+    # sources. Counting all 85 would be true of the registry and misleading
+    # to a reader, who hears "sources" and pictures organisations.
+    named = [s for s in scraper.SOURCES if " — " not in s["name"]]
+    return render_template("about.html", photos=photos, author=ABOUT_AUTHOR,
+                           commits=ABOUT_COMMITS, sources=len(named),
+                           categories=len({s["category"] for s in scraper.SOURCES}))
+
+
+# Counted at build time, not at request time: `git` is not installed in the
+# Railway image and shelling out per request would be absurd anyway. Update
+# it when it drifts enough to matter, or drop the stat.
+ABOUT_COMMITS = 119
+
+
 @app.errorhandler(404)
 def not_found(_e):
     if request.path.startswith("/api/"):
@@ -1059,13 +1112,12 @@ def api_me():
     # has already re-issued as this browser's cookie - the same stored CV on
     # every device the person signs in on, without a second id to carry.)
     aid, uid = account["id"], account["oc_uid"]
-    prefs, latest, cv, extras, meta, pc, locked_to = db.parallel(
+    prefs, latest, cv, extras, meta, locked_to = db.parallel(
         lambda: db.get_digest_prefs(aid),
         lambda: db.get_latest_analysis(uid),
         lambda: db.get_cv_status(uid),
         lambda: db.get_digest_extras(aid),
         lambda: db.get_account_meta(aid),
-        lambda: db.get_postcode(aid),
         lambda: db.get_cv_identity(aid),
     )
     prefs, cv, extras, meta = prefs or {}, cv or {}, extras or {}, meta or {}
@@ -1078,25 +1130,9 @@ def api_me():
         "google_enabled": auth.google_enabled(),
         "email_signin_enabled": auth.email_signin_enabled(),
         "email": account["email"],
-        # Home postcode: just the display string + lat/lng. The lat/lng
-        # travels to the browser so OC_USER_LOC can light up on load
-        # without a geolocation prompt.
-        "home": ({"postcode": pc["postcode"], "lat": pc["lat"], "lng": pc["lng"],
-                  "set_at": pc["set_at"]} if pc else None),
         "name": account.get("name"),
         "avatar_url": account.get("avatar_url"),
-        "member_since": account.get("created_at"),
-        # Membership-card number: stable, human-readable, derived - nothing new
-        # stored. Account ids are sequential, which here is a feature: early
-        # members get low numbers.
-        "member_no": f"OC-{int(account['id']):04d}",
-        # How this person gets in, said plainly: there is no password to
-        # forget, and knowing that is the answer to "how do I reset it".
-        "signin_method": "google" if meta.get("google_linked") else "email_link",
         "has_profile": has_profile,
-        # Presence only. The feed URL is shown once, at create/rotate - the
-        # token is stored hashed and cannot be recovered.
-        "calendar_feed": {"active": bool(meta.get("cal_feed_active"))} if meta.get("cal_feed_active") else None,
         "cv": {
             # Text-only submissions have no file, so "on file" must mean
             # either - reporting only the upload would tell someone who typed
@@ -1120,8 +1156,9 @@ def api_me():
             "paused": prefs.get("paused", True),
             "next_send_at": prefs["next_send_at"].isoformat() if prefs.get("next_send_at") else None,
             "categories": extras.get("categories") or [],
+            "max_items": extras.get("max_items"),
+            "niche_text": extras.get("niche_text") or "",
             "snooze_until": snooze.isoformat() if snooze else None,
-            "recent": db.recent_digest_sends(account["id"]),
         },
     })
 
@@ -1190,54 +1227,6 @@ def _lookup_postcode(normalised: str):
             "in_london": in_london}
 
 
-@app.route("/api/me/postcode", methods=["POST", "DELETE"])
-@auth.login_required
-@limiter.limit("30 per hour;10 per minute")
-def api_me_postcode():
-    """POST {"postcode": "SW1A 1AA"} saves it after validating via
-    postcodes.io. DELETE clears it. GET isn't needed; /api/me returns
-    the active value."""
-    account = auth.current_account()
-    if not account:
-        return jsonify({"error": "Sign in first."}), 401
-    if not db.is_configured():
-        return jsonify({"error": "Accounts are not available right now."}), 503
-
-    if request.method == "DELETE":
-        ok = db.clear_postcode(account["id"])
-        if ok:
-            _audit("postcode_cleared", account)
-        return jsonify({"ok": bool(ok), "home": None}), (200 if ok else 503)
-
-    data = request.get_json(silent=True) or request.form or {}
-    normalised = _normalise_postcode(data.get("postcode") or "")
-    if not normalised:
-        return jsonify({"error": "That doesn't look like a UK postcode.",
-                        "reason": "bad_format"}), 400
-
-    result = _lookup_postcode(normalised)
-    if result is None:
-        return jsonify({"error": "We couldn't check that postcode right now. "
-                                 "Try again in a moment.",
-                        "reason": "lookup_unavailable"}), 502
-    if result.get("not_found"):
-        return jsonify({"error": "No postcode matches that.",
-                        "reason": "not_found"}), 404
-
-    saved = db.set_postcode(account["id"], result["postcode"],
-                            result["lat"], result["lng"])
-    if not saved:
-        return jsonify({"error": "Could not save that right now."}), 503
-    _audit("postcode_set", account,
-           detail={"district": result.get("district"),
-                   "in_london": bool(result.get("in_london"))})
-    return jsonify({"ok": True,
-                    "home": {"postcode": result["postcode"],
-                             "district": result.get("district"),
-                             "region":   result.get("region"),
-                             "in_london": bool(result.get("in_london"))}}), 200
-
-
 @app.route("/api/me/cv", methods=["DELETE"])
 @auth.login_required
 @limiter.limit("20 per hour")
@@ -1297,6 +1286,14 @@ def api_digest_prefs():
                   else extras.get("categories") or [])
     snooze_until = (digest.snooze_until_from(data.get("snooze_days")) if "snooze_days" in data
                     else extras.get("snooze_until"))
+    max_items = (digest.clean_max_items(data["max_items"]) if "max_items" in data
+                 else extras.get("max_items"))
+    # niche_text follows the same rule, but with a twist: None is meaningful
+    # here (it means "clear what I wrote"), so the write has to distinguish
+    # "absent from this request" from "explicitly emptied".
+    touch_niche = "niche_text" in data
+    niche_text = (digest.clean_niche(data.get("niche_text")) if touch_niche
+                  else extras.get("niche_text"))
     if clean["paused"]:
         snooze_until = None                 # off is off; a snooze under it is noise
     next_at = None if clean["paused"] else digest.next_send_for(clean, snooze_until)
@@ -1309,12 +1306,16 @@ def api_digest_prefs():
                                     clean["paused"], next_at, unsub)
     if not saved:
         return jsonify({"error": "Could not save that."}), 503
-    db.set_digest_extras(account["id"], categories, snooze_until)
+    db.set_digest_extras(account["id"], categories, snooze_until,
+                         max_items=max_items, niche_text=niche_text,
+                         touch_niche=touch_niche)
     still_snoozed = bool(snooze_until and snooze_until > datetime.now(timezone.utc))
     return jsonify({"ok": True,
                      "next_send_at": next_at.isoformat() if next_at else None,
                      "paused": clean["paused"],
                      "categories": categories,
+                     "max_items": max_items,
+                     "niche_text": niche_text,
                      "snooze_until": snooze_until.isoformat() if still_snoozed else None})
 
 
@@ -1331,12 +1332,6 @@ def _account_or_401():
         return None, (jsonify({"error": "Sign in first.", "reason": "auth_required"}), 401)
     return account, None
 
-
-def _feed_urls(token):
-    if not token:
-        return None
-    https = f"{mailer.PUBLIC_URL}/cal/{token}.ics"
-    return {"https": https, "webcal": "webcal://" + https.split("://", 1)[1]}
 
 
 def _catalog_by_id():
@@ -1508,36 +1503,6 @@ def api_my_digest_test():
     return jsonify({"ok": True, "to": account["email"]}), 202
 
 
-@app.route("/api/me/calendar-feed", methods=["POST"])
-@auth.login_required
-@limiter.limit("30 per hour")
-def api_my_calendar_feed():
-    """Creates, rotates or revokes the private calendar-feed URL.
-
-    'create' is idempotent - it returns the existing URL if there is one, so
-    opening the panel twice cannot invalidate a feed a calendar app is
-    already subscribed to. Only an explicit 'rotate' or 'revoke' does."""
-    account, err = _account_or_401()
-    if err:
-        return err
-    action = ((request.get_json(silent=True) or {}).get("action") or "create").strip()
-    active = db.get_account_meta(account["id"]).get("cal_feed_active")
-    if action == "revoke":
-        token = None
-    elif action == "rotate" or not active:
-        token = secrets.token_urlsafe(48)
-    else:
-        # Already have one. The token is stored hashed, so it cannot be shown
-        # again - the panel offers "rotate" to get a fresh URL.
-        return jsonify({"ok": True, "calendar_feed": {"active": True}})
-    if not db.set_cal_token(account["id"], token):
-        return jsonify({"error": "Calendar feeds are not available right now."}), 503
-    _audit("calendar_feed_" + ("revoked" if token is None else "issued"), account)
-    if token is None:
-        return jsonify({"ok": True, "calendar_feed": None})
-    return jsonify({"ok": True, "calendar_feed": {"active": True, **_feed_urls(token)}})
-
-
 def _ics_escape(text):
     return (str(text or "").replace("\\", "\\\\").replace(";", "\\;")
             .replace(",", "\\,").replace("\r", "").replace("\n", "\\n"))
@@ -1604,17 +1569,18 @@ def _saved_ics(saved):
 @app.route("/cal/<token>.ics")
 @limiter.limit("240 per hour")
 def calendar_feed(token):
-    """The private feed a calendar app subscribes to. No login: the token in
-    the URL is the credential. An unknown token is a plain 404, identical to
-    a revoked one, so the route cannot be used to test which tokens exist."""
-    account_id = db.account_id_by_cal_token(token) if len(token) >= 32 else None
-    if not account_id:
-        return ("Not found", 404, {"Content-Type": "text/plain; charset=utf-8"})
-    resp = make_response(_saved_ics(db.list_saved_events(account_id) or []))
-    resp.headers["Content-Type"] = "text/calendar; charset=utf-8"
-    resp.headers["Cache-Control"] = "private, max-age=900"
-    resp.headers["X-Robots-Tag"] = "noindex"
-    return resp
+    """Retired. The feed can no longer be created, but anyone who subscribed
+    while it existed still has this URL sitting in Google or Apple Calendar,
+    polling it every few hours. 410 says the resource is deliberately gone,
+    which is what a calendar client needs to hear to stop asking - a 404 reads
+    as "maybe later" and gets retried indefinitely.
+
+    Keep this for a release or two, then delete the route. Per-event .ics
+    download is still there and covers the same need one event at a time."""
+    return ("This calendar feed has been retired. You can still add individual "
+            "events to your calendar from OrbitCast.",
+            410, {"Content-Type": "text/plain; charset=utf-8",
+                  "X-Robots-Tag": "noindex"})
 
 
 @app.route("/api/me/export", methods=["GET"])
@@ -1817,21 +1783,6 @@ def _run_analysis_job(account_id, oc_uid, consent, file_bytes, filename, mimetyp
     if not events:
         return 503, {"error": "The event catalogue is still loading. Try again in a minute."}
 
-    # Location for distance + directions on each match. Two sources, in
-    # order of preference:
-    #   1. The signed-in account's saved postcode (durable, device-independent,
-    #      no in-the-moment consent needed - the person entered it themselves).
-    #   2. The latest HTML5-geolocation ping for this oc_uid, iff location
-    #      consent was granted for this browser.
-    # The analysis runs identically with no location at all.
-    user_location = None
-    if account_id:
-        pc = db.get_postcode(account_id)
-        if pc:
-            user_location = {"lat": pc["lat"], "lng": pc["lng"]}
-    if user_location is None and oc_uid and db.get_location_consent(oc_uid):
-        user_location = db.get_latest_location(oc_uid)
-
     # One account, one person: the gate runs inside analyze_upload, after the
     # cheap classification pass and before any scoring spend (see identity.py).
     # Anonymous free looks have no account to lock and can't upload files, so
@@ -1840,8 +1791,7 @@ def _run_analysis_job(account_id, oc_uid, consent, file_bytes, filename, mimetyp
     if account_id is not None:
         gate = identity.make_gate(account_id, db.get_cv_identity(account_id),
                                   db.set_cv_identity_if_absent)
-    result = ai_engine.analyze_upload(file_text, events, user_location=user_location,
-                                      identity_gate=gate)
+    result = ai_engine.analyze_upload(file_text, events, identity_gate=gate)
     if result.get("identity_refused"):
         _audit("analysis_identity_refused", {"id": account_id},
                detail={"file": bool(file_bytes)})
@@ -1870,9 +1820,8 @@ def _run_reuse_job(oc_uid, last):
     events = load_events_cache().get("events", [])
     if not events:
         return 503, {"error": "The event catalogue is still loading. Try again in a minute."}
-    user_location = db.get_latest_location(oc_uid) if db.get_location_consent(oc_uid) else None
     scored = ai_engine.score_and_enrich(last["profile"], last["evidence_level"], last["field"],
-                                         events, user_location=user_location)
+                                         events)
     result = {"is_cv": True, "evidence_level": last["evidence_level"], "field": last["field"],
               "profile": last["profile"], "clarifying_questions": [], "analysis_failed": False,
               "message_if_not_cv": "", **scored}
@@ -2090,47 +2039,6 @@ def api_consent():
                     utm_medium=_cap(data.get("utm_medium"), 100),
                     utm_campaign=_cap(data.get("utm_campaign"), 100))
     return resp
-
-@app.route("/api/location", methods=["GET", "POST"])
-@limiter.limit("120 per hour")
-def api_location():
-    if request.method == "GET":
-        oc_uid, _acct = _effective_oc_uid()
-        if request.cookies.get(auth.SESSION_COOKIE) and not _acct:
-            # A session cookie was presented but is invalid: do not fall back
-            # to the anonymous id - that is how a stale cookie read a location.
-            return jsonify({"decision": None, "lat": None, "lng": None})
-        # On a returning visit where location was already granted, hand back
-        # the last known fix so the page doesn't have to re-prompt the OS
-        # geolocation dialog on every load just to draw the map/distance.
-        # Both reads at once; the fix is only used when consent is on record.
-        decision, loc = (db.parallel(lambda: db.get_location_consent(oc_uid),
-                                     lambda: db.get_latest_location(oc_uid))
-                         if oc_uid else (None, None))
-        loc = loc if decision else None
-        return jsonify({"decision": decision, "lat": loc["lat"] if loc else None,
-                         "lng": loc["lng"] if loc else None})
-
-    data = request.get_json(silent=True) or {}
-    accepted = bool(data.get("accepted"))
-    resp = jsonify({"ok": True, "decision": accepted})
-    oc_uid, _acct = _effective_oc_uid()
-    oc_uid = oc_uid or ensure_oc_uid(resp)
-    # location_consented lives on the consent row, so that row must exist
-    # first - it does by the time this can fire, since the location prompt
-    # only ever appears after the general consent banner has been answered.
-    if db.get_consent(oc_uid) is None:
-        db.set_consent(oc_uid, False)
-    db.set_location_consent(oc_uid, accepted)
-    if accepted:
-        lat, lng = data.get("lat"), data.get("lng")
-        if (isinstance(lat, (int, float)) and isinstance(lng, (int, float))
-                and not isinstance(lat, bool) and -90 <= lat <= 90 and -180 <= lng <= 180):
-            # Rounded to ~100 m: enough for distance and directions, not a
-            # doorstep.
-            db.save_user_location(oc_uid, round(float(lat), 3), round(float(lng), 3), data.get("accuracy"))
-    return resp
-
 
 @app.route("/api/track", methods=["POST"])
 @limiter.limit("1200 per hour")

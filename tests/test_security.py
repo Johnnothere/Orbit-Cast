@@ -111,6 +111,23 @@ class HeaderTests(unittest.TestCase):
         self.assertEqual(h["X-Content-Type-Options"], "nosniff")
         self.assertIn("frame-ancestors 'none'", h["Content-Security-Policy"])
 
+    def test_leaflet_cdn_is_no_longer_allowed(self):
+        """unpkg.com was only ever there for the map. The map is gone, so no
+        third-party script origin should remain except Turnstile."""
+        csp = self.c.get("/api/thing").headers["Content-Security-Policy"]
+        self.assertNotIn("unpkg.com", csp)
+
+    def test_images_are_not_blanket_https(self):
+        """img-src was 'https:' for OpenStreetMap tiles; with no map the only
+        remote image is the Google avatar."""
+        csp = self.c.get("/api/thing").headers["Content-Security-Policy"]
+        self.assertNotIn("img-src 'self' data: https:;", csp)
+        self.assertIn("googleusercontent.com", csp)
+
+    def test_geolocation_is_denied_again(self):
+        pp = self.c.get("/api/thing").headers["Permissions-Policy"]
+        self.assertIn("geolocation=()", pp)
+
 
 class ErrorMessageTests(unittest.TestCase):
     def test_413_quotes_the_configured_limit(self):

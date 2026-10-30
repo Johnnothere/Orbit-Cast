@@ -1,0 +1,58 @@
+{#
+  Shared shell for every OrbitCast email.
+
+  Table-based and inline-styled on purpose: Outlook's rendering engine has no
+  flexbox or grid and strips most of a <style> block, so a layout that reads
+  as dated in a browser is the one that survives in an inbox. The only
+  concession to modern clients is the media query below, which they honour
+  and Outlook ignores harmlessly.
+
+  Autoescaping is on. Every value interpolated here arrives from a scraped
+  page or from something the subscriber typed, and neither is trusted.
+#}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>{{ subject }}</title>
+<style>
+  /* Clients that support media queries get a tighter phone layout; the rest
+     fall back to the inline styles, which are already readable at 320px. */
+  @media (max-width:600px){
+    .oc-card{padding:20px !important}
+    .oc-title{font-size:19px !important}
+  }
+</style>
+</head>
+<body style="margin:0;padding:24px 12px;background:{{ c.bg }};
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+{# Preheader: the grey line most clients show next to the subject. Hidden in
+   the body itself, so it must not repeat the subject verbatim. #}
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">{{ preheader }}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+<tr><td align="center">
+<table role="presentation" width="100%" style="max-width:560px;" cellpadding="0" cellspacing="0" border="0">
+
+  <tr><td style="padding:0 0 20px 0;">
+    <a href="{{ settings_url }}" style="text-decoration:none;color:{{ c.text }};
+      font-size:15px;font-weight:700;letter-spacing:.14em;">ORBITCAST</a>
+  </td></tr>
+
+  <tr><td class="oc-card" style="background:{{ c.card }};border-radius:14px;padding:28px;
+    color:{{ c.text }};font-size:15px;line-height:1.6;">
+    {% block body %}{% endblock %}
+  </td></tr>
+
+  <tr><td style="padding:18px 4px;color:{{ c.muted }};font-size:12px;line-height:1.6;">
+    <a href="{{ settings_url }}" style="color:{{ c.muted }};">Change how often you get this</a>
+    &nbsp;·&nbsp;
+    <a href="{{ unsub_url }}" style="color:{{ c.muted }};">Unsubscribe</a>
+    {% block footnote %}{% endblock %}
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>

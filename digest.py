@@ -27,6 +27,7 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 try:
@@ -37,6 +38,14 @@ except ImportError:                                   # pragma: no cover
 import auth
 import db
 import mailer
+
+# Only for the usage counters in the cost log. Imported defensively because
+# digest.py is deliberately testable without an Anthropic key - score_fn is
+# injected for exactly that reason, and this must not undo it.
+try:
+    import ai_engine
+except Exception:          # pragma: no cover
+    ai_engine = None
 
 log = logging.getLogger("orbitcast.digest")
 
@@ -144,6 +153,42 @@ def validate_prefs(data: dict):
             "paused": bool(data.get("paused", False))}, None
 
 
+MAX_ITEMS_DEFAULT = 5
+MAX_ITEMS_CEILING = 10
+NICHE_MAX_CHARS = 400
+
+
+def clean_max_items(raw):
+    """None means "no preference, use the engine's own cap". Anything else is
+    clamped rather than rejected: a bad number here should not fail a save
+    that also carried a perfectly good frequency change."""
+    if raw in (None, "", "default"):
+        return None
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return max(1, min(MAX_ITEMS_CEILING, n))
+
+
+def clean_niche(raw):
+    """Free text, treated as hostile.
+
+    This string is the only user-authored text that reaches the scoring
+    prompt, so it gets three things: a hard length cap, control characters
+    stripped, and the delimiter that fences it in the prompt removed from the
+    body so it cannot be closed early and followed by instructions. The
+    prompt-side defence lives in ai_engine; this is the input-side half, and
+    neither is sufficient alone."""
+    if not isinstance(raw, str):
+        return None
+    txt = raw.replace("\x00", " ")
+    txt = "".join(ch for ch in txt if ch == "\n" or ch >= " ")
+    txt = txt.replace("SUBSCRIBER_INTEREST", " ").replace("<<<", " ").replace(">>>", " ")
+    txt = " ".join(txt.split())
+    return txt[:NICHE_MAX_CHARS] or None
+
+
 def clean_categories(raw):
     """A browser-supplied category list reduced to the ones that exist. All
     of them selected is stored as none selected: both mean 'everything', and
@@ -180,25 +225,77 @@ def next_send_for(prefs: dict, snooze_until=None) -> datetime:
 # ─────────────────────────────────────────────
 
 def build_digest(account, prefs, catalog_events, score_fn):
-    """Returns (recommendations, event_ids_considered).
+    """Returns (recommendations, event_ids_considered, trimmed).
 
     `score_fn` is injected rather than imported so this can be tested without
     an Anthropic key, and so app.py stays the only place that knows how the
     catalog is loaded."""
     stored = db.get_latest_analysis(account["oc_uid"])
     if not stored:
-        return None, []                      # no profile yet - nothing to match against
+        return None, [], False               # no profile yet - nothing to match against
 
     already = db.recently_sent_event_ids(account["id"], days=45)
     fresh = [e for e in (catalog_events or []) if e.get("id") not in already]
     fresh = _apply_account_filters(account["id"], fresh)
     if not fresh:
-        return [], []
+        return [], [], False
 
-    scored = score_fn(stored["profile"], stored.get("evidence_level") or "rich",
-                      stored.get("field") or "", fresh)
-    recs = (scored or {}).get("recommendations") or []
-    return recs, [r.get("event_id") for r in recs if r.get("event_id")]
+    extras = db.get_digest_extras(account["id"]) or {}
+    with _usage_logged(account["id"], len(fresh)):
+        scored = score_fn(stored["profile"], stored.get("evidence_level") or "rich",
+                          stored.get("field") or "", fresh, extras.get("niche_text"))
+    recs, trimmed = cap_recs((scored or {}).get("recommendations") or [],
+                             extras.get("max_items"))
+    return recs, [r.get("event_id") for r in recs if r.get("event_id")], trimmed
+
+
+@contextmanager
+def _usage_logged(account_id, n_events):
+    """One line per send saying what it cost.
+
+    Every digest runs a full scoring pass, so this is the largest recurring
+    item in the AI bill and it scales linearly with subscribers. The shared
+    catalog prefix is cached, which is the only reason that is affordable -
+    so cache_read should dwarf input here. When it does not, something has
+    pushed per-person text in front of the cached block and the cost has
+    quietly multiplied for everyone. That is the regression this line is
+    here to make visible within a day rather than at the end of the month."""
+    before = dict(ai_engine.USAGE) if ai_engine else {}
+    t0 = time.time()
+    try:
+        yield
+    finally:
+        if ai_engine:
+            d = {k: ai_engine.USAGE.get(k, 0) - before.get(k, 0)
+                 for k in ("calls", "input", "cache_read", "cache_write", "output")}
+            log.info("digest scoring account=%s events=%d %.1fs "
+                     "calls=%d in=%d cached=%d out=%d",
+                     account_id, n_events, time.time() - t0,
+                     d["calls"], d["input"], d["cache_read"], d["output"])
+
+
+def cap_recs(recs, max_items):
+    """(capped, trimmed). A ceiling applied AFTER scoring, never a target
+    handed to the model.
+
+    Asking for "five" is how you get a padded five - the scorer would reach
+    for the number instead of the bar, which is exactly the behaviour the
+    engine refuses everywhere else. Scoring first and then trimming means a
+    quiet week still produces a short list, or none at all. It saves nothing:
+    the model call is the same size either way.
+
+    `trimmed` says whether anything was actually removed, which is not the
+    same as "a cap was set". The email tells the reader when its list was
+    shortened, and saying so when four events cleared the bar and the cap was
+    four would be claiming a cut that never happened."""
+    n = clean_max_items(max_items)
+    if not n or len(recs) <= n:
+        return recs, False
+    return recs[:n], True
+
+
+def _cap(recs, max_items):
+    return cap_recs(recs, max_items)[0]
 
 
 def _apply_account_filters(account_id, events):
@@ -229,15 +326,22 @@ def send_preview(account, prefs, catalog_events, score_fn) -> str:
     if not stored:
         return "no_profile"
     events = _apply_account_filters(account["id"], list(catalog_events or []))
-    recs = []
+    # Read once, outside the branch: the send calls below reference it even
+    # when there was nothing to score.
+    extras = db.get_digest_extras(account["id"]) or {}
+    recs, trimmed = [], False
     if events:
         scored = score_fn(stored["profile"], stored.get("evidence_level") or "rich",
-                          stored.get("field") or "", events)
-        recs = (scored or {}).get("recommendations") or []
+                          stored.get("field") or "", events, extras.get("niche_text"))
+        recs, trimmed = cap_recs((scored or {}).get("recommendations") or [], extras.get("max_items"))
     if recs:
-        ok = mailer.send_digest(account["email"], recs, unsub, settings)
+        ok = mailer.send_digest(account["email"], recs, unsub, settings,
+                                frequency=(prefs or {}).get("frequency"),
+                                trimmed=trimmed,
+                                max_items=clean_max_items(extras.get("max_items")))
     else:
-        ok = mailer.send_empty_digest(account["email"], unsub, settings)
+        ok = mailer.send_empty_digest(account["email"], unsub, settings,
+                                      frequency=(prefs or {}).get("frequency"))
     return ("sent" if recs else "sent_empty") if ok else "send_failed"
 
 
@@ -254,7 +358,7 @@ def send_one(account, prefs, catalog_events, score_fn) -> str:
     settings = f"{mailer.PUBLIC_URL}/?settings=alerts"
 
     try:
-        recs, ids = build_digest(account, prefs, catalog_events, score_fn)
+        recs, ids, trimmed = build_digest(account, prefs, catalog_events, score_fn)
     except Exception as exc:
         log.warning("digest build failed for account %s: %s", account["id"], exc)
         db.finish_digest_send(account["id"], key, "error", [], 0)
@@ -271,7 +375,8 @@ def send_one(account, prefs, catalog_events, score_fn) -> str:
                            < timedelta(days=EMPTY_DIGEST_COOLDOWN_DAYS)):
             db.finish_digest_send(account["id"], key, "skipped_empty", [], 0)
             return "skipped_empty"
-        ok = mailer.send_empty_digest(account["email"], unsub, settings)
+        ok = mailer.send_empty_digest(account["email"], unsub, settings,
+                                      frequency=(prefs or {}).get("frequency"))
         db.finish_digest_send(account["id"], key, "sent_empty" if ok else "send_failed", [], 0)
         return "sent_empty" if ok else "send_failed"
 
@@ -281,7 +386,10 @@ def send_one(account, prefs, catalog_events, score_fn) -> str:
     # permanently - the digest that never arrived would also be the reason they
     # never hear about those events again. On failure the ids stay unwritten,
     # so the same events are back in the running at the next scheduled send.
-    ok = mailer.send_digest(account["email"], recs, unsub, settings)
+    ok = mailer.send_digest(account["email"], recs, unsub, settings,
+                            frequency=(prefs or {}).get("frequency"),
+                            trimmed=trimmed,
+                            max_items=clean_max_items((db.get_digest_extras(account["id"]) or {}).get("max_items")))
     if not ok:
         log.warning("digest email was not accepted for account %s", account["id"])
         db.finish_digest_send(account["id"], key, "send_failed", [], 0)

@@ -217,14 +217,11 @@ def init_security(app):
         # Control referrer information
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         # Permissions policy — lock down browser features.
-        # geolocation=(self): the opt-in location feature (map + distance
-        # to events) needs navigator.geolocation from this origin. It was
-        # geolocation=() before, which blocks the API at the browser level
-        # regardless of any in-page consent UI - that had to change first,
-        # or the location consent banner would prompt for something the
-        # browser silently refuses to ever grant.
+        # geolocation=() again: the distance/map feature it was opened for
+        # has been removed, so nothing in the app asks for location and the
+        # browser should refuse it outright.
         response.headers["Permissions-Policy"] = (
-            "geolocation=(self), camera=(), microphone=(), payment=()"
+            "geolocation=(), camera=(), microphone=(), payment=()"
         )
         # Content Security Policy
         # 'unsafe-inline' is needed for the inline <script> and <style> blocks.
@@ -243,11 +240,19 @@ def init_security(app):
             # Listed unconditionally even though the widget only renders when
             # TURNSTILE_SITE_KEY is set - a policy that varies by config is a
             # policy nobody can test.
-            "script-src 'self' 'unsafe-inline' https://unpkg.com "
-            "https://challenges.cloudflare.com; "
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "
+            #
+            # unpkg.com is gone from script-src and style-src: it was there
+            # only for Leaflet, and the map it drew went with the distance
+            # feature. One fewer origin allowed to run script on this page.
+            "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src https://fonts.gstatic.com; "
-            "img-src 'self' data: https:; "
+            # Was a blanket 'https:' so OpenStreetMap could serve map tiles.
+            # With no map, the only remote image left is the Google account
+            # avatar, which arrives in the OIDC `picture` claim and is served
+            # from lh3/lh4/lh5/lh6.googleusercontent.com depending on the
+            # account - hence the wildcard rather than one host.
+            "img-src 'self' data: https://*.googleusercontent.com; "
             "connect-src 'self'; "
             "frame-src https://challenges.cloudflare.com; "
             "base-uri 'none'; "

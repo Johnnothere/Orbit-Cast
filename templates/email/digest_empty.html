@@ -1,0 +1,18 @@
+{% extends "email/base.html" %}
+
+{#
+  The honest empty email. It exists on purpose: the scorer drops anything
+  under 65%, so some periods genuinely have nothing, and filling the gap with
+  weak matches is the one thing that would teach people to stop opening these.
+#}
+
+{% block body %}
+  <p class="oc-title" style="margin:0 0 12px 0;font-size:17px;font-weight:600;">Nothing this time</p>
+  <p style="margin:0 0 12px 0;">
+    No new event scored high enough against your profile {{ period_phrase }} to be worth
+    your evening. Rather than pad the list, here is an empty one.
+  </p>
+  <p style="margin:0;color:{{ c.muted }};font-size:13px;">
+    You will hear from us again as soon as something fits.
+  </p>
+{% endblock %}

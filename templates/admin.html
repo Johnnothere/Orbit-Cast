@@ -9,9 +9,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
-<!-- Leaflet is NOT loaded here. It is ~150KB for one map in one view, behind
-     a gate most page views never pass. ensureLeaflet() injects the CSS and JS
-     (same SRI hashes) the first time a map is actually about to render. -->
 <style>
 /* ============================================================================
    ORBITCAST ADMIN — DESIGN SYSTEM
@@ -395,7 +392,6 @@ dialog.sheet::backdrop{background:rgba(6,8,20,.55);backdrop-filter:blur(2px);}
 .fit-pill{font-family:var(--fm);font-weight:600;font-size:.68rem;color:var(--ok);
   background:var(--ok-soft);border-radius:var(--rp);padding:2px var(--s2);flex-shrink:0;}
 .fit-pill.mid{color:var(--warn);background:var(--warn-soft);}
-.loc-map{height:160px;border-radius:var(--r2);overflow:hidden;margin-top:var(--s2);border:1px solid var(--border);}
 
 /* audit log */
 .audit-row{display:grid;grid-template-columns:150px 1fr auto;gap:var(--s3);align-items:baseline;
@@ -450,7 +446,6 @@ dialog.sheet::backdrop{background:rgba(6,8,20,.55);backdrop-filter:blur(2px);}
 .hcell{aspect-ratio:1;border-radius:3px;background:var(--border);}
 .hstrip-ax{display:grid;grid-template-columns:repeat(24,1fr);gap:2px;margin-top:4px;
   font-family:var(--fm);font-size:7px;color:var(--t3);text-align:center;}
-.an-map{height:260px;border-radius:var(--r2);overflow:hidden;border:1px solid var(--border);margin-top:10px;}
 .range-row{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap;margin-top:10px;}
 .range-row button{font-family:var(--fm);font-size:.7rem;padding:0 var(--s3);min-height:32px;
   border-radius:var(--r2);border:1px solid var(--border2);background:var(--surface);color:var(--t2);cursor:pointer;}
@@ -993,17 +988,12 @@ details.group[open] .caret{transform:rotate(90deg);}
       </div></div>
     </details>
 
-    <details class="group" id="an-map-group">
-      <summary>Uploads and location<span class="caret">&#9656;</span></summary>
+    <details class="group">
+      <summary>Uploads<span class="caret">&#9656;</span></summary>
       <div class="group-body">
         <div class="chart-grid">
           <div class="chart-box"><h3>Files received</h3><div id="an-files"></div></div>
-          <div class="chart-box"><h3>Location permission</h3><div id="an-locconsent"></div></div>
         </div>
-        <h3 style="margin-top:16px">Where people are</h3>
-        <p class="hint">Every location point shared, at the precision the browser reported. The map
-          library is fetched only when this group is opened.</p>
-        <div class="an-map" id="an-map"></div>
       </div>
     </details>
 
@@ -1173,28 +1163,6 @@ function setStamp(id, when) {
   if (!when) { el.textContent = ""; return; }
   const mins = Math.floor((Date.now() - when) / 60000);
   el.textContent = mins < 1 ? "updated just now" : `updated ${mins} min ago`;
-}
-
-/* ---------------------------------------------------------------- leaflet -- */
-/* Loaded on demand. It was a blocking <script> in <head> on every page view:
-   ~150KB for one map in one view, behind a gate most views never pass. */
-let LEAFLET_PROMISE = null;
-function ensureLeaflet() {
-  if (typeof L !== "undefined") return Promise.resolve(true);
-  if (LEAFLET_PROMISE) return LEAFLET_PROMISE;
-  LEAFLET_PROMISE = new Promise(resolve => {
-    const css = document.createElement("link");
-    css.rel = "stylesheet"; css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-    css.integrity = "sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="; css.crossOrigin = "";
-    document.head.appendChild(css);
-    const js = document.createElement("script");
-    js.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-    js.integrity = "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="; js.crossOrigin = "";
-    js.onload = () => resolve(true);
-    js.onerror = () => resolve(false);   // offline/CDN blocked: callers degrade
-    document.head.appendChild(js);
-  });
-  return LEAFLET_PROMISE;
 }
 
 /* ============================== VIEW REGISTRY ==============================
@@ -1771,15 +1739,6 @@ function fmtBytes(n) {
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
   return (n / (1024 * 1024)).toFixed(1) + " MB";
 }
-function initAdminLocMap(el) {
-  if (typeof L === "undefined") return;  // ensureLeaflet() loads it before this is called // CDN blocked/offline - the coordinate link above still works
-  const lat = +el.dataset.lat, lng = +el.dataset.lng;
-  const map = L.map(el, { scrollWheelZoom: false, attributionControl: true }).setView([lat, lng], 12);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 18, attribution: "&copy; OpenStreetMap contributors",
-  }).addTo(map);
-  L.marker([lat, lng]).addTo(map);
-}
 
 // ANALYTICS
 let FUNNEL_DATA = [];
@@ -2023,36 +1982,6 @@ function renderAnalyticsCharts(d) {
        </div>` + hbars(d.file_types || [], "ext", "n", { note: r => "avg " + anBytes(r.avg_bytes) })
     : anEmpty("No files uploaded yet."));
 
-  const lc = d.location_consent || {};
-  set("an-locconsent", donut([
-      { k: "Granted", n: lc.granted || 0 },
-      { k: "Refused", n: lc.refused || 0 },
-      { k: "Never asked", n: lc.never_asked || 0 },
-    ].filter(r => r.n), "k", "n", "visitors"));
-
-  // ---- map ---------------------------------------------------------
-  const locs = d.locations || [];
-  const mapEl = document.getElementById("an-map");
-  if (mapEl && typeof L !== "undefined") {
-    if (!locs.length) {
-      mapEl.innerHTML = `<div class="empty" style="height:100%;display:flex;align-items:center;justify-content:center">No location points shared yet.</div>`;
-    } else {
-      // Leaflet cannot re-init onto a container it already owns, so tear
-      // the old instance down before rebuilding on a range change.
-      if (AN_MAP) { AN_MAP.remove(); AN_MAP = null; }
-      mapEl.innerHTML = "";
-      AN_MAP = L.map(mapEl, { scrollWheelZoom: false });
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-        { maxZoom: 18, attribution: "&copy; OpenStreetMap" }).addTo(AN_MAP);
-      const pts = locs.map(p => [Number(p.lat), Number(p.lng)]);
-      locs.forEach(p => L.circleMarker([Number(p.lat), Number(p.lng)], {
-          radius: 6, color: "#2563eb", weight: 2, fillColor: "#38bdf8", fillOpacity: .65,
-        }).addTo(AN_MAP).bindPopup(`${anEsc(p.day)}<br>±${anEsc(p.accuracy_m)} m`));
-      AN_MAP.fitBounds(L.latLngBounds(pts).pad(0.25));
-      if (pts.length === 1) AN_MAP.setZoom(12);
-    }
-  }
-
   // ---- tables ------------------------------------------------------
   set("an-labeled", (d.labeled || []).length
     ? donut(d.labeled, "judgment", "n", "examples")
@@ -2140,7 +2069,7 @@ async function showUserDetail(oc_uid) {
       + (sourceDetails ? `<br><span style="font-size:.72rem;">${escapeHtml(sourceDetails)}</span>` : "");
 
     let html = "";
-    if (!data.analyses.length && !data.interactions.length && !data.locations.length) {
+    if (!data.analyses.length && !data.interactions.length) {
       html = `<div class="empty">${c.consented ? "Consented, but no activity recorded yet." : "Declined consent - nothing else is stored for this ID."}</div>`;
       body.innerHTML = html;
       return;
@@ -2157,25 +2086,6 @@ async function showUserDetail(oc_uid) {
         <div class="u-stat"><b>${zeroMatch}</b><span>Zero-match runs</span></div>
         <div class="u-stat"><b>${data.interactions.length}</b><span>Event clicks</span></div>
       </div>`;
-
-    if (data.locations.length) {
-      html += `<h2 style="margin:18px 0 10px;font-size:.85rem;">Location on file (${data.locations.length})</h2>`;
-      html += data.locations.map((l, i) => {
-        const mapId = `admin-loc-map-${i}-${Math.random().toString(36).slice(2, 8)}`;
-        return `
-        <div class="tl-item" style="padding:12px 16px;">
-          <div class="tl-top">
-            <a href="https://www.google.com/maps?q=${l.lat},${l.lng}" target="_blank" rel="noopener" style="color:var(--blue);font-family:'IBM Plex Mono',monospace;font-size:.78rem;">${l.lat.toFixed(4)}, ${l.lng.toFixed(4)}</a>
-            ${l.accuracy_m ? `<span style="font-size:.72rem;color:var(--t3);">&plusmn;${Math.round(l.accuracy_m)}m</span>` : ""}
-            <span class="tl-time">${fmtDate(l.created_at)}</span>
-          </div>
-          <div class="loc-map" id="${mapId}" data-lat="${l.lat}" data-lng="${l.lng}"></div>
-        </div>
-      `;
-      }).join("");
-    } else if (c.location_consented) {
-      html += `<h2 style="margin:18px 0 10px;font-size:.85rem;">Location on file</h2><div class="empty">Granted, but no fix stored yet (e.g. the browser's own location prompt didn't complete).</div>`;
-    }
 
     if (data.analyses.length) {
       html += `<h2 style="margin:18px 0 10px;font-size:.85rem;">Analyses (${data.analyses.length}) &mdash; click to expand</h2>`;
@@ -2241,9 +2151,6 @@ async function showUserDetail(oc_uid) {
     }
 
     body.innerHTML = html;
-    if (body.querySelector(".loc-map")) {
-      ensureLeaflet().then(ok => { if (ok) body.querySelectorAll(".loc-map").forEach(initAdminLocMap); });
-    }
   } catch (e) {
     document.getElementById("u-detail-meta").textContent = "";
     body.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`;
@@ -2255,7 +2162,7 @@ async function showUserDetail(oc_uid) {
 /* ===========================================================================
    VIEWS
    =========================================================================== */
-let AN_DAYS = 30, AN_MAP = null, AN_DATA = null;
+let AN_DAYS = 30, AN_DATA = null;
 
 const fmtWhen = iso => {
   if (!iso) return "never";
@@ -2888,11 +2795,6 @@ function wireActions() {
   document.getElementById("an-filter-input").oninput = debounce(renderFunnel);
   document.getElementById("an-sort-sel").onchange = renderFunnel;
 
-  // The map library is fetched only when this group is opened for the first time.
-  const mg = document.getElementById("an-map-group");
-  if (mg) mg.addEventListener("toggle", () => {
-    if (mg.open && AN_DATA) ensureLeaflet().then(ok => { if (ok) renderAnalyticsCharts(AN_DATA); });
-  });
 
   bindBusy("scrape-btn", async () => {
     const ok = await confirmAction("Scrape now?",

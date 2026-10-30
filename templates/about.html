@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>About — OrbitCastAI</title>
+<meta name="description" content="How OrbitCast was built, and why it tells you when nothing fits.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f4f7fd;--card:#ffffff;--hairline:#e2e8f4;--text:#12142a;--muted:#65667a;--primary:#2563eb;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',sans-serif;line-height:1.7;font-size:15px;}
+main{max-width:44rem;margin:0 auto;padding:3rem 1.5rem 6rem;}
+a.back{font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:var(--primary);text-decoration:none;}
+h1{font-size:1.75rem;font-weight:600;letter-spacing:-.02em;margin:1.25rem 0 .5rem;}
+.lede{font-size:1.05rem;color:var(--muted);margin-bottom:2.5rem;}
+h2{font-size:1.05rem;font-weight:600;letter-spacing:-.01em;margin:2.25rem 0 .75rem;}
+p,li{color:color-mix(in oklab,var(--text) 88%,transparent);margin-bottom:.75rem;}
+ul{padding-left:1.25rem;margin-bottom:.75rem;}
+strong{font-weight:600;}
+a{color:var(--primary);}
+.card{background:var(--card);border:1px solid var(--hairline);border-radius:1.25rem;padding:1.5rem 1.75rem;margin:1.5rem 0;}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(8rem,1fr));gap:1rem;margin:1.5rem 0 2rem;}
+.stat b{display:block;font-family:'IBM Plex Mono',monospace;font-size:1.5rem;font-weight:600;letter-spacing:-.02em;}
+.stat span{font-size:.78rem;color:var(--muted);line-height:1.4;display:block;}
+figure{margin:1.5rem 0;}
+figure img{width:100%;height:auto;display:block;border-radius:1rem;border:1px solid var(--hairline);background:var(--card);}
+figcaption{font-size:.78rem;color:var(--muted);margin-top:.5rem;}
+/* Placeholder frame for a photo that has not been added yet. It holds the
+   same space the real image will, so adding one later does not reflow the
+   page around it. */
+.ph{aspect-ratio:3/2;border:1px dashed var(--hairline);border-radius:1rem;background:
+  repeating-linear-gradient(45deg,transparent,transparent 10px,rgba(37,99,235,.03) 10px,rgba(37,99,235,.03) 20px);
+  display:flex;align-items:center;justify-content:center;color:var(--muted);
+  font-family:'IBM Plex Mono',monospace;font-size:.72rem;letter-spacing:.06em;text-align:center;padding:1rem;}
+.note{font-size:.8rem;color:var(--muted);font-style:italic;}
+</style>
+</head>
+<body>
+<main>
+  <a class="back" href="/">&larr; Back to OrbitCastAI</a>
+  <h1>About OrbitCast</h1>
+  <p class="lede">A London event engine that reads your CV, scores every upcoming event
+    against it, and shows you only the ones that clear the bar — including, often, none.</p>
+
+  <h2>Why it says no</h2>
+  <p>Most recommendation tools are built to always return something. Ask for five results
+    and you get five, whether or not the fifth is worth your evening. That is a pleasant
+    product and a useless one: once you have been to two events that were a stretch, you
+    stop trusting the list.</p>
+  <p>OrbitCast scores fit from 0 to 100 and shows nothing below 65. It names what is thin
+    in your profile as well as what is strong, caps the list rather than padding it, and
+    when a quiet week produces no match it sends a short email saying exactly that. The
+    scoring prompt, the threshold and the self-critique pass that catches drift back
+    toward flattery are the product. Everything else is plumbing.</p>
+
+  <h2>How it was built</h2>
+  <div class="stats">
+    <div class="stat"><b>{{ commits }}</b><span>commits since June 2026</span></div>
+    <div class="stat"><b>{{ sources }}</b><span>event sources scraped</span></div>
+    <div class="stat"><b>{{ categories }}</b><span>categories covered</span></div>
+    <div class="stat"><b>65</b><span>minimum score to be shown</span></div>
+  </div>
+  <p>It started as a scraper and a spreadsheet. The hard part was never fetching pages —
+    it was deciding what counts as a real event, and then being honest about fit.</p>
+  <p>Some of what that took, in no particular order: about half the catalogue showed
+    &ldquo;time TBC&rdquo; against events whose own page stated a time, because listings
+    carry a date and a link while the time lives one click deeper — so every event without
+    one now has its page read once, deterministically, with no model involved. Several
+    organisers sit behind Cloudflare and returned 403 to every scrape, repeatedly, so
+    refused hosts are now paused and backed off rather than retried into the ground.
+    And every database query was crossing a continent: the app runs in Europe and the
+    database was in Tokyo, which is a quarter of a second per round trip against about ten
+    milliseconds from London.</p>
+  <p>None of that is visible in the product. That is roughly the point.</p>
+
+  <h2>Where</h2>
+  {% for photo in photos %}
+  <figure>
+    {% if photo.src %}
+    <img src="{{ photo.src }}" alt="{{ photo.caption }}" width="1600" height="1067" loading="lazy" decoding="async">
+    {% else %}
+    <div class="ph">PHOTO TO COME<br>{{ photo.file }}</div>
+    {% endif %}
+    <figcaption>{{ photo.caption }}</figcaption>
+  </figure>
+  {% endfor %}
+
+  {#
+    The personal section renders ONLY when both the bio and the LinkedIn URL
+    are filled in — see ABOUT_AUTHOR in app.py. That is deliberate: a
+    half-written "about me" with placeholder text is worse than no section at
+    all, and this way nothing invented can ship by accident.
+  #}
+  {% if author.bio and author.linkedin %}
+  <h2>Who made it</h2>
+  <div class="card">
+    <p>{{ author.bio }}</p>
+    <p style="margin-bottom:0;"><a href="{{ author.linkedin }}" target="_blank" rel="noopener noreferrer">{{ author.name or 'LinkedIn' }} on LinkedIn &rarr;</a></p>
+  </div>
+  {% endif %}
+
+  <p class="note">OrbitCast ranks by fit and nothing else. There are no paid placements,
+    no sponsored results, and no arrangement with any organiser listed.</p>
+
+  <p style="margin-top:2rem;"><a href="/privacy">Privacy &amp; terms</a></p>
+</main>
+</body>
+</html>

@@ -77,8 +77,10 @@ class _ApiError(Exception):
 
 class OutageBreaker(unittest.TestCase):
     def setUp(self):
+        # _outage is keyed by provider now: Anthropic and OpenAI are separate
+        # accounts that fail independently, so they get separate breakers.
         with ai_engine._outage_lock:
-            ai_engine._outage.update({"until": 0.0, "reason": None, "since": None, "count": 0})
+            ai_engine._outage.clear()
 
     def test_billing_error_opens_breaker(self):
         client = mock.Mock()
@@ -101,8 +103,10 @@ class OutageBreaker(unittest.TestCase):
 
     def test_breaker_expires(self):
         with ai_engine._outage_lock:
-            ai_engine._outage.update({"until": time.time() - 1, "reason": "x"})
+            ai_engine._outage["anthropic"] = {"until": time.time() - 1, "reason": "x",
+                                              "since": None, "count": 1}
         self.assertIsNone(ai_engine.outage())
+        self.assertIsNone(ai_engine.outage("anthropic"))
 
 
 class ParallelReads(unittest.TestCase):

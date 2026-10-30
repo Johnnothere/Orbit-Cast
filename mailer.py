@@ -41,11 +41,11 @@ Env:
   PUBLIC_URL       absolute base for links in emails (no trailing slash)
 """
 
-import html
 import logging
 import os
 import smtplib
 import ssl
+import threading
 from email.message import EmailMessage
 from email.utils import formataddr, parseaddr
 
@@ -258,80 +258,112 @@ def _send_smtp(to: str, subject: str, html_body: str, text_body: str,
 # ─────────────────────────────────────────────
 # Templates
 # ─────────────────────────────────────────────
+# Jinja, not f-strings. Two reasons beyond readability: autoescaping, because
+# every value here is a scraped title or something the subscriber typed; and
+# a standalone Environment rather than flask.render_template, because the
+# scheduler thread that sends these has no request and no app context.
 
-def _shell(inner: str, footer: str = "") -> str:
-    return f"""<!doctype html>
-<html><body style="margin:0;padding:24px;background:{BRAND_BG};
-  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
-<table role="presentation" width="100%" style="max-width:560px;" cellpadding="0" cellspacing="0">
-<tr><td style="padding:0 0 20px 0;">
-  <span style="color:{BRAND_TEXT};font-size:15px;font-weight:700;letter-spacing:.14em;">ORBITCAST</span>
-</td></tr>
-<tr><td style="background:{BRAND_CARD};border-radius:14px;padding:28px;color:{BRAND_TEXT};
-  font-size:15px;line-height:1.6;">{inner}</td></tr>
-<tr><td style="padding:18px 4px;color:{BRAND_MUTED};font-size:12px;line-height:1.6;">{footer}</td></tr>
-</table></td></tr></table></body></html>"""
+_JINJA = None
+_jinja_lock = threading.Lock()
+_TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+
+BRAND = {"bg": BRAND_BG, "card": BRAND_CARD, "text": BRAND_TEXT,
+         "muted": BRAND_MUTED, "accent": BRAND_ACCENT}
 
 
-def _event_row(ev: dict) -> str:
-    title = html.escape(ev.get("title") or "Untitled")
-    url = html.escape(ev.get("url") or "#")
-    date = html.escape(ev.get("date") or "Date TBC")
-    cat = html.escape(ev.get("category") or "")
-    why = html.escape((ev.get("why") or "").strip())
-    score = ev.get("fit_score")
-    score_html = (f'<span style="color:{BRAND_ACCENT};font-weight:600;">{int(score)}% fit</span>'
-                  if isinstance(score, (int, float)) else "")
-    return f"""
-      <tr><td style="padding:14px 0;border-top:1px solid rgba(255,255,255,.08);">
-        <a href="{url}" style="color:{BRAND_TEXT};font-size:16px;font-weight:600;
-           text-decoration:none;">{title}</a>
-        <div style="color:{BRAND_MUTED};font-size:13px;margin:4px 0 6px 0;">
-          {date} &nbsp;·&nbsp; {cat} &nbsp;·&nbsp; {score_html}</div>
-        <div style="color:{BRAND_TEXT};font-size:14px;opacity:.9;">{why}</div>
-      </td></tr>"""
+def _env():
+    global _JINJA
+    if _JINJA is None:
+        with _jinja_lock:
+            if _JINJA is None:
+                from jinja2 import Environment, FileSystemLoader, select_autoescape
+                _JINJA = Environment(
+                    loader=FileSystemLoader(_TEMPLATE_DIR),
+                    autoescape=select_autoescape(["html"]),
+                    trim_blocks=True, lstrip_blocks=True,
+                )
+    return _JINJA
+
+
+def _render(name: str, **ctx) -> str:
+    return _env().get_template(name).render(c=BRAND, **ctx)
+
+
+# How the period reads in prose, per cadence. The empty digest used to say
+# "this week" to everyone, which is simply wrong for a daily subscriber and
+# the kind of detail that makes an automated email feel automated.
+_PERIOD_PHRASE = {"daily": "today", "weekly": "this week"}
+_PERIOD_SUBJECT = {"daily": "Nothing worth your time today",
+                   "weekly": "Nothing worth your time this week"}
+
+
+def period_phrase(frequency: str = None) -> str:
+    return _PERIOD_PHRASE.get(frequency or "", "since we last looked")
+
+
+def _empty_subject(frequency: str = None) -> str:
+    return _PERIOD_SUBJECT.get(frequency or "", "Nothing worth your time right now")
+
+
+def _safe_url(raw) -> str:
+    """Only http(s) survives. An event URL reaches this from a scraped page,
+    and autoescaping makes a javascript: href harmless to the HTML but still
+    leaves it clickable."""
+    u = (raw or "").strip()
+    return u if u[:7].lower() == "http://" or u[:8].lower() == "https://" else ""
+
+
+def _event_ctx(r: dict) -> dict:
+    score = r.get("fit_score")
+    return {
+        "title": (r.get("title") or "Untitled"),
+        "url": _safe_url(r.get("url")),
+        "date": r.get("date") or "",
+        "category": r.get("category") or "",
+        "fit_score": score if isinstance(score, (int, float)) else None,
+        "why": (r.get("why") or "").strip(),
+        # Hackathons get a badge in the template. Entry deadline, prize and
+        # team size would be the genuinely useful fields here, but none of
+        # them is scraped today - see templates/email/digest.html.
+        "is_hackathon": (r.get("category") or "") == "Hackathons",
+    }
 
 
 def send_digest(to: str, recommendations: list, unsub_url: str,
-                settings_url: str = None) -> bool:
+                settings_url: str = None, frequency: str = None,
+                max_items: int = None, trimmed: bool = False) -> bool:
     settings_url = settings_url or f"{PUBLIC_URL}/"
-    n = len(recommendations)
+    events = [_event_ctx(r) for r in recommendations]
+    n = len(events)
     subject = f"{n} event{'s' if n != 1 else ''} worth your time"
-    rows = "".join(_event_row(r) for r in recommendations)
-    inner = f"""
-      <p style="margin:0 0 4px 0;font-size:17px;font-weight:600;">Your shortlist</p>
-      <p style="margin:0 0 10px 0;color:{BRAND_MUTED};font-size:13px;">
-        Matched against your profile. Nothing below scored under 65% - anything weaker
-        was left out rather than padded in.</p>
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">{rows}</table>"""
-    footer = (f'<a href="{settings_url}" style="color:{BRAND_MUTED};">Change how often you get this</a>'
-              f' &nbsp;·&nbsp; <a href="{unsub_url}" style="color:{BRAND_MUTED};">Unsubscribe</a>')
-    lines = [f"- {r.get('title')} ({r.get('date') or 'date TBC'}) {r.get('url')}"
-             for r in recommendations]
+    html_body = _render(
+        "email/digest.html", subject=subject,
+        preheader=f"{n} that cleared 65% against your profile.",
+        events=events, unsub_url=unsub_url, settings_url=settings_url,
+        capped=bool(trimmed and max_items), max_items=max_items,
+    )
+    lines = [f"- {e['title']} ({e['date'] or 'date TBC'}) {e['url']}" for e in events]
     text = ("Your OrbitCast shortlist:\n\n" + "\n".join(lines) +
             f"\n\nChange frequency: {settings_url}\nUnsubscribe: {unsub_url}")
-    return send(to, subject, _shell(inner, footer), text, unsubscribe_url=unsub_url)
+    return send(to, subject, html_body, text, unsubscribe_url=unsub_url)
 
 
-def send_empty_digest(to: str, unsub_url: str, settings_url: str = None) -> bool:
+def send_empty_digest(to: str, unsub_url: str, settings_url: str = None,
+                      frequency: str = None) -> bool:
     """The honest empty email.
 
-    This exists on purpose. The scorer drops anything under 65%, so some weeks
-    genuinely have nothing. Filling the gap with weak matches is the one thing
-    that would teach people to stop opening these - and it is the same
-    inflation the recommendation engine refuses to do on the site."""
+    The scorer drops anything under 65%, so some periods genuinely have
+    nothing. Filling the gap with weak matches is the same inflation the
+    recommendation engine refuses to do on the site."""
     settings_url = settings_url or f"{PUBLIC_URL}/"
-    inner = f"""
-      <p style="margin:0 0 12px 0;font-size:17px;font-weight:600;">Nothing this time</p>
-      <p style="margin:0 0 12px 0;">No new event scored high enough against your profile
-        to be worth your evening. Rather than pad the list, here is an empty one.</p>
-      <p style="margin:0;color:{BRAND_MUTED};font-size:13px;">
-        You will hear from us again as soon as something fits.</p>"""
-    footer = (f'<a href="{settings_url}" style="color:{BRAND_MUTED};">Change how often you get this</a>'
-              f' &nbsp;·&nbsp; <a href="{unsub_url}" style="color:{BRAND_MUTED};">Unsubscribe</a>')
-    text = ("No new event scored high enough against your profile this time, so this "
+    subject = _empty_subject(frequency)
+    phrase = period_phrase(frequency)
+    html_body = _render(
+        "email/digest_empty.html", subject=subject,
+        preheader="An honest empty list, rather than a padded one.",
+        period_phrase=phrase, unsub_url=unsub_url, settings_url=settings_url,
+    )
+    text = (f"No new event scored high enough against your profile {phrase}, so this "
             "digest is deliberately empty.\n\n"
             f"Change frequency: {settings_url}\nUnsubscribe: {unsub_url}")
-    return send(to, "Nothing worth your time this week", _shell(inner, footer), text,
-                unsubscribe_url=unsub_url)
+    return send(to, subject, html_body, text, unsubscribe_url=unsub_url)

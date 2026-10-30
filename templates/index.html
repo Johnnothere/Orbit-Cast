@@ -265,11 +265,16 @@ kbd{font:500 11px/1 var(--f-mono);color:var(--tx-3);border:1px solid var(--line-
 
 /* ---------- browse shell ---------- */
 .shell{max-width:1296px;margin:0 auto;padding:96px 24px 96px;display:grid;grid-template-columns:212px minmax(0,1fr);gap:36px;align-items:start}
+:root{--nav-h:80px;--toolbar-h:56px;--catrail-h:0px}
 .shell.no-rail{grid-template-columns:minmax(0,1fr)}
 .shell.no-rail .cats{display:none}
 .main{min-width:0}
 
-.cats{position:sticky;top:96px;display:grid;gap:2px;padding-top:6px}
+/* Sticky stack: nav, then toolbar, then the category rail. --toolbar-h and
+   --catrail-h are measured in JS (measureSticky) because the toolbar wraps
+   to a second row between roughly 1040 and 1250px, and every offset below
+   used to be a hard-coded number that was only right while it didn't. */
+.cats{position:sticky;top:calc(var(--nav-h) + var(--toolbar-h) + 8px);display:grid;gap:2px;padding-top:6px}
 .cats-hd{font:500 12px var(--f-body);color:var(--tx-3);padding:0 12px 8px}
 .cat{display:flex;align-items:center;gap:10px;height:36px;padding:0 12px;border:0;border-radius:10px;background:none;color:var(--tx-2);font:500 14px/1 var(--f-body);text-align:left}
 .cat:hover{background:var(--s2);color:var(--tx)}
@@ -287,7 +292,7 @@ kbd{font:500 11px/1 var(--f-mono);color:var(--tx-3);border:1px solid var(--line-
 .live{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px color-mix(in oklab,var(--ok) 22%,transparent)}
 .vhead-actions{display:flex;gap:8px;align-items:center}
 
-.toolbar{position:sticky;top:calc(80px + env(safe-area-inset-top,0px));z-index:30;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px;margin-bottom:18px;border-radius:18px;background:var(--glass);border:1px solid var(--line-2);box-shadow:var(--sh-2);-webkit-backdrop-filter:blur(16px) saturate(140%);backdrop-filter:blur(16px) saturate(140%)}
+.toolbar{position:sticky;top:calc(var(--nav-h) + env(safe-area-inset-top,0px));z-index:30;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px;margin-bottom:18px;border-radius:18px;background:var(--glass);border:1px solid var(--line-2);box-shadow:var(--sh-2);-webkit-backdrop-filter:blur(16px) saturate(140%);backdrop-filter:blur(16px) saturate(140%)}
 .tb-spacer{flex:1}
 .search{position:relative;flex:1 1 220px;max-width:360px;min-width:180px}
 .search input{width:100%;height:40px;border-radius:999px;border:1px solid var(--line-2);background:var(--s1);padding:0 40px 0 38px;font:400 14px var(--f-body);color:var(--tx)}
@@ -304,14 +309,22 @@ kbd{font:500 11px/1 var(--f-mono);color:var(--tx-3);border:1px solid var(--line-
 .menu button[aria-checked="true"] .i{opacity:1}
 .menu .n{font:500 12px var(--f-mono);color:var(--tx-3)}
 
-.catrail{display:none;gap:6px;overflow-x:auto;scrollbar-width:none;margin:-6px 0 16px;padding-bottom:2px}
+/* The rail and the .cats sidebar are two presentations of one control;
+   exactly one is visible at a time (sidebar on wide events views, rail
+   everywhere else it applies). One row that scrolls: flex-wrap and
+   overflow-x cannot both work, and four rules used to disagree about which.
+   Sticky under the toolbar rather than tucked beneath it by a negative
+   margin, which put the chips behind the toolbar's own backdrop blur. */
+.catrail{display:none;gap:6px;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;
+  position:sticky;top:calc(var(--nav-h) + var(--toolbar-h) + env(safe-area-inset-top,0px));
+  z-index:25;margin:0 0 16px;padding:2px 0 8px;background:var(--bg)}
 .catrail::-webkit-scrollbar{display:none}
-.shell.chiprail .catrail{display:flex;flex-wrap:wrap}
+.shell.chiprail .catrail{display:flex}
 
 /* ---------- event list ---------- */
 .days{display:grid;gap:14px}
 .day{background:var(--s1);border:1px solid var(--line-2);border-radius:18px;overflow:clip}
-.day-hd{position:sticky;top:calc(146px + env(safe-area-inset-top,0px));z-index:5;display:flex;align-items:center;justify-content:space-between;gap:12px;height:42px;padding:0 16px;background:var(--s1);border-bottom:1px solid var(--line);font:500 13.5px/1 var(--f-body);color:var(--tx-2)}
+.day-hd{position:sticky;top:calc(var(--nav-h) + var(--toolbar-h) + var(--catrail-h) + env(safe-area-inset-top,0px));z-index:5;display:flex;align-items:center;justify-content:space-between;gap:12px;height:42px;padding:0 16px;background:var(--s1);border-bottom:1px solid var(--line);font:500 13.5px/1 var(--f-body);color:var(--tx-2)}
 .day-hd b{font-weight:600;color:var(--tx)}
 .day-hd b.today{color:var(--ac)}
 .day-hd .n{font:500 12px var(--f-mono);color:var(--tx-3)}
@@ -510,7 +523,45 @@ kbd{font:500 11px/1 var(--f-mono);color:var(--tx-3);border:1px solid var(--line-
 
 /* ---------- home ---------- */
 .wrap{max-width:1180px;margin:0 auto;padding-inline:24px}
-.hero{padding:150px 0 40px}
+
+/* ---- home: three panels you swipe between ----------------------------
+   Scroll-snap rather than a JS carousel: native touch physics, native
+   wheel and trackpad, keyboard for free (PageUp/Down, arrows, and Tab
+   scrolls a focused control into view), and the content stays in document
+   order for a screen reader. No library, nothing to keep up to date.
+
+   `proximity`, deliberately, not `mandatory`. Panel two holds #results,
+   which is taller than the viewport as soon as an analysis returns;
+   mandatory snapping on an overflowing panel is the classic trap where the
+   reader cannot reach the bottom of their own matches. Proximity snaps when
+   you are near a boundary and otherwise gets out of the way. */
+.panels{height:100dvh;overflow-y:auto;overflow-x:hidden;scroll-snap-type:y proximity;scroll-behavior:smooth;overscroll-behavior-y:contain}
+.panel{min-height:100dvh;scroll-snap-align:start;scroll-snap-stop:normal;display:flex;flex-direction:column;justify-content:center;padding:96px 0 40px}
+.panel-last{justify-content:center}
+/* Once results are on screen the panel is a document, not a slide: let it
+   grow and stop trying to centre it. */
+.panels.has-results #console{justify-content:flex-start;min-height:auto;scroll-snap-align:none}
+.panel-dots{position:fixed;z-index:50;right:18px;top:50%;transform:translateY(-50%);display:grid;gap:10px}
+.panel-dots button{width:9px;height:9px;padding:0;border-radius:50%;border:1px solid var(--line-2);background:var(--s2);cursor:pointer;transition:background .15s,transform .15s}
+.panel-dots button:hover{transform:scale(1.25)}
+.panel-dots button[aria-current="true"]{background:var(--ac);border-color:var(--ac)}
+.panel-dots button:focus-visible{outline:2px solid var(--ac);outline-offset:3px}
+@media (prefers-reduced-motion: reduce){
+  /* No snapping and no smooth scrolling: the page becomes three tall
+     sections you scroll normally, which is the same content either way. */
+  .panels{scroll-snap-type:none;scroll-behavior:auto}
+}
+@media (max-width:860px){
+  .panel{padding:72px 0 32px}
+  .panel-dots{right:10px}
+}
+@media (max-height:620px){
+  /* Short viewport: a full-height panel would clip its own content. */
+  .panels{scroll-snap-type:none}
+  .panel{min-height:auto;padding:88px 0 28px}
+  .panel-dots{display:none}
+}
+.hero{padding:0 0 40px}
 .eyebrow{display:flex;align-items:center;gap:10px;font:500 12px/1 var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--tx-3)}
 .hero h1{margin-top:22px;font:600 clamp(46px,8.2vw,112px)/.94 var(--f-display);letter-spacing:-.047em;text-wrap:balance}
 .hero h1 span{display:block}
@@ -589,6 +640,7 @@ kbd{font:500 11px/1 var(--f-mono);color:var(--tx-3);border:1px solid var(--line-
 .res-h{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:6px}
 .res-h h2{font:600 34px/1.1 var(--f-display);letter-spacing:-.03em}
 .res-h span{font-size:13px;color:var(--tx-3)}
+.res-h .chip{align-self:center;margin-left:auto}
 .match{padding:20px 22px;border-radius:20px;background:var(--s1);border:1px solid var(--line-2)}
 .m-top{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:start}
 .m-meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:13px;color:var(--tx-3)}
@@ -683,13 +735,16 @@ details.card .body{margin-top:14px;display:grid;gap:14px;font-size:14.5px;color:
 @media (max-width:1040px){
   .shell{grid-template-columns:minmax(0,1fr);gap:0}
   .cats{display:none}
-  .catrail,.shell.chiprail .catrail{display:flex;flex-wrap:nowrap}
+  .catrail,.shell.chiprail .catrail{display:flex}
   .shell.no-rail:not(.chiprail) .catrail{display:none}
   .cmp{grid-template-columns:minmax(0,1fr)}
   .chg{grid-template-columns:minmax(0,1fr)}
 }
 @media (max-width:860px){
   html{scroll-padding-top:130px}
+  /* The floating 80px nav capsule gives way to the 56px topbar here, so
+     everything sticking below it moves up with one variable. */
+  :root{--nav-h:56px}
   .nav{display:none}
   .topbar{display:flex;position:sticky;top:env(safe-area-inset-top,0px);z-index:60;height:56px;align-items:center;gap:8px;padding:0 8px 0 12px;background:var(--glass);border-bottom:1px solid var(--line);-webkit-backdrop-filter:blur(18px) saturate(150%);backdrop-filter:blur(18px) saturate(150%)}
   .topbar .brand{padding-right:4px}
@@ -705,12 +760,11 @@ details.card .body{margin-top:14px;display:grid;gap:14px;font-size:14.5px;color:
   .vtitle{display:none}
   .vsub{margin-top:0}
   .vhead-actions{display:none}
-  .toolbar{top:calc(56px + env(safe-area-inset-top,0px));margin:0 -16px 12px;padding:8px 16px;border-radius:0;border-width:0 0 1px;box-shadow:none;flex-wrap:nowrap}
+  .toolbar{margin:0 -16px 12px;padding:8px 16px;border-radius:0;border-width:0 0 1px;box-shadow:none;flex-wrap:nowrap}
   .toolbar .tb-desk{display:none}
   .search{max-width:none;min-width:0}
   .search kbd{display:none}
   .search input{font-size:16px}
-  .day-hd{top:calc(112px + env(safe-area-inset-top,0px))}
   .days{gap:12px}
   .row{grid-template-columns:48px minmax(0,1fr) auto;gap:12px;padding:10px 4px 10px 14px;min-height:66px}
   .row-title{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
@@ -788,10 +842,6 @@ details.card .body{margin-top:14px;display:grid;gap:14px;font-size:14.5px;color:
 .skel-row{height:40px}
 .nav-avatar{width:22px;height:22px;border-radius:50%;object-fit:cover}
 .acct-id .nav-avatar{width:36px;height:36px}
-.match-map{height:190px;margin-top:14px;border-radius:14px;overflow:hidden;border:1px solid var(--line-2);background:var(--s2)}
-.match-map .leaflet-container{height:100%;font-family:var(--f-body)}
-.m-dist{margin-top:10px;font-size:13.5px;color:var(--tx-2)}
-.m-dist a{color:var(--ac)}
 .q .free{margin-top:8px;height:40px;width:100%;border-radius:12px;border:1px solid var(--line-2);background:var(--s2);padding:0 12px;font:400 14px var(--f-body);color:var(--tx)}
 .q .free:focus{outline:none;border-color:var(--ac);box-shadow:0 0 0 3px var(--ac-soft)}
 .orient-src{display:flex;flex-wrap:wrap;gap:8px}
@@ -849,6 +899,15 @@ details.card .body{margin-top:14px;display:grid;gap:14px;font-size:14.5px;color:
 .ac-sec{display:grid;gap:10px}
 .ac-sec h3 .n,.ac-sec-hd .n{font:500 12px var(--f-mono);color:var(--tx-3);margin-left:4px}
 .ac-sec-hd{display:flex;align-items:center;justify-content:space-between;gap:10px}
+/* "Your interests": the count makes the default state legible. Empty means
+   "all categories", which previously looked identical to a filtered list. */
+.int-count{display:inline-flex;align-items:center;gap:6px;flex:none;font:500 12px var(--f-mono);color:var(--tx-3);white-space:nowrap}
+.int-count.all{color:var(--ac)}
+.int-count .i{opacity:.8}
+.int-sec .chips{margin-top:2px}
+.int-reset{margin-top:2px;font-size:13px}
+.field .fhint{display:block;margin-top:5px;font-size:12.5px;line-height:1.45;color:var(--tx-3);font-style:normal}
+.input.ta{min-height:74px;padding:10px 12px;line-height:1.5;resize:vertical;font:inherit}
 .ac-foot{display:grid;gap:12px;padding-top:14px;border-top:1px solid var(--line)}
 .ac-foot p{font-size:13.5px;color:var(--tx-2);max-width:64ch}
 .ac-foot p b{font-weight:600;color:var(--tx)}
@@ -997,11 +1056,6 @@ details.past[open]>summary .i{transform:rotate(180deg)}
 /* Commute line: distance from the user's home base + live-times deep
    links (Citymapper first, Google Maps as fallback). Only shown when the
    server computed a distance for this match - never a placeholder. */
-.mc-commute{display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px;font-size:12.5px;color:var(--tx-3);margin-top:4px}
-.mc-commute a{color:var(--tx-2);text-decoration:underline;text-underline-offset:2px;text-decoration-color:var(--line);transition:color .12s}
-.mc-commute a:hover{color:var(--ac);text-decoration-color:currentColor}
-.m-links{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-.m-links .btn{height:34px}
 /* Postcode row in the account panel: input + save button, with a clear
    button that only appears when a postcode is already set. */
 .pc-row{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap}
@@ -1115,7 +1169,9 @@ details.past[open]>summary .i{transform:rotate(180deg)}
 <main id="app">
   <!-- ================= HOME ================= -->
   <section class="view" id="v-home" hidden>
-    <div class="wrap">
+    <div class="panels" id="homePanels">
+      <section class="panel" id="panel-hero" aria-label="What OrbitCast does">
+      <div class="wrap">
       <div class="hero">
         <p class="eyebrow"><span class="live"></span><span id="heroStamp">London</span></p>
         <h1><span>The right room.</span><span><em>At</em> the right time.</span><span class="dim">Or no room at all.</span></h1>
@@ -1132,8 +1188,11 @@ details.past[open]>summary .i{transform:rotate(180deg)}
           <div class="stat"><b>≤5</b><span>matches, never padded</span></div>
         </div>
       </div>
+      </div>
+      </section>
 
-      <section class="sec" id="console" aria-labelledby="consoleH">
+      <section class="panel" id="console" aria-labelledby="consoleH">
+      <div class="wrap"><div class="sec">
         <div class="sec-h"><h2 id="consoleH">Start with your <em>CV</em></h2><p>Upload a CV or your LinkedIn PDF. Only events scoring 65 or more come back.</p></div>
         <div class="console">
           <div class="seg lg" role="tablist" aria-label="How to share your background">
@@ -1200,17 +1259,27 @@ details.past[open]>summary .i{transform:rotate(180deg)}
           <div class="progress" id="progress" hidden aria-live="polite"></div>
         </div>
         <div class="results" id="results" hidden></div>
+      </div></div>
       </section>
 
+      <section class="panel panel-last" id="panel-closing" aria-label="If nothing fits">
+      <div class="wrap">
       <div class="closing">
         <h2>If nothing fits, <em>we say so.</em></h2>
         <button class="btn btn-primary lg" data-act="getmatched">Get matched <svg class="i s16"><use href="#i-arrow-right"/></svg></button>
       </div>
       <footer class="foot">
         <span>Nothing is stored unless you choose to keep it. Delete everything at any time from your account or the <a href="/privacy">Privacy page</a>.</span>
-        <span>© 2026 OrbitCast</span>
+        <span><a href="/about">About</a> · <a href="/privacy">Privacy</a> · © 2026 OrbitCast</span>
       </footer>
+      </div>
+      </section>
     </div>
+    <nav class="panel-dots" id="homeDots" aria-label="Sections">
+      <button type="button" data-panel="panel-hero" aria-label="What OrbitCast does"></button>
+      <button type="button" data-panel="console" aria-label="Start with your CV"></button>
+      <button type="button" data-panel="panel-closing" aria-label="If nothing fits"></button>
+    </nav>
   </section>
 
   <!-- ================= BROWSE (events / calendar / hackathons) ================= -->
@@ -1442,16 +1511,20 @@ const upcoming=e=>!(e.date&&e.date<TODAY);
 
 /* ================= state ================= */
 const RANGES=[['all','Any date'],['today','Today'],['week','Next 7 days'],['month','This month'],['30','Next 30 days']];
-const SORTS=[['soon','Soonest first'],['time','Time of day'],['az','A to Z'],['cat','By category']];
+const SORTS=[['soon','Soonest first'],['saved','Saved first'],['time','Time of day'],['az','A to Z'],['cat','By category']];
+/* Saved-first is only offered to someone signed in: saved events live on the
+   account, and offering a sort that can only ever be a no-op is worse than
+   not offering it. Everything else is available to everyone. */
+const sortsFor=()=>SORTS.filter(([k])=>k!=='saved'||ME.signed_in);
+const DEFAULT_SORT='soon';
 const FORMATS=['Conference','Talk','Workshop','Course','Meetup','Networking','Social','Pitch','Hackathon','Expo','Webinar'];
 const TODS=[['any','Any time'],['morning','Morning'],['afternoon','Afternoon'],['evening','Evening']];
 const DOWS=[['any','Any day'],['weekday','Weekdays'],['weekend','Weekends']];
 const S={view:'home',q:'',where:store.get('oc_where','london'),range:'all',cat:'all',savedOnly:false,showHidden:false,winDays:7,
-  sort:'soon',fmt:new Set(),tod:'any',dow:'any',timed:false,hidePitch:!!store.get('oc_hide_pitch',0),
+  sort:'soon',matchSavedFirst:false,fmt:new Set(),tod:'any',dow:'any',timed:false,hidePitch:!!store.get('oc_hide_pitch',0),
   calMode:'weeks',calOff:0,calY:TODAY.getFullYear(),calM:TODAY.getMonth(),calSel:null,
-  pendingRun:false,matches:null,file:null,pane:'cv',keep:true,locOn:false,result:null};
+  pendingRun:false,matches:null,file:null,pane:'cv',keep:true,result:null};
 let ME={signed_in:false,google_enabled:true,email_signin_enabled:false};
-let OC_USER_LOC=null;
 const saved=new Set(store.get('oc_saved',[]));
 const qterms=()=>S.q.toLowerCase().split(/\s+/).filter(Boolean);
 // Captured once at load from this page's own referrer and query string.
@@ -1491,6 +1564,11 @@ function inRange(e){
   return true;
 }
 function cmpSorted(a,b){
+  /* A sort, not a filter: saved events rise to the top and everything else
+     keeps its normal order underneath. S.savedOnly is the filter, and the
+     two are deliberately separate - "show me my saved ones first" is not
+     "hide everything I haven't saved". */
+  if(S.sort==='saved'){const d=(saved.has(b.id)?1:0)-(saved.has(a.id)?1:0);if(d)return d;return cmp(a,b);}
   if(S.sort==='az')return a.title.localeCompare(b.title)||cmp(a,b);
   if(S.sort==='cat')return catOf(a.cat).label.localeCompare(catOf(b.cat).label)||cmp(a,b);
   if(S.sort==='time'){const am=a.mins==null?1e4:a.mins,bm=b.mins==null?1e4:b.mins;return (am-bm)||cmp(a,b);}
@@ -1594,15 +1672,42 @@ function loadingHTML(){
 }
 
 /* ================= sidebar + category rail ================= */
+/* One list of categories, two presentations: the sidebar on wide events
+   views, the scrolling rail everywhere else. Built from the same rows so a
+   category cannot appear in one and be missing from the other. */
+const CAT_ROWS=()=>[['all','All events','All','']].concat(CATS.map(c=>[c.key,c.label,c.label,c.v]));
 function buildCats(){
-  const mk=(k,l,v)=>'<button class="cat" data-cat="'+esc(k)+'" aria-pressed="false"><span class="dot'+(k==='all'?' all':'')+'"'+(v?' style="--c:var('+v+')"':'')+'></span><span class="lbl">'+esc(l)+'</span><span class="n" data-n></span></button>';
-  $('#cats').innerHTML='<p class="cats-hd">Categories</p>'+mk('all','All events','')+CATS.map(c=>mk(c.key,c.label,c.v)).join('');
-  $('#catrail').innerHTML=[['all','All','']].concat(CATS.map(c=>[c.key,c.label,c.v])).map(([k,l,v])=>'<button class="chip" data-cat="'+esc(k)+'" aria-pressed="false">'+(v?'<span class="dot" style="--c:var('+v+')"></span>':'')+esc(l)+' <span class="n" data-n></span></button>').join('');
+  const sidebar=(k,l,v)=>'<button class="cat" data-cat="'+esc(k)+'" aria-pressed="false"><span class="dot'+(k==='all'?' all':'')+'"'+(v?' style="--c:var('+v+')"':'')+'></span><span class="lbl">'+esc(l)+'</span><span class="n" data-n></span></button>';
+  const chip=(k,l,v)=>'<button class="chip" data-cat="'+esc(k)+'" aria-pressed="false">'+(v?'<span class="dot" style="--c:var('+v+')"></span>':'')+esc(l)+' <span class="n" data-n></span></button>';
+  const rows=CAT_ROWS();
+  $('#cats').innerHTML='<p class="cats-hd">Categories</p>'+rows.map(([k,l,,v])=>sidebar(k,l,v)).join('');
+  $('#catrail').innerHTML=rows.map(([k,,sh,v])=>chip(k,sh,v)).join('');
+  measureSticky();
 }
 function updateCats(){
   const c={};let total=0;const o=Object.assign({cat:false},viewOpts());
   for(const e of EV){if(!passes(e,o))continue;total++;c[e.cat]=(c[e.cat]||0)+1;}
-  $$('[data-cat]').forEach(b=>{const k=b.dataset.cat;const n=k==='all'?total:(c[k]||0);b.setAttribute('aria-pressed',String(S.cat===k));const s=b.querySelector('[data-n]');if(s)s.textContent=LOADED?n:'';b.hidden=LOADED&&k!=='all'&&n===0&&S.cat!==k;});
+  /* Scoped to the two containers that actually hold categories. The global
+     $$('[data-cat]') this replaces also matched anything inside an open
+     menu or the phone filter sheet, so a panel could be rewritten from
+     under the person using it. */
+  $$('#cats [data-cat], #catrail [data-cat]').forEach(b=>{const k=b.dataset.cat;const n=k==='all'?total:(c[k]||0);b.setAttribute('aria-pressed',String(S.cat===k));const s=b.querySelector('[data-n]');if(s)s.textContent=LOADED?n:'';b.hidden=LOADED&&k!=='all'&&n===0&&S.cat!==k;});
+  measureSticky();
+}
+
+/* The sticky stack is measured, not guessed. The events toolbar carries
+   seven controls and wraps to a second row between roughly 1040 and 1250px;
+   every offset below it used to be a hard-coded pixel count that was right
+   at exactly one width, which is why day headers hid behind it. */
+function measureSticky(){
+  const set=(name,el)=>{
+    const px=(el&&!el.hidden&&el.offsetParent)
+      ? Math.round(el.getBoundingClientRect().height+(parseFloat(getComputedStyle(el).marginBottom)||0))
+      : 0;
+    document.documentElement.style.setProperty(name,px+'px');
+  };
+  set('--toolbar-h',$('#toolbar'));
+  set('--catrail-h',$('#catrail'));
 }
 
 /* ================= toolbar ================= */
@@ -1619,7 +1724,7 @@ function renderToolbar(){
       +'<div class="menu-wrap tb-desk"><button class="btn btn-secondary sm" id="filterBtn" data-menu="filter" aria-haspopup="menu" aria-expanded="false">'+ic('sliders','s16')+'<span id="filterLbl">Filters</span>'+ic('chevron-down','s14')+'</button>'
       +'<div class="menu wide" id="filterMenu" role="group" aria-label="More filters" hidden>'+filterPanelHTML()+'</div></div>'
       +'<div class="menu-wrap tb-desk"><button class="btn btn-ghost sm" id="sortBtn" data-menu="sort" aria-haspopup="menu" aria-expanded="false">'+ic('list','s16')+'<span id="sortLbl"></span>'+ic('chevron-down','s14')+'</button>'
-      +'<div class="menu" id="sortMenu" role="menu" hidden>'+SORTS.map(([k,l])=>'<button role="menuitemradio" data-sort="'+k+'" aria-checked="false">'+l+ic('check','s16')+'</button>').join('')+'</div></div>'
+      +'<div class="menu" id="sortMenu" role="menu" hidden>'+sortsFor().map(([k,l])=>'<button role="menuitemradio" data-sort="'+k+'" aria-checked="false">'+l+ic('check','s16')+'</button>').join('')+'</div></div>'
       +'<button class="chip tb-desk" data-act="saved" aria-pressed="false">'+ic('bookmark','s14')+'Saved <span class="n" id="savedN">0</span></button>';
   }else if(v==='calendar'){
     h+='<span class="tb-desk">'+whereSeg()+'</span>'
@@ -1634,11 +1739,12 @@ function renderToolbar(){
       +'<div class="menu-wrap tb-desk"><button class="btn btn-secondary sm" id="filterBtn" data-menu="filter" aria-haspopup="menu" aria-expanded="false">'+ic('sliders','s16')+'<span id="filterLbl">Filters</span>'+ic('chevron-down','s14')+'</button>'
       +'<div class="menu wide" id="filterMenu" role="group" aria-label="More filters" hidden>'+filterPanelHTML()+'</div></div>'
       +'<div class="menu-wrap tb-desk"><button class="btn btn-ghost sm" id="sortBtn" data-menu="sort" aria-haspopup="menu" aria-expanded="false">'+ic('list','s16')+'<span id="sortLbl"></span>'+ic('chevron-down','s14')+'</button>'
-      +'<div class="menu" id="sortMenu" role="menu" hidden>'+SORTS.filter(x=>x[0]!=='cat').map(([k,l])=>'<button role="menuitemradio" data-sort="'+k+'" aria-checked="false">'+l+ic('check','s16')+'</button>').join('')+'</div></div>'
+      +'<div class="menu" id="sortMenu" role="menu" hidden>'+sortsFor().filter(x=>x[0]!=='cat').map(([k,l])=>'<button role="menuitemradio" data-sort="'+k+'" aria-checked="false">'+l+ic('check','s16')+'</button>').join('')+'</div></div>'
       +'<button class="chip tb-desk" data-act="saved" aria-pressed="false">'+ic('bookmark','s14')+'Saved <span class="n" id="savedN">0</span></button>';
   }
   h+='<button class="icon-btn phone-only" data-act="filters" id="filtersBtn" aria-label="Filters">'+ic('sliders')+'</button>';
   $('#toolbar').innerHTML=h;
+  measureSticky();   // the control set differs per view, so the height does too
   const q=$('#q');let tmr;
   q.addEventListener('input',()=>{clearTimeout(tmr);tmr=setTimeout(()=>{S.q=q.value.trim();S.winDays=7;render();},120);});
 }
@@ -1662,14 +1768,21 @@ function updateToolbar(){
   $$('[data-range]').forEach(b=>b.setAttribute('aria-checked',String(S.range===b.dataset.range)));
   $$('[data-sort]').forEach(b=>b.setAttribute('aria-checked',String(S.sort===b.dataset.sort)));
   const rl=$('#rangeLbl');if(rl)rl.textContent=RANGES.find(r=>r[0]===S.range)[1];
-  const sl=$('#sortLbl');if(sl)sl.textContent=SORTS.find(r=>r[0]===S.sort)[1];
+  const sl=$('#sortLbl');if(sl){const row=SORTS.find(r=>r[0]===S.sort);sl.textContent=row?row[1]:SORTS[0][1];}
   const n=extraFilterCount();
   const fl=$('#filterLbl');if(fl)fl.textContent=n?'Filters · '+n:'Filters';
   const fbtn=$('#filterBtn');if(fbtn)fbtn.classList.toggle('is-on',n>0);
   const fm=$('#filterMenu');if(fm&&fm.hidden)fm.innerHTML=filterPanelHTML();
-  $$('[data-act="saved"]').forEach(b=>{if(b.classList.contains('chip'))b.setAttribute('aria-pressed',String(S.savedOnly));});
+  /* Two presentations of one toggle: a chip in the toolbar (aria-pressed)
+     and a switch in the phone sheet (aria-checked). Only the chip was being
+     updated, so a screen reader read the sheet's switch as off while the
+     filter was on. */
+  $$('[data-act="saved"]').forEach(b=>{
+    const attr=b.getAttribute('role')==='switch'?'aria-checked':'aria-pressed';
+    if(b.classList.contains('chip')||b.getAttribute('role')==='switch')b.setAttribute(attr,String(S.savedOnly));
+  });
   const sn=$('#savedN');if(sn)sn.textContent=saved.size;
-  const fb=$('#filtersBtn');if(fb)fb.classList.toggle('has-dot',S.where!=='london'||S.range!=='all'||S.savedOnly||n>0||S.sort!=='soon');
+  const fb=$('#filtersBtn');if(fb)fb.classList.toggle('has-dot',S.where!=='london'||S.range!=='all'||S.savedOnly||n>0||S.sort!==DEFAULT_SORT);
 }
 
 /* ================= views ================= */
@@ -1702,12 +1815,12 @@ function renderEvents(){
   const hn=hiddenCount();
   $('#vhead').innerHTML='<div><h1 class="vtitle">Events</h1><p class="vsub"><span class="live" aria-hidden="true"></span><span><b>'+list.length+'</b> '+(S.where==='online'?'online':S.where==='all'?'in London and online':'upcoming in London')+'</span><span class="sep">·</span><span>updated '+ago(LAST_RUN)+'</span>'
     +(hn?'<span class="sep">·</span><button class="linkish" data-act="hidden">'+(S.showHidden?'hide off-topic':hn+' off-topic hidden')+'</button>':'')
-    +(extraFilterCount()||S.sort!=='soon'?'<span class="sep">·</span><button class="linkish" data-act="clearextra">clear filters</button>':'')+'</p></div>';
+    +(extraFilterCount()?'<span class="sep">·</span><button class="linkish" data-act="clearextra">clear filters</button>':'')+'</p></div>';
   const out=$('#out');
   if(!items.length){out.innerHTML=emptyHTML()+hiddenNote();return;}
-  if(S.sort!=='soon'){
+  if(S.sort!==DEFAULT_SORT){
     // A flat list: grouping by day would fight the chosen order.
-    const lbl=S.sort==='az'?'A to Z':S.sort==='cat'?'By category':'By time of day';
+    const row=SORTS.find(r=>r[0]===S.sort);const lbl=row?row[1]:'Sorted';
     out.innerHTML='<div class="days"><section class="day"><header class="day-hd"><span><b>'+lbl+'</b> · '+items.length+' events</span><span class="n">'+items.length+'</span></header>'+items.map(it=>rowHTML(it,false,true)).join('')+'</section></div>'+hiddenNote();
     return;
   }
@@ -1847,7 +1960,7 @@ function renderHack(){
   const all=EV.filter(e=>e.cat==='Hackathons'&&passes(e,{where:'all',cat:false}));
   const lon=all.filter(e=>!e.online),onl=all.filter(e=>e.online);
   const list=(S.where==='london'?lon:S.where==='online'?onl:all).slice().sort(cmpSorted);
-  $('#vhead').innerHTML='<div><h1 class="vtitle">Hackathons</h1><p class="vsub"><span><b>'+lon.length+'</b> in London</span><span class="sep">·</span><span><b>'+onl.length+'</b> online</span>'+'<span class="sep">·</span><span>filed from the title, not the source</span>'+(extraFilterCount()||S.range!=='all'||S.sort!=='soon'?'<span class="sep">·</span><button class="linkish" data-act="clearall">clear filters</button>':'')+'</p></div>';
+  $('#vhead').innerHTML='<div><h1 class="vtitle">Hackathons</h1><p class="vsub"><span><b>'+lon.length+'</b> in London</span><span class="sep">·</span><span><b>'+onl.length+'</b> online</span>'+'<span class="sep">·</span><span>filed from the title, not the source</span>'+(extraFilterCount()||S.range!=='all'||S.sort!==DEFAULT_SORT?'<span class="sep">·</span><button class="linkish" data-act="clearall">clear filters</button>':'')+'</p></div>';
   const hw=$('#hackWhere');if(hw)hw.innerHTML=whereSeg({london:lon.length,online:onl.length,all:all.length});
   const card=e=>{
     const df=daysFrom(e.date);const soon=df!==null&&df<=3?(df===0?'Today':df===1?'Tomorrow':'In '+df+' days'):'';
@@ -2021,10 +2134,10 @@ async function runAnalysis(opts){
       +'<span>Nothing you typed was stored. Sign in with Google to keep this profile, run more analyses, save events, and get the email digest. No password.</span></div>'
       +'<button class="btn btn-primary" data-act="signin">Sign in with Google</button></div>');
     res.hidden=false;
+    $('#homePanels').classList.add('has-results');
     $$('.deck-wrap',res).forEach(deckSync);
     if(!opts.reuse)clearDraft();
     $('#returning').hidden=true;
-    res.querySelectorAll('.match-map').forEach(initMiniMap);
     setTimeout(()=>res.scrollIntoView({behavior:REDUCE?'auto':'smooth',block:'start'}),60);
     loadMe();
   }catch(e){showErr('The analysis could not run: '+(e.message||'network error'));}
@@ -2058,11 +2171,6 @@ function deckHTML(items,key){
        weakness is worse than no weakness. */
     const wk=(m.weakness||'').trim();
     const showWk=wk && wk.toLowerCase().replace(/[.\s]/g,'')!=='nonematerial';
-    /* Commute: only shown on the live-analysis card where the server has
-       already computed distance_km. History cards don't carry venue
-       coordinates, so they stay quiet rather than show a stale number. */
-    const dKm=m.distance_km;
-    const showCommute=typeof dKm==='number'&&(m.citymapper_url||m.directions_url);
     return'<article class="mcard'+(hot?' hot':'')+(m.muted?' muted':'')+'" role="listitem" aria-label="'+esc(e.title)+', '+esc(band)+'">'
       +'<div class="mc-top"><span class="mc-rank">#'+(i+1)+'</span><span class="mc-tier">'+esc(band)+'</span><span class="mc-fit" title="Fit score, 0-100"><b>'+m.fit+'</b><i>/100</i></span></div>'
       +'<div class="meter" aria-hidden="true"><i'+(hot?' class="hot"':'')+' style="width:'+m.fit+'%"></i></div>'
@@ -2071,7 +2179,6 @@ function deckHTML(items,key){
       +'<p class="mc-when">'+ic('calendar','s14')+(e.date?fmtDay(e.date):'Date TBC')+(e.time?' · '+e.time:'')+'<span class="sep">·</span>'+ic(e.online?'globe':'pin','s14')+esc(where)+'</p>'
       +'<p class="mc-why">'+esc(m.why)+'</p>'
       +(showWk?'<p class="mc-weakness"><span class="mc-wk-label">One honest limit</span> — '+esc(wk)+'</p>':'')
-      +(showCommute?'<p class="mc-commute">'+ic('pin','s14')+'~'+dKm+' km from '+(OC_USER_LOC&&OC_USER_LOC.src==='postcode'?esc(OC_USER_LOC.postcode||'home'):'you')+(m.citymapper_url?' · <a href="'+esc(m.citymapper_url)+'" target="_blank" rel="noopener">Citymapper</a>':'')+(m.directions_url?' · <a href="'+esc(m.directions_url)+'" target="_blank" rel="noopener">Maps</a>':'')+'</p>':'')
       +'<div class="mc-acts">'+saveBtn(e.id,'sm')+'<button class="icon-btn sm" data-ics="'+esc(e.id)+'" aria-label="Add to calendar">'+ic('calendar-plus','s16')+'</button>'
       +(m.mutable?'<button class="icon-btn sm" data-act="ac-mute" data-id="'+esc(e.id)+'" data-title="'+esc(e.title)+'" aria-pressed="'+!!m.muted+'" aria-label="'+(m.muted?'Unmute':'Not for me')+'" title="'+(m.muted?'Muted · undo':'Not for me')+'">'+ic('eye-off','s16')+'</button>':'')
       +'<span class="tb-spacer"></span><button class="btn btn-secondary sm" data-open="'+esc(e.id)+'">Details</button><a class="btn btn-primary sm" href="'+esc(e.url)+'" target="_blank" rel="noopener"'+(m.rid?' data-track="'+esc(m.rid)+'"':'')+'>View '+ic('arrow-up-right','s14')+'</a></div>'
@@ -2106,9 +2213,20 @@ function resultsHTML(data){
   const recs=(data.recommendations||[]).map((r,i)=>({r,e:ensureEv(r,i),fit:Math.round(r.fit_score||0)}));
   // Ranked by fit, best first: the deck reads left to right like a shortlist.
   recs.sort((a,b)=>b.fit-a.fit||((a.e.date&&b.e.date)?a.e.date-b.e.date:0));
-  S.matches=Object.fromEntries(recs.map((m,i)=>[m.e.id,{fit:m.fit,band:m.r.band||tierOf(m.fit),rank:i+1,why:m.r.why||'',why_now:m.r.why_now||'',prepare:m.r.prepare||'',benefit:m.r.benefit||'',weakness:m.r.weakness||'',distance_km:m.r.distance_km,directions_url:m.r.directions_url,citymapper_url:m.r.citymapper_url,event_lat:m.r.event_lat,event_lng:m.r.event_lng,recommendation_id:m.r.recommendation_id}]));
+  /* Optional saved-first pass. It REORDERS and never filters or re-scores -
+     every card still carries the fit the engine gave it, and nothing drops
+     out of the shortlist. Anything else here would misrepresent the engine. */
+  if(S.matchSavedFirst)recs.sort((a,b)=>(saved.has(b.e.id)?1:0)-(saved.has(a.e.id)?1:0));
+  S.matches=Object.fromEntries(recs.map((m,i)=>[m.e.id,{fit:m.fit,band:m.r.band||tierOf(m.fit),rank:i+1,why:m.r.why||'',why_now:m.r.why_now||'',prepare:m.r.prepare||'',benefit:m.r.benefit||'',weakness:m.r.weakness||'',recommendation_id:m.r.recommendation_id}]));
   let h='<div class="res-note">'+ic('info','s16')+'<div>'+(recs.length?'Real, upcoming events, best fit first. They are marked in Events too.':'An honest result, not a failure.')+(S.keep?' Your CV and profile are kept on your account.':' Nothing from this run was stored.')+'</div></div>';
-  h+='<div class="res-h"><h2>'+(recs.length?recs.length+' match'+(recs.length===1?'':'es'):'No matches')+'</h2><span>Fit score out of 100 · only 65 and above are shown</span></div>';
+  /* The shortlist is at most five cards, so it gets one toggle rather than
+     the events view's whole filter bar. Shown only to someone signed in who
+     has actually saved one of these - otherwise it can only be a no-op. */
+  const savedHere=recs.filter(m=>saved.has(m.e.id)).length;
+  const savedToggle=(ME.signed_in&&recs.length>1&&savedHere)
+    ? '<button class="chip sm" data-act="match-saved" aria-pressed="'+(!!S.matchSavedFirst)+'">'+ic('bookmark','s14')+'Saved first <span class="n">'+savedHere+'</span></button>'
+    : '';
+  h+='<div class="res-h"><h2>'+(recs.length?recs.length+' match'+(recs.length===1?'':'es'):'No matches')+'</h2><span>Fit score out of 100 · only 65 and above are shown</span>'+savedToggle+'</div>';
   if(!recs.length){
     h+=data.scoring_failed
       ?'<div class="card"><h3>The matching step didn’t complete.</h3><p class="sub" style="margin-top:8px;font-size:14.5px;color:var(--tx-2)">This is a failure on our side, not a verdict on what you sent. Your profile below is still valid. Please run it again.</p></div>'
@@ -2139,25 +2257,6 @@ function rerun(){
   if(!parts.length){toast('Pick or type at least one answer first');return;}
   if(!ME.signed_in){openSignin(true);return;}
   runAnalysis({extra:parts.join('\n')});
-}
-// Leaflet is loaded only when a map is actually going to be drawn.
-function loadLeaflet(){
-  if(window.L)return Promise.resolve();
-  if(loadLeaflet.p)return loadLeaflet.p;
-  loadLeaflet.p=new Promise((res,rej)=>{
-    const l=document.createElement('link');l.rel='stylesheet';l.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';l.integrity='sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';l.crossOrigin='';document.head.appendChild(l);
-    const s=document.createElement('script');s.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';s.integrity='sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';s.crossOrigin='';s.onload=res;s.onerror=()=>rej(new Error('leaflet'));document.head.appendChild(s);
-  });
-  return loadLeaflet.p;
-}
-function initMiniMap(el){
-  loadLeaflet().then(()=>{
-    const uLat=+el.dataset.userLat,uLng=+el.dataset.userLng,eLat=+el.dataset.evLat,eLng=+el.dataset.evLng;
-    const map=L.map(el,{scrollWheelZoom:false,attributionControl:true}).fitBounds([[uLat,uLng],[eLat,eLng]],{padding:[24,24]});
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap contributors'}).addTo(map);
-    L.circleMarker([uLat,uLng],{radius:7,color:'#fff',weight:2,fillColor:'#2563eb',fillOpacity:1}).addTo(map).bindPopup('You');
-    L.marker([eLat,eLng]).addTo(map).bindPopup('Event');
-  }).catch(()=>{el.remove();});
 }
 function trackView(id){try{navigator.sendBeacon('/api/track',new Blob([JSON.stringify({recommendation_id:id,event_type:'view_event'})],{type:'application/json'}));}catch(e){}}
 
@@ -2199,15 +2298,9 @@ function openEvent(id){
     const wk=(m.weakness||'').trim();
     const showWk=wk && wk.toLowerCase().replace(/[.\s]/g,'')!=='nonematerial';
     const det=[m.why_now?['Why now',m.why_now]:null,m.prepare?['Prepare',m.prepare]:null,m.benefit?['Benefit',m.benefit]:null,showWk?['One honest limit',wk]:null].filter(Boolean);
-    const hasMap=m.distance_km!=null&&m.event_lat!=null&&m.event_lng!=null&&!!OC_USER_LOC;
     h+='<div class="dr-match"><div class="top"><b>'+ic('spark','s14')+' '+(m.rank?'Match #'+m.rank:'Matched to your profile')+' · '+esc(bandOf(m))+'</b><span class="sc">'+m.fit+'</span></div><p>'+esc(m.why)+'</p>'
       +(det.length?'<dl class="m-det">'+det.map(([k,v])=>'<div><dt>'+esc(k)+'</dt><dd>'+esc(v)+'</dd></div>').join('')+'</dl>':'')
-      +(hasMap?'<div class="match-map" data-user-lat="'+OC_USER_LOC.lat+'" data-user-lng="'+OC_USER_LOC.lng+'" data-ev-lat="'+m.event_lat+'" data-ev-lng="'+m.event_lng+'"></div>':'')
-      +(m.distance_km!=null?'<p class="m-dist">~'+m.distance_km+' km from '+(OC_USER_LOC&&OC_USER_LOC.src==='postcode'?esc(OC_USER_LOC.postcode||'home'):'you')+'</p>'
-       +'<div class="m-links">'
-       +(m.citymapper_url?'<a class="btn btn-secondary sm" href="'+esc(m.citymapper_url)+'" target="_blank" rel="noopener">Citymapper · live times</a>':'')
-       +(m.directions_url?'<a class="btn btn-ghost sm" href="'+esc(m.directions_url)+'" target="_blank" rel="noopener">Google Maps</a>':'')
-       +'</div>':'')+'</div>';
+      +'</div>';
   }
   h+='<div id="drDetails">'+detailsHTML(DETAILS[id])+'</div>';
   if(series.length)h+='<div class="dr-block"><h4>Also on</h4><ul>'+series.slice(0,6).map(x=>'<li>'+fmtDay(x.date)+(x.time?' · '+x.time:'')+'</li>').join('')+'</ul></div>';
@@ -2216,7 +2309,6 @@ function openEvent(id){
   h+='</div><div class="dr-foot"><a class="btn btn-primary" href="'+esc(e.url)+'" target="_blank" rel="noopener">View event '+ic('arrow-up-right','s16')+'</a><button class="btn btn-secondary" data-ics="'+esc(e.id)+'">'+ic('calendar-plus','s16')+'Add to calendar</button>'+saveBtn(e.id,'')+'</div>'
    +'<p class="dr-note">From the organiser’s listing. Times and venues change, so check their page before you go.</p>';
   openDrawer(h,e.title);$('#drawer').dataset.ev=id;
-  $$('#drawer .match-map').forEach(initMiniMap);
   loadDetails(id);
 }
 /* ---------- event details (read from the event's own page, server-side) ---------- */
@@ -2295,7 +2387,7 @@ function openFilters(){
   if(v!=='calendar')h+='<div class="sheet-sec"><h4>When</h4><div class="opt-list" role="radiogroup" aria-label="When">'+RANGES.map(([k,l])=>'<button class="opt" role="radio" data-range="'+k+'" aria-checked="'+(S.range===k)+'">'+l+ic('check','s16')+'</button>').join('')+'</div></div>';
   if(v==='calendar')h+='<div class="sheet-sec"><h4>Show</h4><div class="seg" role="group"><button data-mode="weeks" aria-pressed="'+(S.calMode==='weeks')+'">Next 5 weeks</button><button data-mode="month" aria-pressed="'+(S.calMode==='month')+'">Month</button></div></div>';
   if(v!=='calendar')h+='<div class="sheet-sec"><div class="set-row"><div><b>Saved only</b><span>'+saved.size+' saved'+(ME.signed_in&&SAVED_SRV?' on your account':' on this device')+'</span></div><button class="switch" role="switch" data-act="saved" aria-checked="'+S.savedOnly+'" aria-label="Saved only"></button></div></div>';
-  if(v!=='calendar')h+='<div class="sheet-sec"><h4>Sort</h4><div class="opt-list" role="radiogroup" aria-label="Sort"><'+SORTS.map(([k,l])=>'button class="opt" role="radio" data-sort="'+k+'" aria-checked="'+(S.sort===k)+'">'+l+ic('check','s16')+'</button>').join('<')+'</div></div>';
+  if(v!=='calendar')h+='<div class="sheet-sec"><h4>Sort</h4><div class="opt-list" role="radiogroup" aria-label="Sort"><'+sortsFor().map(([k,l])=>'button class="opt" role="radio" data-sort="'+k+'" aria-checked="'+(S.sort===k)+'">'+l+ic('check','s16')+'</button>').join('<')+'</div></div>';
   h+='<div class="sheet-sec">'+filterPanelHTML()+'</div>';
   h+='</div><div class="dr-foot"><button class="btn btn-primary" data-act="close">'+(n!=null?'Show '+n+' events':'Done')+'</button></div>';
   openDrawer(h,'Filters');
@@ -2380,15 +2472,6 @@ async function onEmailSigninSubmit(ev){
 }
 async function loadMe(){
   try{const r=await fetch('/api/me',{cache:'no-store'});ME=await r.json();}catch(e){ME={signed_in:false,google_enabled:true,email_signin_enabled:false};}
-  /* Postcode-derived home light: when the account has a saved postcode,
-     OC_USER_LOC is populated from the server without ever prompting for
-     location. This is the whole reason the postcode exists - it carries
-     the person across devices without a per-browser consent dance. The
-     HTML5-geolocation flow (S.locOn / /api/location) still works for
-     anyone who hasn't set a postcode. */
-  if(ME.home&&typeof ME.home.lat==='number'&&typeof ME.home.lng==='number'){
-    OC_USER_LOC={lat:ME.home.lat,lng:ME.home.lng,src:'postcode',postcode:ME.home.postcode};
-  }
   syncRun();checkReturning();syncSaved();
   return ME;
 }
@@ -2472,15 +2555,13 @@ function renderAccount(resetScroll){
   const box=$('#modalBox');const old=$('.ac-body',box);const top=old&&!resetScroll?old.scrollTop:0;
   const first=(ME.name||'').trim();
   const av=ME.avatar_url?'<img class="nav-avatar" src="'+esc(ME.avatar_url)+'" alt="" referrerpolicy="no-referrer">':'<span class="avatar">'+esc((first||ME.email||'A').charAt(0).toUpperCase())+'</span>';
-  const how=ME.signin_method==='google'?'Signs in with Google':'Signs in by emailed link';
-  /* Membership card, not a settings header: who you are, since when, member
-     number, grade. The institutions OrbitCast's audience knows (RUSI, Chatham
-     House) present belonging this way, and it is the frame that makes "one
-     account, one person" read as a membership rule rather than a restriction. */
-  const since=ME.member_since?new Date(ME.member_since):null;
-  const sinceTxt=since&&!isNaN(since)?since.toLocaleDateString(undefined,{month:'long',year:'numeric'}):'';
+  /* Membership card, not a settings header. The member number, the join date
+     and the sign-in method have been taken out: none of them told the person
+     anything they could act on, and three pieces of administrative trivia
+     under their own name made the card read like a database row. What stays
+     is the part that carries meaning - who you are, the grade, and the
+     one-person-per-account lock. */
   const lockedTo=(ME.cv&&ME.cv.locked_to)||'';
-  const meta=[ME.member_no||'',sinceTxt?'Member since '+sinceTxt:'',how.replace('Signs in','signs in')].filter(Boolean);
   const nMatch=ACCT.hist&&ACCT.hist.runs.length?ACCT.hist.runs.find(r=>r.matches.length):null;
   const counts={matches:nMatch?nMatch.matches.length:'',saved:saved.size||''};
   const body={profile:tabProfile,matches:tabMatches,saved:tabSaved,digest:tabDigest,data:tabData}[ACCT.tab]();
@@ -2489,7 +2570,6 @@ function renderAccount(resetScroll){
   const stats=[[latest?String(latest.matches.length):'—','matches, last run'],[saved.size,'saved'],[g.configured&&!g.paused?(g.next_send_at?dayText(g.next_send_at):'on'):'off','next email'],[ME.cv&&ME.cv.on_file?'on file':'none','stored CV']];
   box.innerHTML='<div class="dr-grab ac-grab"></div><div class="ac-hd">'
     +'<div class="mcardid">'+av+'<div class="who"><b>'+esc(first||ME.email||'')+'<span class="pill grade">Founding member</span></b>'
-    +'<span class="mmeta">'+meta.map(esc).join(' <i>\u00b7</i> ')+'</span>'
     +(lockedTo?'<span class="mlock">'+ic('user','s14')+'Analyses for '+esc(lockedTo)+' \u00b7 one person per account</span>':'')
     +'</div></div>'
     +'<span class="saved-flash" id="savedFlash" aria-live="polite">Saved</span>'
@@ -2501,7 +2581,18 @@ function renderAccount(resetScroll){
   const nb=$('.ac-body',box);if(nb)nb.scrollTop=top;
   const st=$('.ac-tab[aria-selected="true"]',box);if(st&&st.scrollIntoView)st.scrollIntoView({block:'nearest',inline:'center'});
   $$('.deck-wrap',box).forEach(deckSync);
-  ['dgDay','dgHour','dgEvery'].forEach(id=>{const el=$('#'+id);if(el)el.addEventListener('change',()=>{const k={dgDay:'weekday',dgHour:'send_hour',dgEvery:'interval_days'}[id];ACCT.dg[k]=+el.value;saveDigest();});});
+  ['dgDay','dgHour','dgEvery','dgMax'].forEach(id=>{const el=$('#'+id);if(el)el.addEventListener('change',()=>{
+    const k={dgDay:'weekday',dgHour:'send_hour',dgEvery:'interval_days',dgMax:'max_items'}[id];
+    ACCT.dg[k]=el.value===''?null:+el.value;saveDigest();});});
+  /* The niche box saves on blur, not on every keystroke: each save is a
+     round trip, and re-rendering the panel mid-sentence would move the
+     caret out from under the person typing. */
+  const nb=$('#dgNiche');
+  if(nb)nb.addEventListener('blur',()=>{
+    const v=nb.value.trim();
+    if(v===(ACCT.dg.niche_text||''))return;
+    ACCT.dg.niche_text=v;saveDigest();
+  });
 }
 const acSkel='<div class="ac-card"><div class="skel" style="height:18px;width:45%"></div><div class="skel" style="height:14px;margin-top:14px"></div><div class="skel" style="height:14px;width:80%;margin-top:8px"></div></div>';
 const acEmpty=(icon,h,p,btn)=>'<div class="ac-empty">'+ic(icon)+'<h3>'+h+'</h3><p>'+p+'</p>'+(btn||'')+'</div>';
@@ -2514,36 +2605,39 @@ function cvCardHTML(){
   if(ACCT.confirm==='cv')return'<div class="confirm"><b>Delete your stored CV?</b><span>The uploaded file and its extracted text are removed. The profile built from it stays, so your matches and digest keep working.</span><div class="row-btns"><button class="btn btn-danger sm" data-act="delcv">Delete the CV</button><button class="btn btn-ghost sm" data-act="ac-cancel">Cancel</button></div></div>';
   return'<div class="cv-card">'+ic('file')+'<div class="nm"><b>'+esc(cv.last_filename||'Written description')+'</b><span>'+esc(meta||'Used for your matches and your digest')+'</span></div><button class="btn btn-secondary sm" data-act="replacecv">Replace</button><button class="btn btn-ghost sm" data-act="ac-ask" data-what="cv">Delete</button></div>';
 }
-function interestsHTML(){
-  /* The digest's category filter, promoted to a first-class "interests"
-     statement on the profile - same data, same data-dcat handler, one source
-     of truth. Changing it here changes what the digest sends. */
-  const cats=((ACCT.dg&&ACCT.dg.categories)||(ME.alerts&&ME.alerts.categories)||[]);
-  return'<section class="ac-sec"><h3>Your interests</h3>'
-    +'<p class="muted">What you want OrbitCast to watch for you. This narrows your email digest; the analysis itself always considers everything.</p>'
-    +'<div class="chips"><button class="chip" data-dcat="all" aria-pressed="'+(!cats.length)+'">Everything</button>'
-    +CATS.map(c=>'<button class="chip" data-dcat="'+esc(c.key)+'" aria-pressed="'+cats.includes(c.key)+'"><span class="dot" style="--c:var('+c.v+')"></span>'+esc(c.label)+'</button>').join('')
-    +'</div></section>';
+/* One producer for the category chips, used by the profile tab's "Your
+   interests" and the digest tab's "Only these categories". They are the same
+   stored field, written through the same saveDigest(), so they must not drift
+   into two controls that disagree. */
+function selectedCats(){
+  return((ACCT.dg&&ACCT.dg.categories)||(ME.alerts&&ME.alerts.categories)||[]);
 }
-function homeBaseHTML(){
-  /* Home postcode: a durable per-account substitute for in-the-moment
-     geolocation. When set, every match card shows commute distance and a
-     deep link into Citymapper (London transit) and Google Maps (fallback).
-     Stored only as a lat/lng + the display string; the lat/lng never
-     surfaces in the UI. */
-  const hm=ME.home||null;
-  const inp='<div class="pc-row"><input id="pcInput" class="input" type="text" inputmode="text" autocomplete="postal-code" spellcheck="false" placeholder="e.g. SW1A 1AA" aria-label="Home postcode" value=""><button class="btn btn-primary sm" data-act="pc-save">'+(hm?'Update':'Save')+'</button>'+(hm?'<button class="btn btn-ghost sm" data-act="pc-clear" aria-label="Clear postcode">Clear</button>':'')+'</div>';
-  const status=hm
-    ?'<p class="muted"><b>'+esc(hm.postcode)+'</b> saved as your home base. Every match now shows commute distance and a live-times link.</p>'
-    :'<p class="muted">Enter your home postcode and every match shows how far it is, with one-tap live times via Citymapper or Google Maps. UK postcodes only. No sign-in prompts, no browser location access, nothing else.</p>';
-  return'<section class="ac-sec"><h3>Home base</h3>'+status+inp+'<p class="status" id="pcStatus" aria-live="polite"></p></section>';
+function catChipsHTML(cats){
+  return'<div class="chips"><button class="chip" data-dcat="all" aria-pressed="'+(!cats.length)+'">Everything</button>'
+    +CATS.map(c=>'<button class="chip" data-dcat="'+esc(c.key)+'" aria-pressed="'+cats.includes(c.key)+'"><span class="dot" style="--c:var('+c.v+')"></span>'+esc(c.label)+'</button>').join('')
+    +'</div>';
+}
+function interestsHTML(){
+  const cats=selectedCats();
+  const all=!cats.length;
+  /* "Everything" is the default and it is stored as an EMPTY list, which the
+     old version left invisible: no chip looked different and nothing said how
+     many were on, so a person who had never touched this could not tell
+     whether it was filtering or not. The count says it outright. */
+  const count=all
+    ?'<span class="int-count all">'+ic('check','s14')+'Watching all '+CATS.length+' categories</span>'
+    :'<span class="int-count">'+ic('filter','s14')+cats.length+' of '+CATS.length+' selected</span>';
+  return'<section class="ac-sec int-sec"><div class="ac-sec-hd"><h3>Your interests</h3>'+count+'</div>'
+    +'<p class="muted">What OrbitCast watches for you between visits. This narrows your email digest only — an analysis you run yourself always scores every category.</p>'
+    +catChipsHTML(cats)
+    +(all?'':'<p class="int-reset"><button class="linkish" data-dcat="all">Watch everything instead</button></p>')
+    +'</section>';
 }
 function tabProfile(){
   const h=ACCT.hist;if(!h)return acSkel+acSkel;
   const p=h.profile;
   if(!p)return acEmpty('user','No profile yet','Run an analysis and the profile the engine builds from your CV appears here: what it found strong, what it found thin, and where it thinks you are headed. Every match is scored against it.','<button class="btn btn-primary sm" data-act="getmatched">Get matched '+ic('arrow-right','s14')+'</button>')
     +interestsHTML()
-    +homeBaseHTML()
     +'<section class="ac-sec"><h3>Stored CV</h3>'+cvCardHTML()+'</section>';
   const src=h.runs.find(r=>!r.reused)||h.runs[0];
   const from=src?(src.filename?'Built from '+src.filename:'Built from what you wrote')+' · '+fmtWhen(src.at):'';
@@ -2558,7 +2652,6 @@ function tabProfile(){
     +'<div class="ac-foot"><p>Every match and every digest is scored against this and nothing else. If it reads wrong, your matches will be wrong, so update it.</p>'
     +'<div class="row-btns"><button class="btn btn-primary sm" data-act="ac-rerun">Run again with this profile</button><button class="btn btn-secondary sm" data-act="replacecv">Update with a new CV</button></div></div></section>'
     +interestsHTML()
-    +homeBaseHTML()
     +'<section class="ac-sec"><h3>Stored CV</h3>'+cvCardHTML()+'</section>';
 }
 
@@ -2597,37 +2690,28 @@ function savedList(){
   const src=SAVED_SRV||Array.from(saved).map(id=>BY[id]).filter(Boolean).map(snap);
   return src.map(evFromSnap);
 }
-function feedHTML(){
-  const f=ME.calendar_feed;
-  if(!f)return'<section class="ac-card"><div class="ac-card-hd"><div><h3>Keep your calendar in step</h3><p class="sub">A private link for Google Calendar, Apple Calendar or Outlook. Save an event here and it shows up there, with its time and venue. Remove it here and it goes.</p></div></div><div class="row-btns"><button class="btn btn-secondary sm" data-act="ac-feed" data-do="create">'+ic('calendar-plus','s16')+'Create my calendar link</button></div></section>';
-  if(ACCT.confirm==='feed')return'<section class="ac-card"><div class="confirm"><b>Turn the calendar link off?</b><span>Calendar apps subscribed to it stop updating. You can create a new link later; it will be a different address.</span><div class="row-btns"><button class="btn btn-danger sm" data-act="ac-feed" data-do="revoke">Turn it off</button><button class="btn btn-ghost sm" data-act="ac-cancel">Cancel</button></div></div></section>';
-  if(!f.https)return'<section class="ac-card"><div class="ac-card-hd"><div><h3>Your calendar link is active</h3><p class="sub">The link is only shown once, when it is created - it is stored in a form that cannot be read back, so a copy of the database cannot reveal it. Lost it? Reset to get a new one and re-subscribe your calendar.</p></div></div>'
-    +'<div class="row-btns"><button class="btn btn-secondary sm" data-act="ac-feed" data-do="rotate">Reset link</button><button class="btn btn-ghost sm" data-act="ac-ask" data-what="feed">Turn off</button></div></section>';
-  return'<section class="ac-card"><div class="ac-card-hd"><div><h3>Your calendar link</h3><p class="sub">Copy it now - it is shown only this once. Subscribed calendars refresh every few hours. Anyone with this link can see your saved events, so reset it if it gets shared by mistake.</p></div></div>'
-    +'<div class="copy-row"><input class="input" id="feedUrl" readonly value="'+esc(f.https)+'" aria-label="Calendar link"><button class="btn btn-secondary sm" data-act="ac-copy">Copy</button></div>'
-    +'<div class="row-btns"><a class="btn btn-primary sm" href="'+esc(f.webcal)+'">'+ic('calendar-plus','s16')+'Open in my calendar app</a><button class="btn btn-ghost sm" data-act="ac-feed" data-do="rotate">Reset link</button><button class="btn btn-ghost sm" data-act="ac-ask" data-what="feed">Turn off</button></div></section>';
-}
 function tabSaved(){
   const list=savedList().sort(cmp);
-  if(!list.length)return acEmpty('bookmark','Nothing saved yet','Use the bookmark on any event. Saved events are kept on your account, so they are here on every device you sign in on, and stay listed even if the organiser takes the page down.','<button class="btn btn-primary sm" data-view="events">Browse events '+ic('arrow-right','s14')+'</button>')+feedHTML();
+  if(!list.length)return acEmpty('bookmark','Nothing saved yet','Use the bookmark on any event. Saved events are kept on your account, so they are here on every device you sign in on, and stay listed even if the organiser takes the page down.','<button class="btn btn-primary sm" data-view="events">Browse events '+ic('arrow-right','s14')+'</button>');
   const up=list.filter(upcoming),past=list.filter(e=>!upcoming(e)).reverse();
   const row=e=>{const c=catOf(e.cat);
     return'<div class="sv"><div class="sv-when"><b>'+(e.date?fmtDM(e.date):'TBC')+'</b><span>'+(e.date?e.date.toLocaleDateString('en-GB',{weekday:'short'}):'')+(e.time?' '+e.time:'')+'</span></div>'
       +'<div class="sv-main"><h4>'+esc(e.title)+'</h4><p class="hm-meta"><span class="dot" style="--c:var('+c.v+')"></span>'+esc(c.label)+' · '+esc(e.online?'Online':(e.loc.kind==='venue'?e.loc.text:'London'))+(e.unlisted?' · <span class="warn">no longer listed</span>':'')+'</p></div>'
       +'<div class="sv-acts"><a class="icon-btn sm" href="'+esc(e.url)+'" target="_blank" rel="noopener" aria-label="Open the organiser’s page">'+ic('arrow-up-right','s16')+'</a><button class="icon-btn sm" data-ics="'+esc(e.id)+'" aria-label="Add to calendar">'+ic('calendar-plus','s16')+'</button>'+saveBtn(e.id,'sm')+'</div></div>';};
-  return'<section class="ac-sec"><div class="ac-sec-hd"><h3>Upcoming <span class="n">'+up.length+'</span></h3>'+(up.some(e=>e.date)?'<button class="btn btn-ghost sm" data-act="ac-saved-ics">'+ic('download','s16')+'Download .ics</button>':'')+'</div>'
+  /* No bulk .ics download here: the per-event calendar button on each row
+     below does the same job at the moment somebody actually wants it. */
+  return'<section class="ac-sec"><div class="ac-sec-hd"><h3>Upcoming <span class="n">'+up.length+'</span></h3></div>'
     +(up.length?'<div class="sv-list">'+up.map(row).join('')+'</div>':'<p class="muted">Nothing upcoming. Everything you saved has already happened.</p>')+'</section>'
-    +feedHTML()
     +(past.length?'<details class="ac-sec past"><summary><h3>Past <span class="n">'+past.length+'</span></h3>'+ic('chevron-down')+'</summary><div class="sv-list">'+past.map(row).join('')+'</div></details>':'');
 }
 
 /* ---------- digest ---------- */
-const DG_STATUS={sent:n=>n+' match'+(n===1?'':'es')+' sent',sent_empty:()=>'Nothing cleared 65, so you got the short empty one',skipped_empty:()=>'Nothing new. No email sent',send_failed:()=>'Could not be delivered. Those events will be tried again',no_profile:()=>'Skipped: no profile to match against',error:()=>'Failed on our side. Nothing was sent'};
 function tabDigest(){
   const g=ACCT.dg||{};const on=!!(g.configured&&!g.paused);
   const freq=g.frequency||'weekly',every=g.interval_days||3,day=g.weekday||0,hour=(g.send_hour===0||g.send_hour)?g.send_hour:8;
   const days=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
   const cats=g.categories||[];const snoozed=g.snooze_until&&new Date(g.snooze_until)>new Date();
+  const maxItems=g.max_items||'',niche=g.niche_text||'';
   let h='<section class="ac-card"><div class="set-row"><div><b>Email digest</b><span>New events that score 65 or more against your profile. Some weeks that is none, and the email says so in two lines.</span></div><button class="switch" role="switch" data-act="dg-on" aria-checked="'+on+'" aria-label="Email digest"'+(ME.has_profile?'':' disabled')+'></button></div>';
   if(!ME.has_profile)h+='<p class="muted">Run an analysis first. The digest matches against your saved profile.</p>';
   if(on){
@@ -2636,15 +2720,28 @@ function tabDigest(){
       +'<div class="two">'+(freq==='weekly'?'<label class="field"><span>On</span><select class="select" id="dgDay">'+days.map((d,i)=>'<option value="'+i+'"'+(day===i?' selected':'')+'>'+d+'</option>').join('')+'</select></label>'
         :freq==='every_n_days'?'<label class="field"><span>Every</span><select class="select" id="dgEvery">'+[2,3,4,5,7,10,14].map(n=>'<option value="'+n+'"'+(every===n?' selected':'')+'>'+n+' days</option>').join('')+'</select></label>':'')
       +'<label class="field"><span>At (your local time)</span><select class="select" id="dgHour">'+Array.from({length:24},(_,i)=>i).map(hh=>'<option value="'+hh+'"'+(hour===hh?' selected':'')+'>'+pad(hh)+':00</option>').join('')+'</select></label></div>'
-      +'<div class="field"><span>Only these categories</span><div class="chips"><button class="chip" data-dcat="all" aria-pressed="'+(!cats.length)+'">Everything</button>'+CATS.map(c=>'<button class="chip" data-dcat="'+esc(c.key)+'" aria-pressed="'+cats.includes(c.key)+'"><span class="dot" style="--c:var('+c.v+')"></span>'+esc(c.label)+'</button>').join('')+'</div></div>'
+      +'<label class="field"><span>How many at most</span><select class="select" id="dgMax">'
+        +'<option value=""'+(maxItems?'':' selected')+'>However many clear the bar</option>'
+        +[1,2,3,4,5].map(n=>'<option value="'+n+'"'+(maxItems===n?' selected':'')+'>'+n+' event'+(n===1?'':'s')+'</option>').join('')
+      +'</select><em class="fhint">A ceiling, not a target. A quiet week still sends fewer, or none.</em></label>'
+      +'<div class="field"><span>Only these categories</span>'+catChipsHTML(cats)+'</div>'
+      /* Free text, deliberately one box and not a conversation: nothing
+         replies to it, so anything chat-shaped would promise an exchange
+         that does not happen. What it does is stated plainly underneath. */
+      +'<label class="field"><span>What you\'re actually after</span>'
+        +'<textarea class="input ta" id="dgNiche" rows="3" maxlength="400" placeholder="e.g. hands-on cyber threat intel, nothing vendor-led, ideally evenings in central London">'+esc(niche)+'</textarea>'
+        +'<em class="fhint">In your own words. It nudges what gets picked for your digest; it never changes the 65 bar or invents a match.'
+        +(niche?' <button class="linkish" data-act="dg-niche-clear">Clear this</button>':'')+'</em></label>'
       +(snoozed?'':'<div class="field"><span>Take a break</span><div class="chips">'+[[7,'1 week'],[14,'2 weeks'],[30,'1 month']].map(([n,l])=>'<button class="chip" data-snooze="'+n+'">'+l+'</button>').join('')+'</div></div>')
       +'</div><p class="next">'+(g.next_send_at?'Next email: <b>'+esc(nextText(g.next_send_at))+'</b>':'')+'</p>';
   }
   h+='</section>';
   h+='<section class="ac-card"><div class="set-row"><div><b>See one now</b><span>Sends today’s digest to '+esc(ME.email||'your address')+', scored exactly like the scheduled one. It takes about a minute and does not use up your next email.</span></div><button class="btn btn-secondary sm" data-act="ac-test"'+(ME.has_profile&&ACCT.busy!=='test'?'':' disabled')+'>'+(ACCT.busy==='test'?'<span class="sp"></span>Sending':'Send it')+'</button></div></section>';
-  const rec=(g.recent||[]);
-  h+='<section class="ac-sec"><h3>What you’ve been sent</h3>'+(rec.length?'<ul class="sends">'+rec.map(s=>'<li><b>'+esc(dayText(s.at))+'</b><span>'+esc((DG_STATUS[s.status]||(()=>s.status))(s.matches||0))+'</span></li>').join('')+'</ul>':'<p class="muted">Nothing yet.</p>')
-    +'<p class="muted">This is the only email OrbitCast sends. Every one has a link that turns it off in one click, without signing in.</p></section>';
+  /* The per-send log is gone. It was a list of dates with no action attached
+     to any of them - the emails are already in the person's inbox, which is
+     a better record than ours. The one line worth keeping is the promise. */
+  h+='<section class="ac-sec"><p class="muted">This is the only email OrbitCast sends. '
+    +'Every one has a link that turns it off in one click, without signing in.</p></section>';
   return h;
 }
 async function saveDigest(over){
@@ -2653,12 +2750,16 @@ async function saveDigest(over){
   const body={frequency:g.frequency||'weekly',interval_days:g.interval_days||3,weekday:g.weekday||0,
     send_hour:(g.send_hour===0||g.send_hour)?g.send_hour:8,
     timezone:(Intl.DateTimeFormat().resolvedOptions().timeZone)||'Europe/London',
-    paused:!!g.paused,categories:g.categories||[]};
+    paused:!!g.paused,categories:g.categories||[],max_items:g.max_items||null};
+  // Sent only when it is part of this change: the server treats an absent
+  // niche_text as "leave it alone" and a present null as "clear it", so
+  // always sending it would wipe the text on every unrelated save.
+  if('niche_text' in g)body.niche_text=g.niche_text||null;
   if('snooze_days' in g){body.snooze_days=g.snooze_days;delete g.snooze_days;}
   try{
     const r=await postJSON('/api/digest/prefs',body);const d=await r.json().catch(()=>({}));
     if(!r.ok){acNote(d.error||'Could not save that.','err');return;}
-    Object.assign(g,body,{configured:true,paused:d.paused,next_send_at:d.next_send_at,categories:d.categories||body.categories,snooze_until:d.snooze_until||null});
+    Object.assign(g,body,{configured:true,paused:d.paused,next_send_at:d.next_send_at,categories:d.categories||body.categories,max_items:d.max_items||null,niche_text:d.niche_text||'',snooze_until:d.snooze_until||null});
     ACCT.dg=g;ME.alerts=Object.assign({},ME.alerts,g);
     if(!d.paused)setKeep(true);
     ACCT.note=null;renderAccount();flash();
@@ -2680,21 +2781,17 @@ function tabData(){
   const h=ACCT.hist,cv=ME.cv||{},g=ME.alerts||{};
   const runs=h?h.runs.length:0,matches=h?h.runs.reduce((n,r)=>n+r.matches.length,0):0;
   const item=(k,v,act)=>'<li><div><b>'+k+'</b><span>'+v+'</span></div>'+(act||'')+'</li>';
-  const how=ME.signin_method==='google'?'With your Google account. OrbitCast never sees a password.':'With a link emailed to '+esc(ME.email||'you')+'. There is no password to forget or reset.';
   let s='<section class="ac-sec"><h3>What OrbitCast holds about you</h3><ul class="held">'
     +item('Profile',h&&h.profile?'Built by the engine from your CV or description. Shown in full under Profile.':'None.','<button class="btn btn-ghost sm" data-act="ac-tab" data-tab="profile">View</button>')
     +item('CV',cv.on_file?esc([cv.last_filename||'Written description',cv.total_bytes?fmtBytes(cv.total_bytes):''].filter(Boolean).join(' · '))+'. The file and its extracted text.':'Nothing stored.',cv.on_file?'<button class="btn btn-ghost sm" data-act="ac-tab" data-tab="profile">Manage</button>':'')
     +item('Match history',h?(runs+' run'+(runs===1?'':'s')+', '+matches+' match'+(matches===1?'':'es')+' with their reasoning.'):'Loading…','<button class="btn btn-ghost sm" data-act="ac-tab" data-tab="matches">View</button>')
-    +item('Saved events',saved.size+' saved'+(ME.calendar_feed?', shared with your calendar by private link.':'.'),'<button class="btn btn-ghost sm" data-act="ac-tab" data-tab="saved">View</button>')
+    +item('Saved events',saved.size+' saved.','<button class="btn btn-ghost sm" data-act="ac-tab" data-tab="saved">View</button>')
     +item('Email schedule',g.configured&&!g.paused?'On. '+(g.next_send_at?'Next '+esc(dayText(g.next_send_at))+'.':''):'Off.','<button class="btn btn-ghost sm" data-act="ac-tab" data-tab="digest">Change</button>')
     +item('Identity',(ME.cv&&ME.cv.locked_to)?'Analyses are for '+esc(ME.cv.locked_to)+' - one person per account, so the free analyses stay free. It clears only when the account is deleted.':'Set by the first named CV you analyse. One person per account.','')
-    +item('Sign-in',how,'')
     +'</ul><p class="muted">Not held: a password, your LinkedIn login, or any tracking beyond the clicks on your own matches. Nothing is sold or shared, and there are no paid placements.</p></section>';
-  s+='<section class="ac-card"><div class="set-row"><div><b>Keep my CV and profile</b><span>Needed for the digest and for reusing your profile. Off means the next run stores nothing.</span></div><button class="switch" role="switch" data-act="keep2" aria-checked="'+S.keep+'" aria-label="Keep my CV and profile"></button></div>'
-    +'<div class="set-row"><div><b>Use my location for distances</b><span>Shows how far each match is. It never changes which events you see.</span></div><button class="switch" role="switch" data-act="loc" aria-checked="'+S.locOn+'" aria-label="Use my location"></button></div></section>';
-  s+='<section class="ac-card"><div class="set-row"><div><b>Download everything</b><span>One readable file with your profile, CV text, every run and match, saved events and email history. Member since '+esc(fmtWhen(ME.member_since)||'today')+'.</span></div><a class="btn btn-secondary sm" href="/api/me/export" download>'+ic('download','s16')+'Download</a></div></section>';
+  s+='<section class="ac-card"><div class="set-row"><div><b>Keep my CV and profile</b><span>Needed for the digest and for reusing your profile. Off means the next run stores nothing.</span></div><button class="switch" role="switch" data-act="keep2" aria-checked="'+S.keep+'" aria-label="Keep my CV and profile"></button></div>'+'</section>';
   s+='<section class="ac-sec">'+(ACCT.confirm==='all'
-    ?'<div class="confirm"><b>Delete everything?</b><span>This removes your stored CV, profile, every run and match, saved events, calendar link and location, deletes your account and stops the digest. It happens now and can’t be undone. Download your data first if you want a copy.</span><div class="row-btns"><button class="btn btn-danger sm" data-act="delyes">Delete everything</button><button class="btn btn-ghost sm" data-act="ac-cancel">Cancel</button></div></div>'
+    ?'<div class="confirm"><b>Delete everything?</b><span>This removes your stored CV, profile, every run and match, and your saved events, deletes your account and stops the digest. It happens now and can’t be undone.</span><div class="row-btns"><button class="btn btn-danger sm" data-act="delyes">Delete everything</button><button class="btn btn-ghost sm" data-act="ac-cancel">Cancel</button></div></div>'
     :'<div class="set-row"><div><b>Delete my account and data</b><span>Everything listed above, immediately. No waiting period and no email to confirm.</span></div><button class="btn btn-danger sm" data-act="ac-ask" data-what="all">Delete…</button></div>')+'</section>';
   return s;
 }
@@ -2728,43 +2825,19 @@ async function muteMatch(id,title,on){
     if(acctOpen())renderAccount();else toast(on?'Muted. It won’t be emailed to you.':'Unmuted');
   }catch(e){acNote('Network error. Nothing was saved.','err');}
 }
-async function feedAction(what){
-  ACCT.confirm=null;
-  try{
-    const r=await postJSON('/api/me/calendar-feed',{action:what});const d=await r.json().catch(()=>({}));
-    if(!r.ok){acNote(d.error||'Could not do that.','err');return;}
-    ME.calendar_feed=d.calendar_feed||null;
-    acNote(what==='revoke'?'Calendar link turned off.':what==='rotate'?'New link created. The old one no longer works, so re-subscribe your calendar.':'Calendar link created.','ok');
-  }catch(e){acNote('Network error. Nothing changed.','err');}
-}
 async function deleteAll(){
   try{await fetch('/api/forget',{method:'POST'});}catch(e){}
-  ME={signed_in:false,google_enabled:ME.google_enabled,email_signin_enabled:ME.email_signin_enabled};S.result=null;S.matches=null;S.keep=true;S.locOn=false;OC_USER_LOC=null;
+  ME={signed_in:false,google_enabled:ME.google_enabled,email_signin_enabled:ME.email_signin_enabled};S.result=null;S.matches=null;S.keep=true;
   ACCT.hist=null;SAVED_SRV=null;savedSyncedFor=null;saved.clear();store.set('oc_saved',[]);
   clearFile();clearDraft();$('#aiText').value='';updCount();$('#results').hidden=true;$('#results').innerHTML='';$('#returning').hidden=true;
   closeModal();syncRun();if(S.view!=='home')render();
   toast('Deleted. Your data and account are gone.');
 }
-function setLocation(on){
-  S.locOn=!!on;$$('[data-act="loc"]').forEach(b=>b.setAttribute('aria-checked',String(S.locOn)));
-  if(!on){OC_USER_LOC=null;postJSON('/api/location',{accepted:false}).catch(()=>{});flash();return;}
-  if(!navigator.geolocation){toast('This browser has no location support');S.locOn=false;$$('[data-act="loc"]').forEach(b=>b.setAttribute('aria-checked','false'));return;}
-  navigator.geolocation.getCurrentPosition(pos=>{
-    OC_USER_LOC={lat:pos.coords.latitude,lng:pos.coords.longitude};
-    postJSON('/api/location',{accepted:true,lat:pos.coords.latitude,lng:pos.coords.longitude,accuracy:pos.coords.accuracy}).catch(()=>{});
-    flash();
-  },()=>{
-    S.locOn=false;$$('[data-act="loc"]').forEach(b=>b.setAttribute('aria-checked','false'));
-    postJSON('/api/location',{accepted:false}).catch(()=>{});
-    toast('Location was not shared');
-  },{enableHighAccuracy:false,timeout:8000,maximumAge:600000});
-}
 function flash(){const f=$('#savedFlash');if(!f)return;f.classList.add('on');clearTimeout(flash.t);flash.t=setTimeout(()=>f.classList.remove('on'),1400);}
 async function loadConsent(){
   try{
-    const [c,l]=await Promise.all([fetch('/api/consent').then(r=>r.json()),fetch('/api/location').then(r=>r.json())]);
+    const c=await fetch('/api/consent').then(r=>r.json());
     if(c&&c.decision===false)setKeep(false,false);
-    if(l&&l.decision===true){S.locOn=true;if(typeof l.lat==='number')OC_USER_LOC={lat:l.lat,lng:l.lng};}
   }catch(e){}
 }
 
@@ -2840,8 +2913,10 @@ function closeMenu(){
   if(!menuOpen)return;const [ms,bs]=MENUS[menuOpen];const m=$(ms),b=$(bs);
   if(m)m.hidden=true;if(b)b.setAttribute('aria-expanded','false');menuOpen=false;
 }
-function clearExtra(){S.fmt=new Set();S.tod='any';S.dow='any';S.timed=false;S.sort='soon';S.hidePitch=false;store.set('oc_hide_pitch',0);}
-function resetFilters(){S.q='';S.range='all';S.cat='all';S.savedOnly=false;S.where='london';store.set('oc_where','london');clearExtra();const q=$('#q');if(q)q.value='';}
+/* Sort is not a filter, so "clear these filters" leaves it alone - it used
+   to reset S.sort to 'soon', which silently undid a chosen ordering. */
+function clearExtra(){S.fmt=new Set();S.tod='any';S.dow='any';S.timed=false;S.hidePitch=false;store.set('oc_hide_pitch',0);}
+function resetFilters(){S.q='';S.range='all';S.cat='all';S.savedOnly=false;S.sort=DEFAULT_SORT;S.where='london';store.set('oc_where','london');clearExtra();const q=$('#q');if(q)q.value='';}
 const filtersOpen=()=>$('#drawer').classList.contains('open')&&$('#drawer').getAttribute('aria-label')==='Filters';
 // Re-renders the list under an open filter drop-down without closing it,
 // so several filters can be set in a row; the panel's counts update too.
@@ -2851,7 +2926,38 @@ function refilter(){
   if(open){const m=$('#filterMenu'),b=$('#filterBtn');if(m){m.innerHTML=filterPanelHTML();m.hidden=false;menuOpen='filter';b&&b.setAttribute('aria-expanded','true');}}
   else if(filtersOpen())openFilters();
 }
-function scrollToConsole(){setTimeout(()=>{$('#console').scrollIntoView({behavior:REDUCE?'auto':'smooth',block:'start'});},40);}
+/* scrollIntoView resolves against whichever ancestor scrolls, so this keeps
+   working now that #v-home is itself the scroll container rather than the
+   window. The timeout lets the view switch paint first. */
+function scrollToConsole(){setTimeout(()=>{const el=$('#console');if(el)el.scrollIntoView({behavior:REDUCE?'auto':'smooth',block:'start'});},40);}
+
+/* Panel dots. Real buttons that move focus, not decoration: a pager nobody
+   can operate from the keyboard is worse than no pager. */
+const HOME_PANELS=['panel-hero','console','panel-closing'];
+function goPanel(id){
+  const el=document.getElementById(id);if(!el)return;
+  el.scrollIntoView({behavior:REDUCE?'auto':'smooth',block:'start'});
+  const first=el.querySelector('button,a[href],input,select,textarea');
+  if(first)setTimeout(()=>first.focus({preventScroll:true}),REDUCE?0:320);
+}
+function markPanel(id){
+  $$('#homeDots button').forEach(b=>b.setAttribute('aria-current',String(b.dataset.panel===id)));
+}
+(function watchPanels(){
+  const dots=$('#homeDots');
+  if(dots)dots.addEventListener('click',ev=>{
+    const b=ev.target.closest('[data-panel]');if(b)goPanel(b.dataset.panel);
+  });
+  markPanel(HOME_PANELS[0]);
+  if(!window.IntersectionObserver)return;
+  const io=new IntersectionObserver(entries=>{
+    // The panel covering most of the viewport is the one we are "on".
+    let best=null;
+    for(const e of entries)if(e.isIntersecting&&(!best||e.intersectionRatio>best.intersectionRatio))best=e;
+    if(best)markPanel(best.target.id);
+  },{root:$('#homePanels'),threshold:[0.5,0.75]});
+  HOME_PANELS.forEach(id=>{const el=document.getElementById(id);if(el)io.observe(el);});
+})();
 
 /* Toggle (checkbox) handler. Separate from the click dispatcher so the
    browser's native checked-state updates FIRST, then we read it, which
@@ -2898,6 +3004,17 @@ document.addEventListener('click',ev=>{
     case'account':openAccount();break;
     case'getmatched':closeModal();if(S.view!=='home')go('home',{scroll:false});scrollToConsole();break;
     case'saved':S.savedOnly=!S.savedOnly;S.winDays=7;render();if(filtersOpen())openFilters();break;
+    case'match-saved':{
+      S.matchSavedFirst=!S.matchSavedFirst;
+      // Re-render from the stored result rather than re-running anything:
+      // this is a reorder of what is already on screen, not a new analysis.
+      const res=$('#results');
+      if(S.result&&res&&!res.hidden){
+        res.innerHTML=resultsHTML(S.result);
+        $$('.deck-wrap',res).forEach(deckSync);
+      }
+      break;
+    }
     case'hidden':S.showHidden=!S.showHidden;render();break;
     case'more':S.winDays+=7;render();break;
     case'moreall':S.winDays=9999;render();break;
@@ -2927,7 +3044,6 @@ document.addEventListener('click',ev=>{
     case'signout':signOut();break;
     case'dg-on':saveDigest({paused:t.getAttribute('aria-checked')==='true'});break;
     case'keep2':setKeep(!S.keep);postJSON('/api/consent',Object.assign({accepted:S.keep},TRAFFIC)).catch(()=>{});flash();break;
-    case'loc':setLocation(t.getAttribute('aria-checked')!=='true');break;
     case'delyes':deleteAll();break;
     case'ac-tab':setTab(d.tab);break;
     case'ac-ask':ACCT.confirm=d.what;ACCT.note=null;renderAccount();{const c=$('#modalBox .confirm .btn-ghost');c&&c.focus();}break;
@@ -2936,59 +3052,12 @@ document.addEventListener('click',ev=>{
     case'ac-rerun':closeModal();if(S.view!=='home')go('home',{scroll:false});scrollToConsole();runAnalysis({reuse:true});break;
     case'ac-details':closeModal();openEvent(d.id);break;
     case'ac-mute':muteMatch(d.id,d.title,t.getAttribute('aria-pressed')!=='true');break;
-    case'ac-saved-ics':{const l=savedList().filter(e=>e.date&&upcoming(e)).sort(cmp);if(l.length){download(buildICS(l),'orbitcast-saved.ics','text/calendar');toast(l.length+' saved event'+(l.length===1?'':'s')+' downloaded');}break;}
-    case'ac-feed':feedAction(d.do);break;
-    case'ac-copy':{const i=$('#feedUrl');if(!i)break;const done=()=>{t.textContent='Copied';setTimeout(()=>{t.textContent='Copy';},1600);};if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(i.value).then(done,()=>{i.select();});else{i.select();try{document.execCommand('copy');done();}catch(e){}}break;}
     case'ac-resume':saveDigest({snooze_days:0});break;
     case'ac-test':testDigest();break;
-    case'pc-save':savePostcode();break;
-    case'pc-clear':clearPostcode();break;
+    case'dg-niche-clear':ACCT.dg.niche_text='';saveDigest();break;
   }
 });
 
-/* Postcode: validate on the server (postcodes.io), store the geocode on
-   the account. We never show the stored lat/lng; the postcode text is the
-   only thing the UI reads back. OC_USER_LOC is updated in place so the
-   next render reflects it without a reload. */
-async function savePostcode(){
-  const inp=$('#pcInput'); if(!inp) return;
-  const raw=(inp.value||'').trim();
-  const st=$('#pcStatus'); if(st){st.className='status';st.textContent='';}
-  if(!raw){if(st){st.className='status err';st.textContent='Enter your postcode first.';}inp.focus();return;}
-  const btn=$('#modalBox [data-act="pc-save"]');if(btn)btn.disabled=true;
-  try{
-    const r=await fetch('/api/me/postcode',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({postcode:raw})});
-    const data=await r.json().catch(()=>({}));
-    if(r.ok&&data.home){
-      ME.home={postcode:data.home.postcode,lat:null,lng:null};
-      /* Reload /api/me to pick up the stored lat/lng (the server deliberately
-         doesn't echo coords in the POST response - the GET is the source of
-         truth, keeping the response payload the same in both routes). */
-      try{const me=await fetch('/api/me',{cache:'no-store'}).then(r=>r.json());ME=me;
-        if(ME.home&&typeof ME.home.lat==='number'&&typeof ME.home.lng==='number'){
-          OC_USER_LOC={lat:ME.home.lat,lng:ME.home.lng,src:'postcode',postcode:ME.home.postcode};
-        }
-      }catch(e){}
-      toast('Home base set to '+data.home.postcode);
-      renderAccount();
-    }else{
-      const msg=(data&&data.error)||'That didn\'t work. Try again.';
-      if(st){st.className='status err';st.textContent=msg;}
-    }
-  }catch(e){
-    if(st){st.className='status err';st.textContent='Could not reach the server. Try again.';}
-  }finally{if(btn)btn.disabled=false;}
-}
-async function clearPostcode(){
-  try{
-    const r=await fetch('/api/me/postcode',{method:'DELETE'});
-    if(r.ok){
-      ME.home=null; OC_USER_LOC=null;
-      toast('Home base cleared');
-      renderAccount();
-    }
-  }catch(e){}
-}
 document.addEventListener('keydown',ev=>{
   const tag=(ev.target.tagName||'').toLowerCase();const typing=tag==='input'||tag==='textarea'||tag==='select'||ev.target.isContentEditable;
   if(ev.key==='Escape'){
@@ -3045,13 +3114,23 @@ function heroClock(){
 }
 (function minuteTick(){heroClock();setTimeout(minuteTick,60000-Date.now()%60000+50);})();
 function tick(){const n=new Date();if(dkey(n)!==dkey(TODAY)){NOW=n;TODAY=day0(n);}else NOW=n;}
-setInterval(()=>{const before=dkey(TODAY);tick();if(dkey(TODAY)!==before)render();else if(S.view==='home')renderHome();else if(S.view==='events'&&S.sort==='soon'&&!$('#drawer').classList.contains('open')&&!menuOpen)render();},60000);
+setInterval(()=>{const before=dkey(TODAY);tick();if(dkey(TODAY)!==before)render();else if(S.view==='home')renderHome();else if(S.view==='events'&&S.sort===DEFAULT_SORT&&!$('#drawer').classList.contains('open')&&!menuOpen)render();},60000);
 
 /* ================= boot ================= */
 buildCats();syncTheme();syncRun();
 const fromHash=()=>{const h=(location.hash||'').replace('#','');return h in TITLES?h:'home';};
 window.addEventListener('popstate',()=>go(fromHash(),{push:false}));
 go(fromHash(),{push:false,scroll:false});
+/* Re-measure whenever the sticky stack can change shape: the toolbar wraps
+   on resize, and its contents change between views. A ResizeObserver catches
+   both without polling. */
+(function watchSticky(){
+  if(!window.ResizeObserver)return;
+  const ro=new ResizeObserver(()=>requestAnimationFrame(measureSticky));
+  ['#toolbar','#catrail'].forEach(sel=>{const el=$(sel);if(el)ro.observe(el);});
+})();
+window.addEventListener('resize',()=>requestAnimationFrame(measureSticky));
+
 (async function boot(){
   const p=new URLSearchParams(location.search);
   const signin=p.get('signin'),settings=p.get('settings');

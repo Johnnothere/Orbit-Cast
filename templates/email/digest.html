@@ -1,0 +1,45 @@
+{% extends "email/base.html" %}
+
+{% block body %}
+  <p class="oc-title" style="margin:0 0 4px 0;font-size:17px;font-weight:600;">Your shortlist</p>
+  <p style="margin:0 0 10px 0;color:{{ c.muted }};font-size:13px;">
+    Matched against your profile. Nothing below scored under 65% — anything weaker was
+    left out rather than padded in.{% if capped %} More cleared it than the {{ max_items }}
+    you asked for, so these are the strongest.{% endif %}
+  </p>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    {% for e in events %}
+    <tr><td style="padding:14px 0;border-top:1px solid rgba(255,255,255,.08);">
+      <a href="{{ e.url or '#' }}" style="color:{{ c.text }};font-size:16px;font-weight:600;
+        text-decoration:none;">{{ e.title or 'Untitled' }}</a>
+
+      <div style="color:{{ c.muted }};font-size:13px;margin:4px 0 6px 0;">
+        {{ e.date or 'Date TBC' }}{% if e.category %} &nbsp;·&nbsp; {{ e.category }}{% endif %}
+        {%- if e.fit_score is not none %} &nbsp;·&nbsp;
+        <span style="color:{{ c.accent }};font-weight:600;">{{ e.fit_score|int }}% fit</span>
+        {%- endif %}
+      </div>
+
+      {#- Hackathons read differently from talks - you enter them rather than
+          attend them - so they get a badge. Deliberately NOT a deadline or a
+          prize line: the scraper does not collect those fields today, and a
+          template branch that can never fire is a feature that looks done
+          and is not. Adding them is a scraper change, not an email one. -#}
+      {% if e.is_hackathon %}
+      <div style="margin:0 0 6px 0;">
+        <span style="display:inline-block;padding:2px 8px;border-radius:999px;
+          background:rgba(110,168,254,.14);color:{{ c.accent }};
+          font-size:11.5px;font-weight:600;letter-spacing:.04em;">HACKATHON</span>
+      </div>
+      {% endif %}
+
+      {% if e.why %}<div style="color:{{ c.text }};font-size:14px;opacity:.9;">{{ e.why }}</div>{% endif %}
+    </td></tr>
+    {% endfor %}
+  </table>
+{% endblock %}
+
+{% block footnote %}
+  <br><span style="color:{{ c.muted }};">This is the only email OrbitCast sends.</span>
+{% endblock %}

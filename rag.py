@@ -27,6 +27,9 @@ import db
 
 log = logging.getLogger("orbitcast.rag")
 
+# Admin document ingestion. Was hardcoded to claude-sonnet-5 in the call
+# itself; named here so it is switchable like every other model in the app.
+INGEST_MODEL = os.environ.get("OC_MODEL_RAG", "claude-sonnet-5")
 VOYAGE_API_KEY = os.environ.get("VOYAGE_API_KEY", "")
 VOYAGE_MODEL = "voyage-3"     # 1024-dim - matches labeled_examples.embedding column
 EMBED_DIM = 1024
@@ -131,25 +134,16 @@ def parse_document_to_examples(document_text: str) -> list:
     if not document_text or not document_text.strip():
         return []
     try:
-        from anthropic import Anthropic
-        client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-        resp = client.messages.create(
-            model="claude-sonnet-5",
-            max_tokens=4096,
-            system=_INGEST_PROMPT,
-            messages=[{"role": "user", "content": document_text[:20000]}],
-        )
-        raw = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
-        if raw.startswith("```"):
-            raw = raw[3:]
-            if raw.lower().startswith("json"):
-                raw = raw[4:]
-            raw = raw.rsplit("```", 1)[0].strip()
-        start, end = raw.find("{"), raw.rfind("}")
-        if start != -1 and end != -1:
-            raw = raw[start:end + 1]
-        data = json.loads(raw)
-        return data.get("examples", [])
+        # Goes through ai_engine rather than building a client here. The
+        # inline Anthropic() this replaces had no timeout, no retry budget, no
+        # in-flight semaphore and no outage breaker, so on the single worker a
+        # hung ingest call held a thread for the SDK's ten-minute default
+        # while the breaker that exists to stop exactly that sat one import
+        # away. Imported lazily to keep the ai_engine -> rag import one-way.
+        import ai_engine
+        data = ai_engine._call(_INGEST_PROMPT, document_text[:20000],
+                               max_tokens=4096, model=INGEST_MODEL)
+        return data.get("examples", []) if isinstance(data, dict) else []
     except Exception as exc:
         log.warning(f"parse_document_to_examples failed: {exc}")
         return []

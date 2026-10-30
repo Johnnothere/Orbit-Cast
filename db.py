@@ -2905,25 +2905,37 @@ def get_digest_extras(account_id) -> dict:
         with _read_cursor() as cur:
             if cur is None:
                 return {}
-            cur.execute("select categories, snooze_until from digest_prefs where account_id = %s",
-                        (account_id,))
+            cur.execute("select categories, snooze_until, max_items, niche_text "
+                        "from digest_prefs where account_id = %s", (account_id,))
             row = cur.fetchone()
             if not row:
                 return {}
-            return {"categories": list(row[0] or []), "snooze_until": row[1]}
+            return {"categories": list(row[0] or []), "snooze_until": row[1],
+                    "max_items": row[2], "niche_text": row[3]}
     except Exception as exc:
         log.warning(f"get_digest_extras failed: {exc}")
         return {}
 
 
-def set_digest_extras(account_id, categories, snooze_until) -> bool:
+def set_digest_extras(account_id, categories, snooze_until,
+                      max_items=None, niche_text=None, touch_niche=False) -> bool:
+    """touch_niche says whether niche_text is part of this write at all.
+
+    Needed because None is a real value here - it means "clear what I wrote" -
+    and every other caller (a category chip, a snooze) must leave the text
+    alone rather than wipe it as a side effect."""
     try:
         with _cursor() as cur:
             if cur is None:
                 return False
-            cur.execute("update digest_prefs set categories = %s, snooze_until = %s, "
-                        "updated_at = now() where account_id = %s",
-                        (list(categories) if categories else None, snooze_until, account_id))
+            sets = ["categories = %s", "snooze_until = %s", "max_items = %s"]
+            args = [list(categories) if categories else None, snooze_until, max_items]
+            if touch_niche:
+                sets += ["niche_text = %s", "niche_updated_at = now()"]
+                args.append(niche_text or None)
+            args.append(account_id)
+            cur.execute("update digest_prefs set " + ", ".join(sets)
+                        + ", updated_at = now() where account_id = %s", tuple(args))
             return True
     except Exception as exc:
         log.warning(f"set_digest_extras failed: {exc}")
