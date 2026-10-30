@@ -130,9 +130,24 @@ badge to earn, and nothing here should be described as an audit.
 4. Make it a required check on PRs only once the baseline is green. A gate
    that is red on arrival gets ignored, and then it is not a gate.
 
-The `security` GitHub Actions workflow already runs `pip-audit`, `bandit` and
-`semgrep` on every PR and weekly, so the dependency half of this is covered
-whether or not Aikido is connected.
+### The CI workflow is not in the repository yet
+
+`.github/workflows/security.yml` exists on disk but is deliberately **not
+committed**. GitHub refuses a push that adds or edits a workflow file unless
+the token carries `workflow` scope on top of `repo` — it will not let a
+code-push token quietly add something that runs on their infrastructure,
+which is the right call.
+
+To add it, either:
+
+- push it with a token that has **`repo` + `workflow`** scope, or
+- paste the file in through the GitHub web UI (Actions → New workflow), which
+  needs no extra token scope at all.
+
+Once it is in, `pip-audit`, `bandit` and `semgrep` run on every PR and weekly,
+so the dependency half of the Aikido work is covered whether or not Aikido
+itself is connected. Until then, those checks only run when someone runs them
+by hand.
 
 ---
 
