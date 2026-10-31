@@ -235,6 +235,30 @@ class ThinkingBudgetTests(unittest.TestCase):
         self.assertEqual(ai_engine.EFFORT_CRITIQUE, "medium")
 
 
+class OrientationSpeedTests(unittest.TestCase):
+    """The thin-profile briefing runs alongside scoring, so it sets the wait.
+    It took ~105s at default effort with five searches."""
+
+    def _seen(self):
+        seen = {}
+
+        def capture(**kw):
+            seen.update(kw)
+            return _AnthropicResp(json.dumps({"ok": True}))
+
+        with _patch("_create", capture):
+            ai_engine._call_with_search("sys", "user")
+        return seen
+
+    def test_runs_at_low_effort(self):
+        self.assertEqual(self._seen()["output_config"], {"effort": "low"})
+
+    def test_searches_fewer_times(self):
+        tool = self._seen()["tools"][0]
+        self.assertEqual(tool["max_uses"], 3)
+        self.assertEqual(tool["type"], "web_search_20260209")
+
+
 class UsageTests(unittest.TestCase):
     def setUp(self):
         self._saved = json.loads(json.dumps(ai_engine.USAGE))

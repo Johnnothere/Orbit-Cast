@@ -201,6 +201,14 @@ THINKING_HEADROOM = int(os.environ.get("OC_THINKING_HEADROOM", "6000"))
 # Set either to "high" to trade that time back for depth.
 EFFORT_SCORE = os.environ.get("OC_EFFORT_SCORE", "medium").strip().lower() or None
 EFFORT_CRITIQUE = os.environ.get("OC_EFFORT_CRITIQUE", "medium").strip().lower() or None
+# The web-searched field briefing for thin profiles. It runs alongside scoring,
+# so it IS the wall-clock time for those people: at the API's default effort
+# with five searches it took ~105s on 31 Oct 2026 while scoring had finished
+# in 27s - and 105s is uncomfortably close to AI_TIMEOUT_S, past which the
+# SDK's retries turn one slow call into several. It is a short paragraph of
+# context, not the judgment, so it runs at low effort on fewer searches.
+EFFORT_ORIENTATION = os.environ.get("OC_EFFORT_ORIENTATION", "low").strip().lower() or None
+ORIENTATION_SEARCHES = max(1, int(os.environ.get("OC_ORIENTATION_SEARCHES", "3")))
 _ai_slots = threading.BoundedSemaphore(AI_MAX_INFLIGHT)
 
 
@@ -1154,19 +1162,22 @@ def _call_with_search(system: str, user_content: str, max_tokens: int = 8000) ->
     produced an empty text block and a confusing "Expecting value" JSON error
     that masked the real cause (verified live: happened on every orientation
     call in production)."""
-    tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": 5}]
+    tools = [{"type": "web_search_20260209", "name": "web_search",
+              "max_uses": ORIENTATION_SEARCHES}]
     messages = [{"role": "user", "content": user_content}]
+    extra = ({"output_config": {"effort": EFFORT_ORIENTATION}}
+             if EFFORT_ORIENTATION and _supports_effort(MODEL) else {})
 
     resp = None
     for _ in range(4):  # bounded: a paused turn resumes, it doesn't loop forever
         resp = _create(
             model=MODEL, max_tokens=max_tokens, system=system,
-            tools=tools, messages=messages,
+            tools=tools, messages=messages, **extra,
         )
         # Counted per leg, not once per call: a paused turn is re-sent, so one
         # orientation can be several billable requests. This was recording
         # nothing at all, which made the most expensive call in the app - a
-        # Sonnet turn with an 8000-token budget and up to five searches - the
+        # Sonnet turn with an 8000-token budget and several searches - the
         # one call invisible in the usage figures.
         _note_usage(resp, "anthropic", MODEL)
         if resp.stop_reason != "pause_turn":
