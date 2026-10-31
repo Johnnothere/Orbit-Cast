@@ -2587,9 +2587,9 @@ function renderAccount(resetScroll){
   /* The niche box saves on blur, not on every keystroke: each save is a
      round trip, and re-rendering the panel mid-sentence would move the
      caret out from under the person typing. */
-  const nb=$('#dgNiche');
-  if(nb)nb.addEventListener('blur',()=>{
-    const v=nb.value.trim();
+  const nicheBox=$('#dgNiche');
+  if(nicheBox)nicheBox.addEventListener('blur',()=>{
+    const v=nicheBox.value.trim();
     if(v===(ACCT.dg.niche_text||''))return;
     ACCT.dg.niche_text=v;saveDigest();
   });
