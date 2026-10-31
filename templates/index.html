@@ -899,6 +899,8 @@ details.card .body{margin-top:14px;display:grid;gap:14px;font-size:14.5px;color:
 .int-count .i{opacity:.8}
 .int-sec .chips{margin-top:2px}
 .int-reset{margin-top:2px;font-size:13px}
+.int-save{margin-top:10px}
+.int-save .muted{font-size:13px}
 .field .fhint{display:block;margin-top:5px;font-size:12.5px;line-height:1.45;color:var(--tx-3);font-style:normal}
 .input.ta{min-height:74px;padding:10px 12px;line-height:1.5;resize:vertical;font:inherit}
 .ac-foot{display:grid;gap:12px;padding-top:14px;border-top:1px solid var(--line)}
@@ -2520,7 +2522,7 @@ const acctOpen=()=>!$('#modal').hidden&&$('#modalBox').classList.contains('wide'
 function openAccount(tab){
   if(!ME.signed_in){openSignin(false);return;}
   if(tab&&TABS.some(t=>t[0]===tab))ACCT.tab=tab;
-  ACCT.confirm=null;ACCT.note=null;ACCT.dg=Object.assign({},ME.alerts||{});
+  ACCT.confirm=null;ACCT.note=null;ACCT.catDraft=null;ACCT.dg=Object.assign({},ME.alerts||{});
   if($('#modal').hidden)modalFocus=document.activeElement;
   $('#modalBox').classList.add('wide');$('#modal').hidden=false;
   renderAccount();
@@ -2590,12 +2592,28 @@ function cvCardHTML(){
   if(ACCT.confirm==='cv')return'<div class="confirm"><b>Delete your stored CV?</b><span>The uploaded file and its extracted text are removed. The profile built from it stays, so your matches and digest keep working.</span><div class="row-btns"><button class="btn btn-danger sm" data-act="delcv">Delete the CV</button><button class="btn btn-ghost sm" data-act="ac-cancel">Cancel</button></div></div>';
   return'<div class="cv-card">'+ic('file')+'<div class="nm"><b>'+esc(cv.last_filename||'Written description')+'</b><span>'+esc(meta||'Used for your matches and your digest')+'</span></div><button class="btn btn-secondary sm" data-act="replacecv">Replace</button><button class="btn btn-ghost sm" data-act="ac-ask" data-what="cv">Delete</button></div>';
 }
-/* One producer for the category chips, used by the profile tab's "Your
-   interests" and the digest tab's "Only these categories". They are the same
-   stored field, written through the same saveDigest(), so they must not drift
-   into two controls that disagree. */
-function selectedCats(){
+/* "Your interests" lives in the digest tab, because the only thing it
+   narrows is the digest. Clicking a chip changes a DRAFT (ACCT.catDraft);
+   nothing is stored until "Save interests". Before, every tap saved at once,
+   so a stray click changed someone's digest with no way to back out. */
+function savedCats(){
   return((ACCT.dg&&ACCT.dg.categories)||(ME.alerts&&ME.alerts.categories)||[]);
+}
+function selectedCats(){
+  return ACCT.catDraft||savedCats();
+}
+function catsDirty(){
+  if(!ACCT.catDraft)return false;
+  const a=ACCT.catDraft.slice().sort().join(','),b=savedCats().slice().sort().join(',');
+  return a!==b;
+}
+async function saveInterests(){
+  if(!catsDirty())return;
+  const g=ACCT.dg||{};
+  /* Saving interests must never switch the digest on or off. Someone who
+     never set a digest up gets their interests stored on a paused one. */
+  const ok=await saveDigest({categories:ACCT.catDraft,paused:g.configured?!!g.paused:true});
+  if(ok){ACCT.catDraft=null;renderAccount();toast('Interests saved');}
 }
 function catChipsHTML(cats){
   return'<div class="chips"><button class="chip" data-dcat="all" aria-pressed="'+(!cats.length)+'">Everything</button>'
@@ -2612,17 +2630,19 @@ function interestsHTML(){
   const count=all
     ?'<span class="int-count all">'+ic('check','s14')+'Watching all '+CATS.length+' categories</span>'
     :'<span class="int-count">'+ic('filter','s14')+cats.length+' of '+CATS.length+' selected</span>';
+  const dirty=catsDirty();
   return'<section class="ac-sec int-sec"><div class="ac-sec-hd"><h3>Your interests</h3>'+count+'</div>'
     +'<p class="muted">What OrbitCast watches for you between visits. This narrows your email digest only — an analysis you run yourself always scores every category.</p>'
     +catChipsHTML(cats)
     +(all?'':'<p class="int-reset"><button class="linkish" data-dcat="all">Watch everything instead</button></p>')
-    +'</section>';
+    +'<div class="row-btns int-save"><button class="btn btn-primary sm" data-act="int-save"'+(dirty?'':' disabled')+'>Save interests</button>'
+    +(dirty?'<button class="btn btn-ghost sm" data-act="int-discard">Discard changes</button><span class="muted">Not saved yet</span>':'')
+    +'</div></section>';
 }
 function tabProfile(){
   const h=ACCT.hist;if(!h)return acSkel+acSkel;
   const p=h.profile;
   if(!p)return acEmpty('user','No profile yet','Run an analysis and the profile the engine builds from your CV appears here: what it found strong, what it found thin, and where it thinks you are headed. Every match is scored against it.','<button class="btn btn-primary sm" data-act="getmatched">Get matched '+ic('arrow-right','s14')+'</button>')
-    +interestsHTML()
     +'<section class="ac-sec"><h3>Stored CV</h3>'+cvCardHTML()+'</section>';
   const src=h.runs.find(r=>!r.reused)||h.runs[0];
   const from=src?(src.filename?'Built from '+src.filename:'Built from what you wrote')+' · '+fmtWhen(src.at):'';
@@ -2636,7 +2656,6 @@ function tabProfile(){
     +(p.trajectory?'<p class="traj"><b>Where you’re headed.</b> '+esc(p.trajectory)+'</p>':'')
     +'<div class="ac-foot"><p>Every match and every digest is scored against this and nothing else. If it reads wrong, your matches will be wrong, so update it.</p>'
     +'<div class="row-btns"><button class="btn btn-primary sm" data-act="ac-rerun">Run again with this profile</button><button class="btn btn-secondary sm" data-act="replacecv">Update with a new CV</button></div></div></section>'
-    +interestsHTML()
     +'<section class="ac-sec"><h3>Stored CV</h3>'+cvCardHTML()+'</section>';
 }
 
@@ -2695,7 +2714,7 @@ function tabDigest(){
   const g=ACCT.dg||{};const on=!!(g.configured&&!g.paused);
   const freq=g.frequency||'weekly',every=g.interval_days||3,day=g.weekday||0,hour=(g.send_hour===0||g.send_hour)?g.send_hour:8;
   const days=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-  const cats=g.categories||[];const snoozed=g.snooze_until&&new Date(g.snooze_until)>new Date();
+  const snoozed=g.snooze_until&&new Date(g.snooze_until)>new Date();
   const maxItems=g.max_items||'',niche=g.niche_text||'';
   let h='<section class="ac-card"><div class="set-row"><div><b>Email digest</b><span>New events that score 65 or more against your profile. Some weeks that is none, and the email says so in two lines.</span></div><button class="switch" role="switch" data-act="dg-on" aria-checked="'+on+'" aria-label="Email digest"'+(ME.has_profile?'':' disabled')+'></button></div>';
   if(!ME.has_profile)h+='<p class="muted">Run an analysis first. The digest matches against your saved profile.</p>';
@@ -2709,7 +2728,6 @@ function tabDigest(){
         +'<option value=""'+(maxItems?'':' selected')+'>However many clear the bar</option>'
         +[1,2,3,4,5].map(n=>'<option value="'+n+'"'+(maxItems===n?' selected':'')+'>'+n+' event'+(n===1?'':'s')+'</option>').join('')
       +'</select><em class="fhint">A ceiling, not a target. A quiet week still sends fewer, or none.</em></label>'
-      +'<div class="field"><span>Only these categories</span>'+catChipsHTML(cats)+'</div>'
       /* Free text, deliberately one box and not a conversation: nothing
          replies to it, so anything chat-shaped would promise an exchange
          that does not happen. What it does is stated plainly underneath. */
@@ -2721,6 +2739,7 @@ function tabDigest(){
       +'</div><p class="next">'+(g.next_send_at?'Next email: <b>'+esc(nextText(g.next_send_at))+'</b>':'')+'</p>';
   }
   h+='</section>';
+  h+=interestsHTML();
   h+='<section class="ac-card"><div class="set-row"><div><b>See one now</b><span>Sends today’s digest to '+esc(ME.email||'your address')+', scored exactly like the scheduled one. It takes about a minute and does not use up your next email.</span></div><button class="btn btn-secondary sm" data-act="ac-test"'+(ME.has_profile&&ACCT.busy!=='test'?'':' disabled')+'>'+(ACCT.busy==='test'?'<span class="sp"></span>Sending':'Send it')+'</button></div></section>';
   /* The per-send log is gone. It was a list of dates with no action attached
      to any of them - the emails are already in the person's inbox, which is
@@ -2743,12 +2762,13 @@ async function saveDigest(over){
   if('snooze_days' in g){body.snooze_days=g.snooze_days;delete g.snooze_days;}
   try{
     const r=await postJSON('/api/digest/prefs',body);const d=await r.json().catch(()=>({}));
-    if(!r.ok){acNote(d.error||'Could not save that.','err');return;}
+    if(!r.ok){acNote(d.error||'Could not save that.','err');return false;}
     Object.assign(g,body,{configured:true,paused:d.paused,next_send_at:d.next_send_at,categories:d.categories||body.categories,max_items:d.max_items||null,niche_text:d.niche_text||'',snooze_until:d.snooze_until||null});
     ACCT.dg=g;ME.alerts=Object.assign({},ME.alerts,g);
     if(!d.paused)setKeep(true);
     ACCT.note=null;renderAccount();flash();
-  }catch(e){acNote('Network error. Nothing was saved.','err');}
+    return true;
+  }catch(e){acNote('Network error. Nothing was saved.','err');return false;}
 }
 async function testDigest(){
   ACCT.busy='test';renderAccount();
@@ -2981,7 +3001,7 @@ document.addEventListener('click',ev=>{
   if(d.mode){S.calMode=d.mode;S.calOff=0;S.calY=TODAY.getFullYear();S.calM=TODAY.getMonth();S.calSel=null;render();if(filtersOpen())openFilters();return;}
   if(d.pane){setPane(d.pane);return;}
   if(d.freq){saveDigest({frequency:d.freq});return;}
-  if(d.dcat){const g=ACCT.dg||{};let c=(g.categories||[]).slice();if(d.dcat==='all')c=[];else if(c.includes(d.dcat))c=c.filter(x=>x!==d.dcat);else c.push(d.dcat);if(c.length===CATS.length)c=[];saveDigest({categories:c});return;}
+  if(d.dcat){let c=selectedCats().slice();if(d.dcat==='all')c=[];else if(c.includes(d.dcat))c=c.filter(x=>x!==d.dcat);else c.push(d.dcat);if(c.length===CATS.length)c=[];ACCT.catDraft=c;renderAccount();return;}
   if(d.snooze){saveDigest({snooze_days:+d.snooze});return;}
   if(d.ex!==undefined){const ta=$('#aiText');const ex=EXAMPLES[+d.ex];if(ta.value.trim()&&ta.value.trim()!==ta.dataset.last){toast('Clear the box first to start from an example.');return;}ta.value=ex[1];ta.dataset.last=ex[1];updCount();saveDraft();ta.focus();const i=ex[1].indexOf('['),j=ex[1].indexOf(']',i);if(i>=0)ta.setSelectionRange(i,j+1);return;}
   switch(d.act){
@@ -3039,6 +3059,8 @@ document.addEventListener('click',ev=>{
     case'ac-mute':muteMatch(d.id,d.title,t.getAttribute('aria-pressed')!=='true');break;
     case'ac-resume':saveDigest({snooze_days:0});break;
     case'ac-test':testDigest();break;
+    case'int-save':saveInterests();break;
+    case'int-discard':ACCT.catDraft=null;renderAccount();break;
     case'dg-niche-clear':ACCT.dg.niche_text='';saveDigest();break;
   }
 });
