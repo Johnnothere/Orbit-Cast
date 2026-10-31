@@ -4,11 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>OrbitCastAI — The right room at the right time</title>
-<meta name="description" content="OrbitCastAI scores every upcoming London event against what you have actually done and shows only the ones that clear the bar. Never more than five. Sometimes none.">
+<meta name="description" content="OrbitCastAI scores every upcoming London event against what you have actually done. Only events that clear the bar count as matches, never more than five; anything below it is labelled as below it.">
 <meta name="theme-color" content="#161a2b" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
 <meta property="og:title" content="OrbitCastAI — The right room at the right time">
-<meta property="og:description" content="Upload your CV or describe yourself. Every upcoming London event is scored against what you have done; only the ones that clear 65 come back.">
+<meta property="og:description" content="Upload your CV or describe yourself. Every upcoming London event is scored against what you have done; only events that clear 65 count as matches.">
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23161a2b'/%3E%3Ccircle cx='32' cy='32' r='16' fill='none' stroke='%2385b4f2' stroke-width='6'/%3E%3Ccircle cx='32' cy='32' r='5' fill='%23f3f1ec'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1179,7 +1179,7 @@ details.past[open]>summary .i{transform:rotate(180deg)}
         <p class="eyebrow"><span class="live"></span><span id="heroStamp">London</span></p>
         <h1><span>The right room.</span><span><em>At</em> the right time.</span><span class="dim">Or no room at all.</span></h1>
         <div class="hero-foot">
-          <p>Upload your CV or LinkedIn PDF. OrbitCast scores every upcoming London event against what you have actually done and shows only the ones that clear the bar, never more than five. Sometimes none, and it tells you so.</p>
+          <p>Upload your CV or LinkedIn PDF. OrbitCast scores every upcoming London event against what you have actually done. Only the ones that clear the bar count as matches, never more than five. If fewer do, you see the closest below it, labelled that way, with the reason each falls short.</p>
           <div class="hero-cta">
             <button class="btn btn-primary lg" data-act="getmatched">Get matched <svg class="i s16"><use href="#i-arrow-right"/></svg></button>
             <button class="btn btn-secondary lg" data-view="events">Browse events</button>
@@ -1196,7 +1196,7 @@ details.past[open]>summary .i{transform:rotate(180deg)}
 
       <section class="panel" id="console" aria-labelledby="consoleH">
       <div class="wrap"><div class="sec">
-        <div class="sec-h"><h2 id="consoleH">Start with your <em>CV</em></h2><p>Upload a CV or your LinkedIn PDF. Only events scoring 65 or more come back.</p></div>
+        <div class="sec-h"><h2 id="consoleH">Start with your <em>CV</em></h2><p>Upload a CV or your LinkedIn PDF. Only events scoring 65 or more count as matches.</p></div>
         <div class="console">
           <div class="seg lg" role="tablist" aria-label="How to share your background">
             <button role="tab" id="tab-cv" aria-selected="true" aria-controls="pane-cv" data-pane="cv">Upload a CV</button>
@@ -1987,7 +1987,7 @@ function syncRun(){
   const using='';
   const usingFile=true; /* files only while "Describe yourself" is off */
   $('#runNote').textContent=(ME.signed_in
-      ?'Only events scoring 65 or more are shown. Often that is none. Members run up to 20 analyses an hour - OrbitCast is free, the AI behind it isn\u2019t.'
+      ?'Only events scoring 65 or more count as matches, and anything below is labelled. Members run up to 20 analyses an hour - OrbitCast is free, the AI behind it isn\u2019t.'
       :'Sign in with Google to analyse your CV. No password.')+using;
   $('#runBtn').innerHTML=((ME.signed_in||!usingFile)?(S.result?'Run again':'Run the analysis'):'Sign in and run')+' '+ic('arrow-right','s16');
   const first=(ME.name||'').trim().split(/\s+/)[0]||'Account';
