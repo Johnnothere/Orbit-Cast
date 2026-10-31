@@ -8,6 +8,7 @@ accounting and the breaker.
 import json
 import os
 import unittest
+from unittest import mock
 
 import ai_engine
 
@@ -67,6 +68,9 @@ class ProviderSelectionTests(unittest.TestCase):
 
 
 class TruncationTests(unittest.TestCase):
+    def setUp(self):
+        _pin_anthropic(self)    # Claude path; an OPENAI_API_KEY must not reroute it
+
     def test_anthropic_max_tokens_raises(self):
         with _fake_anthropic(_AnthropicResp(json.dumps(GOOD), stop_reason="max_tokens")):
             with self.assertRaises(ai_engine.AITruncated):
@@ -178,6 +182,7 @@ class SchemaTests(unittest.TestCase):
 
     def test_anthropic_path_ignores_the_schema(self):
         """Claude has no server-side schema here; _coerce_profile covers it."""
+        _pin_anthropic(self)
         seen = {}
 
         def capture(**kw):
@@ -196,6 +201,9 @@ class ThinkingBudgetTests(unittest.TestCase):
     """Current Claude models think by default and thinking counts against
     max_tokens. Scoring once spent all 4096 tokens thinking and returned
     nothing, twice, ~45s each. These pin the fix."""
+
+    def setUp(self):
+        _pin_anthropic(self)    # Claude path; an OPENAI_API_KEY must not reroute it
 
     def _seen(self, **call_kw):
         seen = {}
@@ -238,6 +246,9 @@ class ThinkingBudgetTests(unittest.TestCase):
 class OrientationSpeedTests(unittest.TestCase):
     """The thin-profile briefing runs alongside scoring, so it sets the wait.
     It took ~105s at default effort with five searches."""
+
+    def setUp(self):
+        _pin_anthropic(self)    # Claude path; an OPENAI_API_KEY must not reroute it
 
     def _seen(self):
         seen = {}
@@ -314,6 +325,13 @@ class BreakerTests(unittest.TestCase):
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
+def _pin_anthropic(test):
+    """Route this test's model calls to the Claude path, undone afterwards."""
+    patcher = mock.patch.object(ai_engine, "AI_PROVIDER", "anthropic")
+    patcher.start()
+    test.addCleanup(patcher.stop)
+
 
 def _provider_with(value):
     saved = ai_engine.EXTRACT_PROVIDER

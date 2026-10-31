@@ -366,7 +366,7 @@ venue: the exact venue name and street address if the page states one, copied fr
 
 
 def _ai_pass(ev, src, emails, links, phones=()):
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    if not ai_engine.ai_configured():
         return None
     cand = "\n".join(["EMAIL " + e for e in emails[:10]] + ["PHONE " + p for p in phones[:5]]
                      + ["LINK " + l for l in links[:30]]) or "(none)"
@@ -543,7 +543,7 @@ def _fresh(rec, url):
     # the record is usable - venue, times, contacts - but has no write-up.
     # Retry on the short clock so the write-up appears soon after the API
     # is back, not six hours later.
-    if rec.get("ai") is None and os.environ.get("ANTHROPIC_API_KEY"):
+    if rec.get("ai") is None and ai_engine.ai_configured():
         if ai_engine.outage():
             return True                   # re-reading now would change nothing
         return age < FAIL_RETRY_S

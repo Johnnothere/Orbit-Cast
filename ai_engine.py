@@ -10,7 +10,8 @@ first-class - "I'm a 21 year old psychology student who wants to get into
 intelligence" is the single most common thing a real user types, and it is a
 question, not a malformed CV. Only genuinely person-free input stops at the gate.
 
-Pipeline, each pass one focused Claude call:
+Pipeline, each pass one focused model call (OpenAI by default since 31 Oct
+2026 - see OC_AI_PROVIDER below):
   1. extract_profile          - classify the input, read the person, and (when the
                                 input is thin) draft the questions worth asking back
   2. build_orientation        - ONLY for thin inputs: what the field is, what's
@@ -19,7 +20,8 @@ Pipeline, each pass one focused Claude call:
   3. score_events             - match profile to events, honestly, with why-now
   4. critique_recommendations - drop any why-statement that isn't evidence-specific
 
-Deps used on demand:  anthropic, pdfplumber, python-docx
+Deps used on demand:  openai, anthropic (only when OC_AI_PROVIDER=anthropic),
+                      pdfplumber, python-docx
 """
 
 import io
@@ -31,6 +33,7 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from datetime import date
 
 import requests
@@ -74,33 +77,64 @@ MODEL_EXTRACT = os.environ.get("OC_MODEL_EXTRACT", "claude-haiku-4-5-20251001")
 # It makes the shape of the reply a server-side guarantee instead of something
 # we hope for and then repair, which removes the whole class of truncated and
 # unparseable output that produced shallow profiles.
-EXTRACT_PROVIDER = os.environ.get("OC_EXTRACT_PROVIDER", "openai").strip().lower()
-MODEL_EXTRACT_OPENAI = os.environ.get("OC_MODEL_EXTRACT_OPENAI", "gpt-4o")
+# ── Which provider runs everything ───────────────────────────────────────────
+# Every pass - profile, scoring, critique, the thin-profile briefing, and the
+# background event-detail / link-intake / ingest calls - runs on OpenAI by
+# default since 31 Oct 2026, for speed: Claude scoring took ~30s a run and its
+# web-searched briefing ~60-105s. That was Tej's decision; scoring was moved
+# knowingly. The honesty rules are unchanged and still enforced in code
+# either way: the 65 threshold, the five-result cap, dropping event ids that
+# are not in the catalogue, and the critique pass.
+#
+# The Anthropic path is kept, not deleted: OC_AI_PROVIDER=anthropic puts the
+# whole pipeline back on Claude with no code change. Model ids passed by
+# callers (MODEL, MODEL_EXTRACT, ...) are Claude ids and only mean something
+# on that path; on OpenAI every pass uses MODEL_OPENAI.
+AI_PROVIDER = os.environ.get("OC_AI_PROVIDER", "openai").strip().lower()
+MODEL_OPENAI = os.environ.get("OC_MODEL_OPENAI", "gpt-4o")
+EXTRACT_PROVIDER = os.environ.get("OC_EXTRACT_PROVIDER", AI_PROVIDER).strip().lower()
+MODEL_EXTRACT_OPENAI = os.environ.get("OC_MODEL_EXTRACT_OPENAI", MODEL_OPENAI)
 MODEL_EXTRACT_ANTHROPIC = os.environ.get("OC_MODEL_EXTRACT_ANTHROPIC", MODEL_EXTRACT)
 
 
-def extract_provider() -> str:
-    """The provider actually used for the profile pass.
+def _resolve_provider(requested: str) -> str:
+    """The provider a call will actually use.
 
     Falls back to Anthropic when OpenAI is selected but unusable - no key, or
-    the package missing. Without this, the day OC_EXTRACT_PROVIDER defaults to
-    openai is the day every upload fails on a deploy where OPENAI_API_KEY has
-    not been set yet. Loud in the log, because running on the fallback without
-    noticing is its own kind of failure."""
-    if EXTRACT_PROVIDER != "openai":
+    the package missing - so a deploy without OPENAI_API_KEY degrades instead
+    of failing every analysis. Loud in the log, because running on the
+    fallback without noticing is its own kind of failure."""
+    if requested != "openai":
         return "anthropic"
     if not os.environ.get("OPENAI_API_KEY"):
-        log.warning("OC_EXTRACT_PROVIDER=openai but OPENAI_API_KEY is not set; "
-                    "running the profile pass on %s instead.", MODEL_EXTRACT_ANTHROPIC)
+        log.warning("Provider is openai but OPENAI_API_KEY is not set; "
+                    "falling back to Anthropic for this call.")
         return "anthropic"
     try:
         import openai  # noqa: F401
     except ImportError:
-        log.warning("OC_EXTRACT_PROVIDER=openai but the openai package is not "
-                    "installed; running the profile pass on %s instead.",
-                    MODEL_EXTRACT_ANTHROPIC)
+        log.warning("Provider is openai but the openai package is not installed; "
+                    "falling back to Anthropic for this call.")
         return "anthropic"
     return "openai"
+
+
+def ai_provider() -> str:
+    """The provider for scoring, critique, the briefing and background calls."""
+    return _resolve_provider(AI_PROVIDER)
+
+
+def extract_provider() -> str:
+    """The provider for the profile pass (OC_EXTRACT_PROVIDER, which defaults
+    to OC_AI_PROVIDER)."""
+    return _resolve_provider(EXTRACT_PROVIDER)
+
+
+def ai_configured() -> bool:
+    """Whether any analysis can run at all - the key for the provider in use."""
+    if ai_provider() == "openai":
+        return True                     # _resolve_provider already checked the key
+    return bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
 def extract_model(provider: str = None) -> str:
@@ -143,9 +177,12 @@ def _note_usage(resp, provider="anthropic", model=""):
         if u is None:
             return
         if provider == "openai":
-            inp = getattr(u, "prompt_tokens", 0) or 0
-            out = getattr(u, "completion_tokens", 0) or 0
-            details = getattr(u, "prompt_tokens_details", None)
+            # chat.completions says prompt/completion; the Responses API (the
+            # briefing's web search) says input/output. Read whichever is set.
+            inp = getattr(u, "prompt_tokens", None) or getattr(u, "input_tokens", 0) or 0
+            out = getattr(u, "completion_tokens", None) or getattr(u, "output_tokens", 0) or 0
+            details = (getattr(u, "prompt_tokens_details", None)
+                       or getattr(u, "input_tokens_details", None))
             cache_read = getattr(details, "cached_tokens", 0) or 0 if details else 0
             cache_write = 0
         else:
@@ -209,6 +246,13 @@ EFFORT_CRITIQUE = os.environ.get("OC_EFFORT_CRITIQUE", "medium").strip().lower()
 # context, not the judgment, so it runs at low effort on fewer searches.
 EFFORT_ORIENTATION = os.environ.get("OC_EFFORT_ORIENTATION", "low").strip().lower() or None
 ORIENTATION_SEARCHES = max(1, int(os.environ.get("OC_ORIENTATION_SEARCHES", "3")))
+# How long results wait for the briefing AFTER scoring is done (see
+# score_and_enrich). Short on purpose: the briefing is an extra, the matches
+# are the answer.
+ORIENTATION_WAIT_S = float(os.environ.get("OC_ORIENTATION_WAIT_S", "2"))
+# Its own small pool so a briefing that outlives the request does not hold a
+# request thread; bounded so a burst of thin profiles cannot pile up searches.
+_orientation_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="orientation")
 _ai_slots = threading.BoundedSemaphore(AI_MAX_INFLIGHT)
 
 
@@ -338,6 +382,20 @@ def _create_openai(**kwargs):
             raise
 
 
+def _create_openai_search(**kwargs):
+    """responses.create (the API that carries OpenAI's web_search tool),
+    behind the same gate and breaker as every other call."""
+    o = outage("openai")
+    if o:
+        raise AIUnavailable(f"AI paused: {o['reason']}")
+    with _ai_slots:
+        try:
+            return _get_openai_client().responses.create(**kwargs)
+        except Exception as exc:
+            _note_account_error(exc, "openai")
+            raise
+
+
 def _extract_json_object(raw: str) -> str:
     """Models are told to return bare JSON, but sometimes wrap it in a code
     fence or add a stray line of commentary anyway. Strip a fence if present,
@@ -362,7 +420,23 @@ def _supports_effort(model):
     return not any(tag in model for tag in ("haiku-4-5", "sonnet-4-5", "claude-3"))
 
 
-def _call(system, user_content, max_tokens=1500, model=None, effort=None):
+def _call(system, user_content, max_tokens=1500, model=None, effort=None,
+          schema=None, schema_name="result"):
+    """One JSON reply from whichever provider is in use (OC_AI_PROVIDER).
+
+    On OpenAI, `schema` makes the reply shape a server-side guarantee
+    (strict json_schema); without one the reply is still forced to be a JSON
+    object. `model` and `effort` are Claude settings and only apply on the
+    Anthropic path - gpt-4o has no thinking to bound."""
+    if ai_provider() == "openai":
+        return _call_json(system, _flatten_system(user_content), max_tokens=max_tokens,
+                          model=MODEL_OPENAI, provider="openai",
+                          schema=schema, schema_name=schema_name)
+    return _call_anthropic(system, user_content, max_tokens=max_tokens,
+                           model=model, effort=effort)
+
+
+def _call_anthropic(system, user_content, max_tokens=1500, model=None, effort=None):
     """system and user_content may be plain strings or content-block lists
     (the block form is how score_events marks the shared catalog prefix with
     cache_control, so a hundred people analysed in the same window pay for
@@ -407,12 +481,12 @@ def _call_json(system, user_content, *, max_tokens, model, provider, schema=None
                schema_name="result"):
     """A JSON reply from whichever provider is configured for this pass.
 
-    Only the profile pass uses this. Scoring, critique and the web-search
-    orientation keep calling _call directly: they rely on Anthropic-specific
-    machinery (the cached catalogue prefix, server-side search, pause_turn)
-    that has no counterpart here and no reason to move."""
+    The profile pass calls this with its own provider; _call() routes every
+    other pass here when OpenAI is in use. OpenAI caches a repeated prompt
+    prefix by itself (no markers), so the stable scoring prompt and the
+    catalogue - which come first - are reused across analyses automatically."""
     if provider != "openai":
-        return _call(system, user_content, max_tokens=max_tokens, model=model)
+        return _call_anthropic(system, user_content, max_tokens=max_tokens, model=model)
 
     kwargs = {
         "model": model,
@@ -430,6 +504,11 @@ def _call_json(system, user_content, *, max_tokens, model, provider, schema=None
             "json_schema": {"name": schema_name, "strict": True, "schema": schema},
         }
     else:
+        # json_object mode is rejected unless the word "JSON" appears in the
+        # messages. Every prompt here asks for JSON already; this keeps a
+        # future prompt that forgets from turning into a 400 on every call.
+        if "json" not in (kwargs["messages"][0]["content"] + str(user_content)).lower():
+            kwargs["messages"][0]["content"] += "\n\nRespond with a single JSON object."
         kwargs["response_format"] = {"type": "json_object"}
 
     resp = _create_openai(**kwargs)
@@ -447,10 +526,11 @@ def _call_json(system, user_content, *, max_tokens, model, provider, schema=None
 
 
 def _flatten_system(system):
-    """Anthropic accepts a system prompt as a list of content blocks; the
-    chat-completions API wants one string. Only the profile prompt reaches
-    here and it is already a plain string, so this is a guard, not a
-    conversion anyone depends on."""
+    """Anthropic accepts a system prompt or a user message as a list of
+    content blocks (scoring uses blocks to mark its cached catalogue); the
+    chat-completions API wants one string. Joins the text blocks in order, so
+    the stable catalogue still comes first and OpenAI's automatic prefix
+    cache still applies."""
     if isinstance(system, str):
         return system
     parts = []
@@ -1162,6 +1242,9 @@ def _call_with_search(system: str, user_content: str, max_tokens: int = 8000) ->
     produced an empty text block and a confusing "Expecting value" JSON error
     that masked the real cause (verified live: happened on every orientation
     call in production)."""
+    if ai_provider() == "openai":
+        return _search_openai(system, user_content, max_tokens)
+
     tools = [{"type": "web_search_20260209", "name": "web_search",
               "max_uses": ORIENTATION_SEARCHES}]
     messages = [{"role": "user", "content": user_content}]
@@ -1193,6 +1276,31 @@ def _call_with_search(system: str, user_content: str, max_tokens: int = 8000) ->
             f"orientation call produced no text (stop_reason={getattr(resp, 'stop_reason', None)}, "
             f"{len(resp.content) if resp else 0} content blocks) - likely ran out of "
             f"max_tokens on search results before writing the answer")
+    return json.loads(_extract_json_object(raw))
+
+
+def _search_openai(system: str, user_content: str, max_tokens: int) -> dict:
+    """The briefing on OpenAI: the Responses API with its web_search tool, so
+    every source the briefing cites came from a real search. Writing it
+    without search would mean the model inventing plausible-looking sources,
+    which is exactly the kind of answer this product exists not to give."""
+    resp = _create_openai_search(
+        model=MODEL_OPENAI,
+        instructions=system,
+        input=user_content,
+        # London-local results: the briefing is about breaking into a field
+        # here, and without a location the tool assumes the United States.
+        tools=[{"type": "web_search",
+                "user_location": {"type": "approximate", "country": "GB",
+                                  "city": "London", "timezone": "Europe/London"}}],
+        max_output_tokens=max_tokens,
+    )
+    _note_usage(resp, "openai", MODEL_OPENAI)
+    if getattr(resp, "status", None) == "incomplete":
+        raise ValueError(f"briefing incomplete: {getattr(resp, 'incomplete_details', None)}")
+    raw = (getattr(resp, "output_text", "") or "").strip()
+    if not raw:
+        raise ValueError("briefing call produced no text")
     return json.loads(_extract_json_object(raw))
 
 
@@ -1340,6 +1448,29 @@ Return ONLY valid JSON - no markdown, no backticks, no preamble - in EXACTLY thi
 
 CONFIG_KEY_SCORING_RULES = "scoring_rules"
 
+# The same shape as SCORING_FOOTER, as a strict json_schema for OpenAI: every
+# field required, nothing extra. It guarantees the SHAPE only - which events,
+# what score, whether 65+ - is still the prompt's job and is still enforced in
+# score_events below, whatever the model returns.
+SCORING_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["recommendations"],
+    "properties": {"recommendations": {"type": "array", "items": {
+        "type": "object", "additionalProperties": False,
+        "required": ["event_id", "title", "fit_score", "why", "why_now",
+                     "prepare", "benefit", "weakness"],
+        "properties": {
+            "event_id": {"type": "string"},
+            "title": {"type": "string"},
+            "fit_score": {"type": "integer"},
+            "why": {"type": "string"},
+            "why_now": {"type": "string"},
+            "prepare": {"type": "string"},
+            "benefit": {"type": "string"},
+            "weakness": {"type": "string"},
+        }}}},
+}
+
 
 def get_scoring_rules() -> str:
     """The active rules text: an admin override from ai_config if one exists,
@@ -1445,7 +1576,8 @@ def score_events(profile: dict, compact_events: list, niche: str = None) -> list
         {"type": "text", "text": shared, "cache_control": {"type": "ephemeral"}},
         {"type": "text", "text": personal},
     ]
-    data = _call(system_blocks, user_content, max_tokens=4096, effort=EFFORT_SCORE)
+    data = _call(system_blocks, user_content, max_tokens=4096, effort=EFFORT_SCORE,
+                 schema=SCORING_SCHEMA, schema_name="orbitcast_scores")
     valid_ids = {e["id"] for e in catalog}
     # Stamp a band derived from the raw score. The server owns this mapping so
     # the UI never has to - every surface (card, deck, digest email, API)
@@ -1502,6 +1634,17 @@ Return ONLY valid JSON - no markdown, no backticks, no preamble - in EXACTLY thi
 }"""
 
 
+CRITIQUE_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["reviewed"],
+    "properties": {"reviewed": {"type": "array", "items": {
+        "type": "object", "additionalProperties": False,
+        "required": ["event_id", "keep_it"],
+        "properties": {"event_id": {"type": "string"},
+                       "keep_it": {"type": "boolean"}}}}},
+}
+
+
 def critique_recommendations(profile: dict, recommendations: list) -> list:
     if not recommendations:
         return recommendations
@@ -1513,7 +1656,8 @@ def critique_recommendations(profile: dict, recommendations: list) -> list:
     )
     try:
         data = _call(CRITIQUE_SYSTEM_PROMPT, user_content, max_tokens=1000,
-                     model=MODEL_CRITIQUE, effort=EFFORT_CRITIQUE)
+                     model=MODEL_CRITIQUE, effort=EFFORT_CRITIQUE,
+                     schema=CRITIQUE_SCHEMA, schema_name="orbitcast_critique")
     except Exception as exc:
         # Critique failing shouldn't sink the whole analysis - fall back to
         # the unaudited (but already threshold-enforced) recommendations.
@@ -1541,7 +1685,7 @@ def analyze_upload(file_text: str, events: list, identity_gate=None) -> dict:
     if not file_text or not file_text.strip():
         return _empty_result("That file looks empty - try a PDF, DOCX, or TXT CV.")
 
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    if not ai_configured():
         return _empty_result("AI analysis isn't configured yet (no API key set).")
 
     # Retry only what retrying can fix. A malformed or truncated reply is
@@ -1648,17 +1792,21 @@ def score_and_enrich(profile: dict, evidence_level: str, field: str,
 
     result = {}
     if orientation_field:
-        # Orientation (a web-search call, can run 60-90s) and scoring are
-        # independent - both only need the profile. Sequentially they added
-        # up to 2+ minutes of a user staring at a spinner; run them in
-        # parallel threads so wall-clock time is roughly the slower of the
-        # two, not the sum. build_orientation() never raises - it already
-        # returns None on any failure - so no error handling needed here.
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            orient_future = pool.submit(build_orientation, orientation_field, profile)
-            score_future = pool.submit(_do_scoring)
-            result["orientation"] = orient_future.result()
-            recs, scoring_failed = score_future.result()
+        # The briefing (a web-searched paragraph about the field) and scoring
+        # are independent, so they start together - but the person waits for
+        # their MATCHES, not for the briefing. Once scoring is done the
+        # briefing gets ORIENTATION_WAIT_S more; if it is still searching,
+        # the results go out without it. It keeps running on its own pool,
+        # finishes, and lands in the per-field cache, so the next thin profile
+        # in the same field gets it instantly. It used to be awaited in full:
+        # ~105s on Claude with five searches, against ~30s for scoring.
+        # build_orientation() never raises - it returns None on any failure.
+        orient_future = _orientation_pool.submit(build_orientation, orientation_field, profile)
+        recs, scoring_failed = _do_scoring()
+        try:
+            result["orientation"] = orient_future.result(timeout=ORIENTATION_WAIT_S)
+        except FuturesTimeout:
+            result["orientation"] = None
     else:
         result["orientation"] = None
         recs, scoring_failed = _do_scoring()
