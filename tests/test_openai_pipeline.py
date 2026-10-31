@@ -133,8 +133,11 @@ class HonestyStillEnforcedTests(_OnOpenAI):
         seen = self.capture("_create_openai", _chat(reply))
         with mock.patch.object(ai_engine, "rag", None), \
              mock.patch.object(ai_engine, "get_scoring_rules", return_value="RULES"):
-            recs = ai_engine.score_events({"summary": "s"}, events)
+            recs, near = ai_engine.score_events({"summary": "s"}, events)
         self.assertEqual([r["event_id"] for r in recs], ["a"])
+        # A sub-65 entry in the MATCHES list is dropped, not quietly demoted to a
+        # near miss - near misses only come from the model's own near_misses list.
+        self.assertEqual(near, [])
         self.assertEqual(seen[0]["response_format"]["json_schema"]["name"], "orbitcast_scores")
 
 
@@ -164,7 +167,7 @@ class BriefingTests(_OnOpenAI):
             return {"field_reality": "late"}
 
         with mock.patch.object(ai_engine, "build_orientation", slow_briefing), \
-             mock.patch.object(ai_engine, "score_events", return_value=[]), \
+             mock.patch.object(ai_engine, "score_events", return_value=([], [])), \
              mock.patch.object(ai_engine, "critique_recommendations", return_value=[]), \
              mock.patch.object(ai_engine, "ORIENTATION_WAIT_S", 0.05):
             t0 = time.monotonic()
@@ -175,7 +178,7 @@ class BriefingTests(_OnOpenAI):
 
     def test_a_fast_briefing_is_still_included(self):
         with mock.patch.object(ai_engine, "build_orientation", return_value={"field_reality": "ok"}), \
-             mock.patch.object(ai_engine, "score_events", return_value=[]), \
+             mock.patch.object(ai_engine, "score_events", return_value=([], [])), \
              mock.patch.object(ai_engine, "critique_recommendations", return_value=[]):
             out = ai_engine.score_and_enrich({}, "thin", "intelligence", [])
         self.assertEqual(out["orientation"], {"field_reality": "ok"})

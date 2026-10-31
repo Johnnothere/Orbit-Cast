@@ -603,10 +603,13 @@ def _public_result(result):
 
     Copies rather than mutates: the caller still persists the full rows, and
     save_recommendations() writes the source the admin analytics reads."""
-    recs = result.get("recommendations")
-    if not isinstance(recs, list):
-        return result
-    return {**result, "recommendations": [_public_event(r) for r in recs]}
+    out = dict(result)
+    # Near misses are events too, so they lose their source the same way:
+    # source names are admin-only.
+    for key in ("recommendations", "near_misses"):
+        if isinstance(out.get(key), list):
+            out[key] = [_public_event(r) for r in out[key]]
+    return out
 
 
 # Every visitor downloads the same catalogue, and it only changes when a scrape
@@ -1806,15 +1809,19 @@ def _run_analysis_job(account_id, oc_uid, consent, file_bytes, filename, mimetyp
     if account_id is not None:
         gate = identity.make_gate(account_id, db.get_cv_identity(account_id),
                                   db.set_cv_identity_if_absent)
-    result = ai_engine.analyze_upload(file_text, events, identity_gate=gate)
+    result = ai_engine.analyze_upload(file_text, events, identity_gate=gate,
+                                      source="file" if file_bytes else "text")
     if result.get("identity_refused"):
         _audit("analysis_identity_refused", {"id": account_id},
                detail={"file": bool(file_bytes)})
         return 403, {"error": result.get("message_if_not_cv"), "reason": "identity"}
 
     # Consent is the hinge: no recorded "yes" means nothing gets written, and
-    # the result the person sees is identical either way.
-    if consent and oc_uid:
+    # the result the person sees is identical either way. Nor is anything
+    # written for a document that was refused or held no person: storing
+    # someone's attendance record because they uploaded it by mistake is
+    # holding data for no purpose at all.
+    if consent and oc_uid and result.get("is_cv"):
         try:
             analysis_id = db.save_analysis(oc_uid, result.get("is_cv", False), file_text, result.get("profile"),
                                             evidence_level=result.get("evidence_level"), field=result.get("field"))

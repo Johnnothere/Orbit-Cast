@@ -34,6 +34,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
+from collections import Counter
 from datetime import date
 
 import requests
@@ -143,10 +144,18 @@ def extract_model(provider: str = None) -> str:
 MODEL_CRITIQUE = os.environ.get("OC_MODEL_CRITIQUE", "") or None   # default: MODEL
 FIT_THRESHOLD = 65                   # only surface events scoring this or higher
 MAX_RECOMMENDATIONS = 5              # honesty rule: a few strong matches, never a padded list
-MAX_CATALOG_SIZE = 100                # cap events sent to scoring - the live catalog
-                                       # has grown past 200; a huge input made responses
-                                       # more likely to truncate before finishing valid
-                                       # JSON. Soonest-first is a reasonable priority cut.
+# How many events the scorer sees. Since 31 Oct 2026 the first ~3/4 are the
+# ones most related to THIS person (rank_for_profile) and the rest a
+# soonest-first spread across categories, and each now carries its write-up -
+# so fewer, better candidates beat the old 100 chosen by date alone.
+MAX_CATALOG_SIZE = int(os.environ.get("OC_CATALOG_SIZE", "80"))
+RELEVANT_SHARE = 0.75
+# Results always aim for MIN_RESULTS: the matches (65+, never padded), then
+# the closest events below the bar to make up the number, shown and labelled
+# as below it, with their real scores. Nothing under NEAR_MISS_FLOOR is
+# shown at all - an irrelevant event is not a near miss.
+MIN_RESULTS = int(os.environ.get("OC_MIN_RESULTS", "5"))
+NEAR_MISS_FLOOR = int(os.environ.get("OC_NEAR_MISS_FLOOR", "50"))
 
 _client = None
 _client_lock = threading.Lock()
@@ -826,7 +835,7 @@ def build_compact_events(events: list) -> list:
     return compact
 
 
-def select_catalog(compact_events: list, cap: int = None) -> list:
+def select_catalog(compact_events: list, cap: int = None, profile: dict = None) -> list:
     """Pick which events the scorer actually gets to see.
 
     Soonest-first alone starves niche categories: the live feed is dominated
@@ -841,7 +850,20 @@ def select_catalog(compact_events: list, cap: int = None) -> list:
     cap = cap or MAX_CATALOG_SIZE
     if len(compact_events) <= cap:
         return compact_events
+    if profile:
+        # The events most related to this person get a guaranteed place; the
+        # date-ordered spread fills the rest so the scorer still sees range.
+        relevant = rank_for_profile(compact_events, profile)[:int(cap * RELEVANT_SHARE)]
+        taken = {e["id"] for e in relevant}
+        rest = [e for e in compact_events if e["id"] not in taken]
+        return relevant + _round_robin(rest, cap - len(relevant))
+    return _round_robin(compact_events, cap)
 
+
+def _round_robin(compact_events: list, cap: int) -> list:
+    """Soonest-first within each category, taken in turns across categories."""
+    if cap <= 0:
+        return []
     by_cat = {}
     for e in compact_events:
         by_cat.setdefault(e.get("category") or "Uncategorised", []).append(e)
@@ -863,12 +885,94 @@ def select_catalog(compact_events: list, cap: int = None) -> list:
     return selected
 
 
+_STOPWORDS = frozenset("""
+the and for with from into your you our are was were this that have has will can not but all any its
+their them they who what when where how more most other some such than then there these those very
+just also about over under after before between through during each both few many much own same only
+out off per via new using use used work working worked london event events team teams role roles
+year years month months day days time including include includes based across within strong good
+great experience experienced skills skill knowledge ability able etc""".split())
+
+
+def _terms(text) -> set:
+    return {w for w in re.findall(r"[a-z][a-z0-9+#]{2,}", (text or "").lower())
+            if w not in _STOPWORDS}
+
+
+def rank_for_profile(events: list, profile: dict) -> list:
+    """Events ordered by how much they share with this person, most first;
+    events that share nothing are left out. A rare word that both mention
+    ("forensics", "OSINT") counts for far more than a common one, and a hit
+    in the title counts double. Cheap and deterministic - it only decides
+    which events the scorer gets to SEE; the scorer still does the judging."""
+    p = profile or {}
+    pterms = _terms(" ".join(
+        [p.get("field") or "", p.get("aspiration") or "", p.get("trajectory") or "",
+         p.get("summary") or ""] + list(p.get("interests") or []) + list(p.get("strengths") or [])))
+    if not pterms:
+        return []
+    docs = [(e, _terms(e.get("title")), _terms(f"{e.get('category', '')} {e.get('description', '')}"))
+            for e in events]
+    df = Counter()
+    for _, t, b in docs:
+        df.update(t | b)
+    n = len(docs)
+    scored = []
+    for e, t, b in docs:
+        score = sum(math.log(1 + n / df[w]) * (2 if w in t else 1) for w in pterms & (t | b))
+        if score > 0:
+            scored.append((score, e))
+    scored.sort(key=lambda x: -x[0])
+    return [e for _, e in scored]
+
+
+def _with_writeups(compact_events: list) -> list:
+    """Each event with what its own page says it is and who it suits, from
+    event_details. Before this the scorer matched CVs to events by TITLE
+    ALONE: none of the 448 catalogue events had a description, while 328 of
+    them had a write-up sitting unused. Never raises."""
+    try:
+        import event_details             # imports ai_engine itself; resolved at call time
+        texts = event_details.summaries([e["id"] for e in compact_events])
+    except Exception as exc:
+        log.warning(f"Event write-ups unavailable, scoring on titles: {exc}")
+        return compact_events
+    return [dict(e, description=texts.get(e["id"]) or e.get("description") or "")
+            for e in compact_events]
+
+
+# What the scorer sees of each event. The url, emoji and source name were
+# being sent too; they cost tokens on every analysis and inform nothing.
+_SCORER_FIELDS = ("id", "title", "category", "date", "format", "location", "description")
+
+
 # --------------------------------------------------------------------------
 # 3. PASS 1 - classify + extract a structured, evidence-grounded profile
 # --------------------------------------------------------------------------
 PROFILE_SYSTEM_PROMPT = """You are OrbitCast's profile-reading engine. You do ONE job: \
 read what a person gave us and produce an honest, evidence-grounded profile of them. \
 You do not see events or make recommendations - that's a separate step done by someone else.
+
+STEP 0 - WHAT IS THIS DOCUMENT? Set "document_type" to exactly one of:
+
+- "cv_resume": a CV or resume - a document a person wrote to present their own \
+  career: work and/or education history, skills, qualifications.
+- "linkedin_profile": a LinkedIn profile saved or printed as a PDF (sections such as \
+  Contact, Top Skills, Experience, Education).
+- "self_description": words a person TYPED to us about themselves. Only possible when \
+  SOURCE says "typed by the person". An uploaded file is never a self_description.
+- "other_document": ANY other document - EVEN IF it names a person, a course, or an \
+  employer. Attendance records and registers, timetables, transcripts and grade \
+  reports, certificates, payslips, invoices, receipts, bank statements, letters \
+  (including cover letters and references), reports, essays, assignments, slides, \
+  forms, IDs, contracts, articles, notes. A document that MENTIONS a person is not a \
+  document that PRESENTS a person's career.
+
+When SOURCE is "uploaded file": if it is not clearly a CV/resume or a LinkedIn \
+profile, it is "other_document". Do not stretch, do not give it the benefit of the \
+doubt, and do not build a profile out of it. Set input_kind to "unusable", leave the \
+profile empty, and write message_if_not_cv as one plain sentence naming what the file \
+actually is, e.g. "This is an attendance record, not a CV."
 
 STEP 1 - CLASSIFY the input into exactly one of three kinds:
 
@@ -883,13 +987,14 @@ STEP 1 - CLASSIFY the input into exactly one of three kinds:
   direction, or interest in the text, it is a self_description - even if it is short, \
   informal, misspelled, or contains almost no detail.
 
-- "unusable": there is no person in it at all. A recipe, a news article, a product \
-  manual, a legal contract, random characters, an empty extraction. This is the ONLY \
-  kind that stops here.
+- "unusable": there is no person in it at all (a recipe, a news article, a manual, \
+  random characters, an empty extraction) - OR it is an uploaded file whose \
+  document_type is "other_document" (see STEP 0).
 
-Do NOT classify something as "unusable" because it is short, thin, or not a CV. \
-Thin is normal. Thin is what most people type. Thin is handled at STEP 2 by saying \
-so honestly and asking questions - not by refusing.
+For TYPED input, do NOT classify something as "unusable" because it is short, thin, \
+or not a CV. Thin is normal; it is what most people type, and it is handled at STEP 2 \
+by saying so honestly and asking questions - not by refusing. That generosity is for \
+typed words only. It never applies to an uploaded file.
 
 STEP 2 - Read the actual person:
 - Ground EVERY statement in what they actually gave you. Reference the specific role, \
@@ -934,8 +1039,10 @@ Return ONLY valid JSON - no markdown, no backticks, no preamble - in EXACTLY thi
                                     // given. NEVER invent or guess a name; a company or
                                     // university name is not a person's name.
   "confidence": number,            // 0-1, how sure you are of the classification
-  "document_type": string,         // "cv" | "self_description" | "other"
-  "message_if_not_cv": string,     // short friendly note, ONLY if input_kind="unusable", else ""
+  "document_type": string,         // "cv_resume" | "linkedin_profile" | "self_description" | "other_document"
+  "message_if_not_cv": string,     // ONLY if input_kind="unusable": one plain sentence
+                                    // naming what it is, e.g. "This is an attendance
+                                    // record, not a CV." Otherwise "".
   "evidence_level": string,        // "rich" | "thin"
   "field": string,                 // the industry/field they are aiming at, in plain words
                                     // (e.g. "intelligence and national security analysis").
@@ -978,11 +1085,24 @@ def _empty_result(message: str, failed: bool = False) -> dict:
         "profile": {"summary": "", "strengths": [], "gaps": [], "interests": [],
                     "seniority": "", "aspiration": "", "trajectory": ""},
         "recommendations": [],
+        "near_misses": [],
+        "rejected_document": False,
     }
 
 
 SENIORITY_VALUES = ("student", "junior", "mid", "senior", "exec")
 INPUT_KINDS = ("cv", "self_description", "unusable")
+DOCUMENT_TYPES = ("cv_resume", "linkedin_profile", "self_description", "other_document")
+# What an uploaded FILE has to be. Anything else is refused before scoring:
+# an attendance record names a student and a course, which the old "is there
+# a person in it?" test happily read as a thin profile and matched to events.
+FILE_DOCUMENT_TYPES = ("cv_resume", "linkedin_profile")
+FILE_MIN_CONFIDENCE = float(os.environ.get("OC_FILE_MIN_CONFIDENCE", "0.6"))
+# A CV or LinkedIn export has at least one of these section words. Checked in
+# code, independently of the model, so the gate does not rest on one judgement.
+_CV_SECTION_RE = re.compile(
+    r"\b(experience|employment|work history|education|skills|qualifications|"
+    r"projects|internships?|career|certifications?)\b", re.I)
 
 # The same shape the prompt describes in prose, as a schema OpenAI enforces
 # server-side. Kept next to PROFILE_SYSTEM_PROMPT because the two have to
@@ -997,7 +1117,7 @@ PROFILE_SCHEMA = {
         "input_kind": {"type": "string", "enum": list(INPUT_KINDS)},
         "person_name": {"type": "string"},
         "confidence": {"type": "number"},
-        "document_type": {"type": "string"},
+        "document_type": {"type": "string", "enum": list(DOCUMENT_TYPES)},
         "message_if_not_cv": {"type": "string"},
         "evidence_level": {"type": "string", "enum": ["rich", "thin"]},
         "field": {"type": "string"},
@@ -1104,14 +1224,40 @@ def _coerce_profile(data: dict) -> dict:
 
     data["field"] = _str(data.get("field"), 200)
     data["message_if_not_cv"] = _str(data.get("message_if_not_cv"), 600)
-    data["document_type"] = _str(data.get("document_type"), 40) or "unknown"
+    dtype = _str(data.get("document_type"), 40).lower()
+    # Older replies (and the Anthropic path, which has no enum) say "cv" or
+    # "other"; anything unrecognised is treated as not-a-CV, never as one.
+    dtype = {"cv": "cv_resume", "resume": "cv_resume", "linkedin": "linkedin_profile",
+             "other": "other_document"}.get(dtype, dtype)
+    data["document_type"] = dtype if dtype in DOCUMENT_TYPES else "other_document"
     return data
 
 
-def extract_profile(file_text: str) -> dict:
+def file_rejection(data: dict, file_text: str):
+    """None if an uploaded file may be read as a person, else the plain
+    sentence to show them. Three independent checks, all of which must pass:
+    the model says it is a CV/resume or LinkedIn profile, it is confident,
+    and the text actually has a CV section in it."""
+    dtype = data.get("document_type")
+    named = (data.get("message_if_not_cv") or "").strip()
+    if dtype not in FILE_DOCUMENT_TYPES:
+        return named or "That isn't a CV."
+    if float(data.get("confidence") or 0) < FILE_MIN_CONFIDENCE:
+        return "We can't tell that this is a CV."
+    if not _CV_SECTION_RE.search(file_text or ""):
+        return "That file has no experience, education or skills section, so it isn't a CV we can read."
+    return None
+
+
+def extract_profile(file_text: str, source: str = "text") -> dict:
+    """`source` is "file" for an upload, "text" for typed words. Uploads are
+    held to a strict standard (file_rejection); typed words keep the
+    generous one, because one honest sentence is a real question."""
     provider = extract_provider()
     model = extract_model(provider)
-    user_content = f"WHAT THE PERSON GAVE US:\n{_clip_for_profile(file_text)}"
+    label = "uploaded file" if source == "file" else "typed by the person"
+    user_content = (f"SOURCE: {label}\n\n"
+                    f"WHAT THE PERSON GAVE US:\n{_clip_for_profile(file_text)}")
     # 4000, not 2000: the reply carries a nested profile plus up to three
     # questions of four options, and the old ceiling was close enough to clip
     # it. Truncation now raises rather than quietly shortening the object.
@@ -1126,6 +1272,18 @@ def extract_profile(file_text: str) -> dict:
     # input_kind="unusable" closes the gate. input_kind, evidence_level, field
     # and the whole profile object are normalised in _coerce_profile above.
     data["is_cv"] = data["input_kind"] in ("cv", "self_description")
+    data["rejected_document"] = False
+    if source == "file":
+        refusal = file_rejection(data, file_text)
+        if refusal:
+            log.info("Upload refused as %s (confidence %.2f): %s",
+                     data.get("document_type"), data.get("confidence") or 0, refusal)
+            data.update(is_cv=False, input_kind="unusable", rejected_document=True,
+                        evidence_level="thin", field="", clarifying_questions=[],
+                        message_if_not_cv=(refusal + " OrbitCast only reads CVs, resumes "
+                                           "and LinkedIn profile PDFs. Upload one of those."))
+            data["profile"] = {k: ([] if isinstance(v, list) else "")
+                               for k, v in data["profile"].items()}
     data["person_name"] = str(data.get("person_name") or "").strip()[:120]
     data.setdefault("recommendations", [])
 
@@ -1375,6 +1533,12 @@ DEFAULT_SCORING_RULES = """HONESTY RULES - this is the entire point of the produ
 - You are told today's date below. Never recommend an event whose date has \
   already passed - if a date looks past or ambiguous, treat it with suspicion \
   rather than recommending it anyway.
+- Judge each event by what it actually IS - its description and who it suits - not \
+  by its title. Titles are often vague or misleading. If an event has no \
+  description, be more conservative: a title alone rarely justifies more than 75.
+- Every "why" must name BOTH a specific detail from this person's profile AND a \
+  specific detail of this event, and say how they connect. If you cannot name both, \
+  the match is not strong enough to recommend.
 - Reason about TRAJECTORY, not just topic overlap. The profile includes where this \
   person seems to be headed (a pivot, a new skill, a gap they're closing). An event \
   that matches their trajectory forward is worth more than one that just echoes their \
@@ -1443,8 +1607,23 @@ Return ONLY valid JSON - no markdown, no backticks, no preamble - in EXACTLY thi
        "weakness": string          // the ONE honest limit of this match for them,
                                     // or "None material." - never invented, never generic
      }
+  ],
+  "near_misses": [
+     {
+       "event_id": string,         // from the catalog, and NOT one already in recommendations
+       "fit_score": number,        // honest, 50-64 ONLY
+       "why": string,              // one sentence: what this event genuinely offers THIS person
+       "why_not": string           // one sentence: the specific reason it falls short
+     }
   ]
-}"""
+}
+
+NEAR MISSES: after choosing recommendations, list up to 5 more events, best first, \
+that are the closest relevant options scoring 50-64. They are shown to the person, \
+labelled as below the bar, so they can see their next-best options. Score them as \
+honestly as everything else: never raise one to 65 or more to move it into \
+recommendations, and never include anything scoring under 50 - an empty list is \
+correct when nothing else is relevant."""
 
 CONFIG_KEY_SCORING_RULES = "scoring_rules"
 
@@ -1454,7 +1633,7 @@ CONFIG_KEY_SCORING_RULES = "scoring_rules"
 # score_events below, whatever the model returns.
 SCORING_SCHEMA = {
     "type": "object", "additionalProperties": False,
-    "required": ["recommendations"],
+    "required": ["recommendations", "near_misses"],
     "properties": {"recommendations": {"type": "array", "items": {
         "type": "object", "additionalProperties": False,
         "required": ["event_id", "title", "fit_score", "why", "why_now",
@@ -1468,7 +1647,16 @@ SCORING_SCHEMA = {
             "prepare": {"type": "string"},
             "benefit": {"type": "string"},
             "weakness": {"type": "string"},
-        }}}},
+        }}},
+        "near_misses": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False,
+            "required": ["event_id", "fit_score", "why", "why_not"],
+            "properties": {
+                "event_id": {"type": "string"},
+                "fit_score": {"type": "integer"},
+                "why": {"type": "string"},
+                "why_not": {"type": "string"},
+            }}}},
 }
 
 
@@ -1508,12 +1696,15 @@ def band_label(score) -> str:
     return "Worth a look"       # 65-74
 
 
-def score_events(profile: dict, compact_events: list, niche: str = None) -> list:
-    # Capped candidate pool - a smaller set is both more useful to recommend
-    # from and a smaller prompt, which made truncation less likely in practice
-    # (confirmed via stop_reason=max_tokens on the full catalog). select_catalog
-    # keeps it soonest-first *per category* so niche categories aren't starved.
-    catalog = select_catalog(compact_events)
+def score_events(profile: dict, compact_events: list, niche: str = None):
+    """Returns (recommendations, near_misses): matches at 65+ best first, and
+    the closest events below the bar, both validated here whatever the model
+    said."""
+    # Capped candidate pool, chosen for THIS person: their most related
+    # events first (with each event's real write-up attached), then a
+    # soonest-first spread across categories so niche categories aren't
+    # starved and the scorer still sees range.
+    catalog = select_catalog(_with_writeups(compact_events), profile=profile)
 
     # RAG: pull in past human-reviewed judgments for people similar to this
     # profile, if the retrieval layer is configured. Never lets a retrieval
@@ -1538,7 +1729,7 @@ def score_events(profile: dict, compact_events: list, niche: str = None) -> list
     shared = (
         f"TODAY'S DATE: {date.today().isoformat()}\n\n"
         "EVENT CATALOG (JSON array):\n"
-        f"{json.dumps(catalog, ensure_ascii=False)}"
+        f"{json.dumps([{k: e[k] for k in _SCORER_FIELDS if e.get(k)} for e in catalog], ensure_ascii=False)}"
     )
     # The subscriber's own words about what they want, when they have written
     # any. Three things make this safe enough to put in front of the scorer:
@@ -1593,7 +1784,26 @@ def score_events(profile: dict, compact_events: list, niche: str = None) -> list
         and r.get("event_id") in valid_ids
         and r.get("fit_score", 0) >= FIT_THRESHOLD
     ]
-    return sorted(recs, key=lambda r: r.get("fit_score", 0), reverse=True)
+    recs = sorted(recs, key=lambda r: r.get("fit_score", 0), reverse=True)
+
+    # Near misses get the same scrutiny: a real catalogue id, not already a
+    # match, and genuinely in 50-64. One the model scored 65+ is dropped, not
+    # promoted - a match has to come through the recommendations list, where
+    # the critique pass reads it.
+    taken, near = {r["event_id"] for r in recs}, []
+    for n in data.get("near_misses", []) or []:
+        if not isinstance(n, dict) or n.get("event_id") not in valid_ids:
+            continue
+        try:
+            score = int(n.get("fit_score") or 0)
+        except (TypeError, ValueError):
+            continue
+        if n["event_id"] in taken or not NEAR_MISS_FLOOR <= score < FIT_THRESHOLD:
+            continue
+        taken.add(n["event_id"])
+        near.append(dict(n, fit_score=score, band="Below the bar"))
+    near.sort(key=lambda n: n["fit_score"], reverse=True)
+    return recs, near
 
 
 # --------------------------------------------------------------------------
@@ -1674,7 +1884,8 @@ def critique_recommendations(profile: dict, recommendations: list) -> list:
 # --------------------------------------------------------------------------
 # 6. Orchestration - the single entry point the route calls
 # --------------------------------------------------------------------------
-def analyze_upload(file_text: str, events: list, identity_gate=None) -> dict:
+def analyze_upload(file_text: str, events: list, identity_gate=None,
+                   source: str = "text") -> dict:
     """identity_gate, when given, is called with the extracted data after
     classification and before any scoring spend. It returns None to proceed or
     a user-facing refusal string to stop - app.py uses it to hold each account
@@ -1703,7 +1914,7 @@ def analyze_upload(file_text: str, events: list, identity_gate=None) -> dict:
     data, last_exc = None, None
     for attempt in (1, 2):
         try:
-            data = extract_profile(file_text)
+            data = extract_profile(file_text, source)
             last_exc = None
             break
         except retryable as exc:
@@ -1757,6 +1968,8 @@ def score_and_enrich(profile: dict, evidence_level: str, field: str,
     # evidence_level lives at the top level but the scorer needs it to pick which
     # question it's answering (fit-to-record vs fit-to-direction).
     scoring_profile = {**profile, "evidence_level": evidence_level or "rich"}
+    if field:
+        scoring_profile["field"] = field            # also feeds rank_for_profile
 
     compact_events = build_compact_events(events)
 
@@ -1771,10 +1984,10 @@ def score_and_enrich(profile: dict, evidence_level: str, field: str,
         # failure", which is a lie if scoring never actually completed.
         # scoring_failed makes the difference explicit so the UI can say
         # "try again" instead.
-        recs, failed = [], False
+        recs, near, failed = [], [], False
         for attempt in (1, 2):
             try:
-                recs = score_events(scoring_profile, compact_events, niche)
+                recs, near = score_events(scoring_profile, compact_events, niche)
                 recs = critique_recommendations(scoring_profile, recs)
                 failed = False
                 break
@@ -1783,8 +1996,8 @@ def score_and_enrich(profile: dict, evidence_level: str, field: str,
                 log.warning(f"score_events failed (attempt {attempt}/2): {exc}")
         if failed:
             log.warning("scoring failed twice - reporting as failure, not as 'no matches'")
-            recs = []
-        return recs, failed
+            recs, near = [], []
+        return recs, near, failed
 
     orientation_field = None
     if evidence_level == "thin":
@@ -1802,29 +2015,32 @@ def score_and_enrich(profile: dict, evidence_level: str, field: str,
         # ~105s on Claude with five searches, against ~30s for scoring.
         # build_orientation() never raises - it returns None on any failure.
         orient_future = _orientation_pool.submit(build_orientation, orientation_field, profile)
-        recs, scoring_failed = _do_scoring()
+        recs, near, scoring_failed = _do_scoring()
         try:
             result["orientation"] = orient_future.result(timeout=ORIENTATION_WAIT_S)
         except FuturesTimeout:
             result["orientation"] = None
     else:
         result["orientation"] = None
-        recs, scoring_failed = _do_scoring()
+        recs, near, scoring_failed = _do_scoring()
 
     result["scoring_failed"] = scoring_failed
 
     # Enrich with the real event object and cap at the honesty-rule max.
     by_id = {e["id"]: e for e in compact_events}
-    enriched = []
-    for i, r in enumerate(recs[:MAX_RECOMMENDATIONS]):
+
+    def _enrich(r):
         ev = by_id.get(r["event_id"], {})
-        location = ev.get("location", "")
-        row = {**r, "category": ev.get("category", ""),
-               "date": ev.get("date", ""), "source": ev.get("source", ""),
-               "url": ev.get("url", ""), "emoji": ev.get("emoji", ""),
-               "format": ev.get("format", ""), "location": location}
+        return {**r, "title": r.get("title") or ev.get("title", ""),
+                "category": ev.get("category", ""), "date": ev.get("date", ""),
+                "source": ev.get("source", ""), "url": ev.get("url", ""),
+                "emoji": ev.get("emoji", ""), "format": ev.get("format", ""),
+                "location": ev.get("location", "")}
 
-        enriched.append(row)
-
-    result["recommendations"] = enriched
+    result["recommendations"] = [_enrich(r) for r in recs[:MAX_RECOMMENDATIONS]]
+    # Make the list up to MIN_RESULTS with the closest events below the bar.
+    # They stay a separate list: the digest, the saved history and the "N
+    # matches" count only ever see real matches.
+    need = max(0, MIN_RESULTS - len(result["recommendations"]))
+    result["near_misses"] = [_enrich(n) for n in near[:need]]
     return result

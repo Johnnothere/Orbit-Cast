@@ -1030,6 +1030,9 @@ details.past[open]>summary .i{transform:rotate(180deg)}
 .mcard:hover{border-color:var(--line-3)}
 .mcard.hot{border-color:color-mix(in oklab,var(--warm) 45%,var(--line-2));box-shadow:0 0 0 1px color-mix(in oklab,var(--warm) 25%,transparent),var(--sh-2)}
 .mcard.muted{opacity:.55}
+.mcard.near{border-style:dashed;background:transparent}
+.mcard.near .meter i{background:var(--tx-3)}
+.near-h{margin-top:22px}
 .mc-top{display:flex;align-items:baseline;gap:8px}
 .mc-rank{font:600 12px var(--f-mono);color:var(--tx-3)}
 .mc-tier{font:500 12.5px var(--f-body);color:var(--tx-2)}
@@ -2016,7 +2019,19 @@ function setFile(f){
   S.file=f;
   $('#fileName').textContent=f.name;$('#fileSize').textContent=Math.max(1,Math.round(f.size/1024))+' KB';
   $('#fileRow').hidden=false;$('#drop').hidden=true;setPane('cv');hideErr();
-  idbSet('draftFile',f);
+  stashFile(f);
+}
+/* The draft file survives the Google round trip as its BYTES. Storing the
+   File object itself is not enough: Safari can hand back a File after the
+   navigation whose size looks right but whose contents upload as nothing -
+   which is exactly how "sign in, then upload your CV again" happened. Kept
+   for DRAFT_TTL_MS only, so a CV does not sit in a shared browser. */
+const DRAFT_TTL_MS=30*60*1000;
+function stashFile(f){
+  f.arrayBuffer().then(buf=>idbSet('draftFile',{name:f.name,type:f.type||'',buf:buf,at:Date.now()})).catch(()=>{});
+}
+async function readableFile(f){
+  try{return !!f&&f.size>0&&(await f.slice(0,64).arrayBuffer()).byteLength>0;}catch(e){return false;}
 }
 function clearFile(){S.file=null;$('#fileRow').hidden=true;$('#drop').hidden=false;$('#cvFile').value='';idbDel('draftFile');syncRun();}
 function showErr(m){const e=$('#runErr');e.textContent=m;e.hidden=false;}
@@ -2047,7 +2062,12 @@ function idbDel(k){return idb().then(db=>new Promise((res,rej)=>{const t=db.tran
 async function restoreDraft(){
   const d=store.get('oc_draft',null);
   if(d){if(d.text){$('#aiText').value=d.text;updCount();}if(typeof d.keep==='boolean')setKeep(d.keep,false);}
-  const f=await idbGet('draftFile');
+  const rec=await idbGet('draftFile');
+  let f=null;
+  if(rec&&rec.buf&&Date.now()-(rec.at||0)<DRAFT_TTL_MS){
+    try{f=new File([rec.buf],rec.name||'cv.pdf',{type:rec.type||''});}catch(e){f=null;}
+  }
+  if(!f||!(await readableFile(f))){f=null;if(rec)idbDel('draftFile');}
   if(f&&f.size){S.file=f;$('#fileName').textContent=f.name;$('#fileSize').textContent=Math.max(1,Math.round(f.size/1024))+' KB';$('#fileRow').hidden=false;$('#drop').hidden=true;}
   if(d&&d.pane)setPane(d.pane);else if(S.file)setPane('cv');
   syncRun();
@@ -2171,14 +2191,14 @@ function deckHTML(items,key){
        weakness is worse than no weakness. */
     const wk=(m.weakness||'').trim();
     const showWk=wk && wk.toLowerCase().replace(/[.\s]/g,'')!=='nonematerial';
-    return'<article class="mcard'+(hot?' hot':'')+(m.muted?' muted':'')+'" role="listitem" aria-label="'+esc(e.title)+', '+esc(band)+'">'
-      +'<div class="mc-top"><span class="mc-rank">#'+(i+1)+'</span><span class="mc-tier">'+esc(band)+'</span><span class="mc-fit" title="Fit score, 0-100"><b>'+m.fit+'</b><i>/100</i></span></div>'
+    return'<article class="mcard'+(hot&&!m.near?' hot':'')+(m.muted?' muted':'')+(m.near?' near':'')+'" role="listitem" aria-label="'+esc(e.title)+', '+esc(band)+'">'
+      +'<div class="mc-top"><span class="mc-rank">'+(m.near?'Near miss':'#'+(i+1))+'</span><span class="mc-tier">'+esc(band)+'</span><span class="mc-fit" title="Fit score, 0-100"><b>'+m.fit+'</b><i>/100</i></span></div>'
       +'<div class="meter" aria-hidden="true"><i'+(hot?' class="hot"':'')+' style="width:'+m.fit+'%"></i></div>'
       +'<p class="mc-meta"><span class="dot" style="--c:var('+c.v+')"></span>'+esc(c.label)+(e.fmt?' · <span class="mc-fmt'+(e.fmt==='Pitch'?' pitch':'')+'">'+esc(e.fmt)+'</span>':'')+'</p>'
       +'<h3 class="mc-title"><button class="row-open" data-open="'+esc(e.id)+'">'+esc(e.title)+'</button></h3>'
       +'<p class="mc-when">'+ic('calendar','s14')+(e.date?fmtDay(e.date):'Date TBC')+(e.time?' · '+e.time:'')+'<span class="sep">·</span>'+ic(e.online?'globe':'pin','s14')+esc(where)+'</p>'
       +'<p class="mc-why">'+esc(m.why)+'</p>'
-      +(showWk?'<p class="mc-weakness"><span class="mc-wk-label">One honest limit</span> — '+esc(wk)+'</p>':'')
+      +(showWk?'<p class="mc-weakness"><span class="mc-wk-label">'+(m.near?'Why it falls short':'One honest limit')+'</span> — '+esc(wk)+'</p>':'')
       +'<div class="mc-acts">'+saveBtn(e.id,'sm')+'<button class="icon-btn sm" data-ics="'+esc(e.id)+'" aria-label="Add to calendar">'+ic('calendar-plus','s16')+'</button>'
       +(m.mutable?'<button class="icon-btn sm" data-act="ac-mute" data-id="'+esc(e.id)+'" data-title="'+esc(e.title)+'" aria-pressed="'+!!m.muted+'" aria-label="'+(m.muted?'Unmute':'Not for me')+'" title="'+(m.muted?'Muted · undo':'Not for me')+'">'+ic('eye-off','s16')+'</button>':'')
       +'<span class="tb-spacer"></span><button class="btn btn-secondary sm" data-open="'+esc(e.id)+'">Details</button><a class="btn btn-primary sm" href="'+esc(e.url)+'" target="_blank" rel="noopener"'+(m.rid?' data-track="'+esc(m.rid)+'"':'')+'>View '+ic('arrow-up-right','s14')+'</a></div>'
@@ -2207,7 +2227,7 @@ function resultsHTML(data){
   if(!data.is_cv){
     const broke=!!data.analysis_failed;
     S.matches=null;
-    return'<div class="card"><h3>'+(broke?'We couldn’t finish':'We couldn’t find you in that')+'</h3><p class="sub" style="margin-top:8px;font-size:14.5px;color:var(--tx-2)">'+esc(data.message_if_not_cv||'There’s no person in what you sent. It reads as a document rather than as you. Upload a CV, or type a sentence about who you are and what you’re trying to get into.')+'</p><p class="muted" style="margin-top:12px">'+(broke?'This was a failure on our side. Nothing was rejected.':'No profile was invented.')+'</p></div>';
+    return'<div class="card"><h3>'+(broke?'We couldn’t finish':data.rejected_document?'That isn’t a CV':'We couldn’t find you in that')+'</h3><p class="sub" style="margin-top:8px;font-size:14.5px;color:var(--tx-2)">'+esc(data.message_if_not_cv||'There’s no person in what you sent. It reads as a document rather than as you. Upload a CV, or type a sentence about who you are and what you’re trying to get into.')+'</p><p class="muted" style="margin-top:12px">'+(broke?'This was a failure on our side. Nothing was rejected.':'No profile was invented.')+'</p></div>';
   }
   const p=data.profile||{};const thin=data.evidence_level==='thin';
   const recs=(data.recommendations||[]).map((r,i)=>({r,e:ensureEv(r,i),fit:Math.round(r.fit_score||0)}));
@@ -2226,12 +2246,20 @@ function resultsHTML(data){
   const savedToggle=(ME.signed_in&&recs.length>1&&savedHere)
     ? '<button class="chip sm" data-act="match-saved" aria-pressed="'+(!!S.matchSavedFirst)+'">'+ic('bookmark','s14')+'Saved first <span class="n">'+savedHere+'</span></button>'
     : '';
-  h+='<div class="res-h"><h2>'+(recs.length?recs.length+' match'+(recs.length===1?'':'es'):'No matches')+'</h2><span>Fit score out of 100 · only 65 and above are shown</span>'+savedToggle+'</div>';
+  h+='<div class="res-h"><h2>'+(recs.length?recs.length+' match'+(recs.length===1?'':'es'):'No matches')+'</h2><span>Fit score out of 100 · a match means 65 or more</span>'+savedToggle+'</div>';
   if(!recs.length){
     h+=data.scoring_failed
       ?'<div class="card"><h3>The matching step didn’t complete.</h3><p class="sub" style="margin-top:8px;font-size:14.5px;color:var(--tx-2)">This is a failure on our side, not a verdict on what you sent. Your profile below is still valid. Please run it again.</p></div>'
       :'<div class="card"><h3>Nothing clears the bar.</h3><p class="sub" style="margin-top:8px;font-size:14.5px;color:var(--tx-2)">Nothing in the live catalogue scored 65 or more against '+(thin?'where you’re trying to go. That is about this week’s catalogue, not about you; the questions below are the fastest way to change it.':'your record. Check back as the catalogue updates.')+'</p></div>';
-  }else h+=deckHTML(recs.map(m=>({e:m.e,fit:m.fit,why:m.r.why||'',rid:m.r.recommendation_id,url:m.r.url})),'res');
+  }else h+=deckHTML(recs.map(m=>({e:m.e,fit:m.fit,why:m.r.why||'',weakness:m.r.weakness||'',band:m.r.band,rid:m.r.recommendation_id,url:m.r.url})),'res');
+  /* Near misses: the closest events BELOW the 65 bar, shown so the list
+     reaches five - never dressed up as matches. Own heading, own label, real
+     score, and the specific reason each one falls short. */
+  const near=(data.near_misses||[]).map((r,i)=>({r,e:ensureEv(r,100+i),fit:Math.round(r.fit_score||0)}));
+  if(near.length){
+    h+='<div class="res-h near-h"><h2>'+(recs.length?'Closest below the bar':'The closest options')+'</h2><span>Scored under 65 for you · shown with the reason they fall short</span></div>';
+    h+=deckHTML(near.map(m=>({e:m.e,fit:m.fit,why:m.r.why||'',weakness:m.r.why_not||'',band:'Below the bar',near:true,url:m.r.url})),'near');
+  }
   const li=a=>(a&&a.length)?a.map(s=>'<li>'+esc(s)+'</li>').join(''):null;
   h+='<div class="card"><h3>Your profile'+(p.seniority?' <em>'+esc(p.seniority)+'</em>':'')+'</h3><p class="sub">'+(thin?'From what you told us':'From the evidence in your CV')+'</p><div class="pgrid"><div class="strong"><h4><span class="dot" style="--c:var(--ac)"></span>Strong in</h4><ul>'+(li(p.strengths)||'<li>'+(thin?'Nothing to point at yet. You told us where you’re going, not where you’ve been.':'No specific strengths surfaced.')+'</li>')+'</ul></div><div><h4><span class="dot"></span>Thin on</h4><ul>'+(li(p.gaps)||'<li>No notable gaps detected.</li>')+'</ul></div></div>'+(p.trajectory?'<p class="traj"><b>Where you’re headed.</b> '+esc(p.trajectory)+'</p>':'')+'</div>';
   const o=data.orientation;
@@ -3146,14 +3174,18 @@ window.addEventListener('resize',()=>requestAnimationFrame(measureSticky));
   if(ME.signed_in||keepDraft)await restoreDraft();else{clearDraft();syncRun();}
   if(signin){
     const msg={ok:'Signed in',failed:'That sign-in link didn\'t work. It may have expired or already been used. Request a new one.',google_off:'Sign-in is not available right now.',unavailable:'Accounts are unavailable right now. Try again shortly.',not_allowed:'That address can\'t sign in here. Access is by invitation.',email_bad:'That link is malformed. Request a new one.'}[signin];
-    if(msg)setTimeout(()=>toast(msg),300);
+    const resuming=signin==='ok'&&ME.signed_in&&!!store.get('oc_pending',0);
+    if(msg&&!resuming)setTimeout(()=>toast(msg),300);   /* the resume path says it itself */
     if(signin==='ok')finishAfterSignin();else store.del('oc_after_action');
     if(signin==='ok'&&ME.signed_in&&store.get('oc_after_signin',null)){const tab=store.get('oc_after_signin',null);store.del('oc_after_signin');setTimeout(()=>openAccount(tab),350);}
     if(signin==='ok'&&ME.signed_in&&store.get('oc_pending',0)){
       store.del('oc_pending');
       if(S.view!=='home')go('home',{push:false});
       scrollToConsole();
-      if(inputReady()){const wait=()=>LOADED?runAnalysis({}):setTimeout(wait,200);setTimeout(wait,400);}
+      if(inputReady()){
+        setTimeout(()=>toast('Signed in. Running your CV now.'),350);
+        const wait=()=>LOADED?runAnalysis({}):setTimeout(wait,200);setTimeout(wait,400);
+      }else showErr('Your CV didn’t come through sign-in. Add it once more and it will run.');
     }else if(signin!=='ok'&&!ME.signed_in){store.del('oc_pending');setTimeout(()=>openSignin(false),500);}
   }
   if(settings==='alerts'){

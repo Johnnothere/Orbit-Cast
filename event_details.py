@@ -533,6 +533,42 @@ def _cached(eid):
     return rec
 
 
+def summaries(event_ids):
+    """{id: short text} - what each event is and who it suits - for the
+    scorer. Read from memory, with ONE database query for whatever is not
+    there yet. Never reads a page and never raises: an event with no
+    write-up is simply scored on its title, as every event used to be."""
+    out, missing = {}, []
+    with _mem_lock:
+        for eid in event_ids:
+            rec = _mem.get(eid)
+            if rec is None:
+                missing.append(eid)
+            elif rec.get("ok"):
+                out[eid] = rec
+    if missing:
+        try:
+            fetched = db.get_event_details_many(missing)
+        except Exception:
+            fetched = {}
+        with _mem_lock:
+            for eid, rec in fetched.items():
+                _mem.setdefault(eid, rec)
+                if rec.get("ok"):
+                    out[eid] = rec
+    texts = {}
+    for eid, rec in out.items():
+        about = (rec.get("about") or "").strip()
+        fit = [str(f).strip() for f in (rec.get("fit_for") or []) if str(f).strip()]
+        if not about and not fit:
+            continue
+        text = about[:260]
+        if fit:
+            text += (" " if text else "") + "Suits: " + "; ".join(fit)[:140]
+        texts[eid] = text
+    return texts
+
+
 def _fresh(rec, url):
     if not rec or rec.get("url") != url:
         return False

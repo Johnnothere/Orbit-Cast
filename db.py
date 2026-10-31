@@ -1502,6 +1502,25 @@ def get_event_details(event_id: str):
         return None
 
 
+def get_event_details_many(event_ids) -> dict:
+    """{id: payload} for many events in one round trip. Scoring needs the
+    write-ups of a few hundred events at once; one query per event would put
+    hundreds of round trips in front of every analysis."""
+    ids = [i for i in (event_ids or []) if i]
+    if not ids:
+        return {}
+    try:
+        with _read_cursor() as cur:
+            if cur is None:
+                return {}
+            cur.execute("select id, payload from event_details where id = any(%s)", (ids,))
+            return {eid: (json.loads(p) if isinstance(p, str) else p)
+                    for eid, p in cur.fetchall() if p}
+    except Exception as exc:
+        log.debug(f"get_event_details_many failed: {exc}")
+        return {}
+
+
 def save_event_details(event_id: str, url: str, payload: dict) -> bool:
     try:
         with _cursor() as cur:
