@@ -6,6 +6,7 @@ prompt, so most of this file is about what happens to it on the way there.
 
 import os
 import unittest
+from unittest import mock
 
 os.environ.setdefault("SESSION_SECRET", "x" * 48)
 
@@ -235,3 +236,63 @@ class EmailRenderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScorerShapeTests(unittest.TestCase):
+    """digest.py calls score_fn(profile, level, field, events, niche). The app
+    wires in ai_engine.score_and_enrich. The fakes above accept anything, so
+    they cannot catch the two drifting apart - which is exactly what happened:
+    a four-argument lambda in app.py made every digest raise TypeError."""
+
+    def test_real_scorer_accepts_the_call_digest_makes(self):
+        import inspect
+        import ai_engine
+        sig = inspect.signature(ai_engine.score_and_enrich)
+        sig.bind({}, "rich", "", [], "niche text")      # raises if the shape drifts
+
+    def test_digest_passes_the_niche_positionally(self):
+        seen = []
+
+        def spy(*args):
+            seen.append(args)
+            return {"recommendations": []}
+
+        account = {"id": 1, "oc_uid": "u", "email": "a@b.c"}
+        with mock.patch.object(digest.db, "get_latest_analysis",
+                               return_value={"profile": {}, "evidence_level": "rich", "field": ""}), \
+             mock.patch.object(digest.db, "get_digest_extras",
+                               return_value={"niche_text": "threat intel", "max_items": 3}), \
+             mock.patch.object(digest.db, "recently_sent_event_ids", return_value=set()):
+            try:
+                digest.build_digest(account, {"categories": None}, [{"id": "e1", "date": "2099-01-01"}], spy)
+            except Exception:
+                pass                                     # only the call shape matters here
+        self.assertTrue(seen, "build_digest never called the scorer")
+        self.assertEqual(len(seen[0]), 5)
+        self.assertEqual(seen[0][4], "threat intel")
+
+    def test_app_wires_scorers_that_take_the_niche(self):
+        """The test that would have caught it. Reads app.py and checks every
+        scorer it hands to digest: a lambda must take at least five arguments
+        (or *args); anything else must be a name, i.e. the real function."""
+        import ast
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app.py")
+        with open(path, encoding="utf-8") as fh:
+            tree = ast.parse(fh.read())
+        found = []
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name) and node.func.value.id == "digest"
+                    and node.func.attr in ("start_scheduler", "send_preview", "send_one", "run_due")):
+                continue
+            fn = next((k.value for k in node.keywords if k.arg == "score_fn"), None)
+            if fn is None and node.func.attr in ("send_preview", "send_one") and len(node.args) >= 4:
+                fn = node.args[3]
+            if fn is None:
+                continue
+            found.append(node.lineno)
+            if isinstance(fn, ast.Lambda):
+                a = fn.args
+                self.assertTrue(a.vararg or len(a.args) >= 5,
+                                f"app.py:{node.lineno}: scorer lambda takes {len(a.args)} args; digest passes 5")
+        self.assertGreaterEqual(len(found), 2, "expected the scheduler and the preview to wire a scorer")

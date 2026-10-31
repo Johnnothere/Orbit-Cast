@@ -188,7 +188,51 @@ class SchemaTests(unittest.TestCase):
             ai_engine._call_json("sys", "user", max_tokens=4000, model="claude-x",
                                  provider="anthropic", schema=ai_engine.PROFILE_SCHEMA)
         self.assertNotIn("response_format", seen)
-        self.assertEqual(seen["max_tokens"], 4000)
+        # The caller's 4000 is the answer; thinking gets headroom on top.
+        self.assertEqual(seen["max_tokens"], 4000 + ai_engine.THINKING_HEADROOM)
+
+
+class ThinkingBudgetTests(unittest.TestCase):
+    """Current Claude models think by default and thinking counts against
+    max_tokens. Scoring once spent all 4096 tokens thinking and returned
+    nothing, twice, ~45s each. These pin the fix."""
+
+    def _seen(self, **call_kw):
+        seen = {}
+
+        def capture(**kw):
+            seen.update(kw)
+            return _AnthropicResp(json.dumps({"ok": True}))
+
+        with _patch("_create", capture):
+            ai_engine._call("sys", "user", **call_kw)
+        return seen
+
+    def test_answer_budget_gets_thinking_headroom(self):
+        seen = self._seen(max_tokens=4096, model="claude-sonnet-5")
+        self.assertEqual(seen["max_tokens"], 4096 + ai_engine.THINKING_HEADROOM)
+
+    def test_headroom_stays_inside_the_timeout(self):
+        """At ~100 output tokens/s a ceiling past the timeout turns a long
+        think into a timeout, and the SDK's retries multiply the wait."""
+        worst = (4096 + ai_engine.THINKING_HEADROOM) / 100.0
+        self.assertLess(worst, ai_engine.AI_TIMEOUT_S)
+
+    def test_effort_is_sent_when_asked(self):
+        seen = self._seen(max_tokens=10, model="claude-sonnet-5", effort="medium")
+        self.assertEqual(seen["output_config"], {"effort": "medium"})
+
+    def test_no_effort_means_no_output_config(self):
+        self.assertNotIn("output_config", self._seen(max_tokens=10, model="claude-sonnet-5"))
+
+    def test_effort_is_not_sent_to_models_that_reject_it(self):
+        """Haiku 4.5 returns a 400 on output_config.effort."""
+        seen = self._seen(max_tokens=10, model="claude-haiku-4-5-20251001", effort="medium")
+        self.assertNotIn("output_config", seen)
+
+    def test_scoring_and_critique_default_to_medium(self):
+        self.assertEqual(ai_engine.EFFORT_SCORE, "medium")
+        self.assertEqual(ai_engine.EFFORT_CRITIQUE, "medium")
 
 
 class UsageTests(unittest.TestCase):

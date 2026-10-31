@@ -142,11 +142,16 @@ def copy_table(src, dst, table):
 
 
 def reset_sequences(dst):
+    # deptype 'a' is how a serial column owns its sequence; 'i' is how an
+    # IDENTITY column does. Matching only 'a' skipped every identity column,
+    # still printed "sequences reset", and left the London copy's counters
+    # behind its rows - so new inserts collided with copied ids (duplicate
+    # key on analyses and raw_files, 31 Oct 2026). See migration 0025.
     with dst.cursor() as cur:
         cur.execute("""
             select s.relname, t.relname, a.attname
               from pg_class s
-              join pg_depend d on d.objid = s.oid and d.deptype = 'a'
+              join pg_depend d on d.objid = s.oid and d.deptype in ('a', 'i')
               join pg_class t on t.oid = d.refobjid
               join pg_attribute a on a.attrelid = t.oid and a.attnum = d.refobjsubid
               join pg_namespace n on n.oid = s.relnamespace

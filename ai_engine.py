@@ -184,6 +184,23 @@ AI_TIMEOUT_S = float(os.environ.get("AI_TIMEOUT_S", "120"))
 # The SDK retries 429 / 529 / connection errors with backoff and honours the
 # API's retry-after. Four tries rides out a short rate-limit spike.
 AI_MAX_RETRIES = int(os.environ.get("AI_MAX_RETRIES", "4"))
+# Claude's current models think before they answer even when `thinking` is
+# left out - omitting it runs adaptive thinking - and thinking tokens count
+# against max_tokens. Every budget in this file was sized for the answer
+# alone, so on claude-sonnet-5 the scoring call could spend its whole 4096 on
+# thinking and return nothing (seen in production on 31 Oct 2026: "hit
+# max_tokens, 0 chars", twice, ~45s each). _call() therefore treats each
+# caller's max_tokens as the size of the ANSWER and adds this on top for the
+# thinking. Kept modest on purpose: the ceiling has to stay inside
+# AI_TIMEOUT_S at real output speed, or a long think becomes a timeout and
+# the SDK's retries multiply the wait.
+THINKING_HEADROOM = int(os.environ.get("OC_THINKING_HEADROOM", "6000"))
+# How hard the scoring and critique passes think. Medium, not the API's
+# default of high: at high, one scoring call ran past 4096 tokens of thinking
+# alone, which is most of a minute per analysis before anyone sees a result.
+# Set either to "high" to trade that time back for depth.
+EFFORT_SCORE = os.environ.get("OC_EFFORT_SCORE", "medium").strip().lower() or None
+EFFORT_CRITIQUE = os.environ.get("OC_EFFORT_CRITIQUE", "medium").strip().lower() or None
 _ai_slots = threading.BoundedSemaphore(AI_MAX_INFLIGHT)
 
 
@@ -330,7 +347,14 @@ def _extract_json_object(raw: str) -> str:
     return raw
 
 
-def _call(system, user_content, max_tokens=1500, model=None):
+def _supports_effort(model):
+    """output_config.effort is accepted by the current generation and rejected
+    with a 400 by Haiku 4.5 and Sonnet 4.5 - the model a fallback or an env
+    override might put on this path."""
+    return not any(tag in model for tag in ("haiku-4-5", "sonnet-4-5", "claude-3"))
+
+
+def _call(system, user_content, max_tokens=1500, model=None, effort=None):
     """system and user_content may be plain strings or content-block lists
     (the block form is how score_events marks the shared catalog prefix with
     cache_control, so a hundred people analysed in the same window pay for
@@ -340,12 +364,16 @@ def _call(system, user_content, max_tokens=1500, model=None):
     # analysis (extract_profile included, so uploads come back as "not a CV").
     # Sampling variance near the 65 threshold has to be handled some other way.
     model = model or MODEL
-    resp = _create(
-        model=model,
-        max_tokens=max_tokens,
-        system=system,
-        messages=[{"role": "user", "content": user_content}],
-    )
+    kwargs = {
+        "model": model,
+        # max_tokens is the answer; the headroom is the thinking (see above).
+        "max_tokens": max_tokens + THINKING_HEADROOM,
+        "system": system,
+        "messages": [{"role": "user", "content": user_content}],
+    }
+    if effort and _supports_effort(model):
+        kwargs["output_config"] = {"effort": effort}
+    resp = _create(**kwargs)
     _note_usage(resp, "anthropic", model)
     raw = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
     # A reply cut off at max_tokens is the quiet failure here: slicing from the
@@ -1406,7 +1434,7 @@ def score_events(profile: dict, compact_events: list, niche: str = None) -> list
         {"type": "text", "text": shared, "cache_control": {"type": "ephemeral"}},
         {"type": "text", "text": personal},
     ]
-    data = _call(system_blocks, user_content, max_tokens=4096)
+    data = _call(system_blocks, user_content, max_tokens=4096, effort=EFFORT_SCORE)
     valid_ids = {e["id"] for e in catalog}
     # Stamp a band derived from the raw score. The server owns this mapping so
     # the UI never has to - every surface (card, deck, digest email, API)
@@ -1474,7 +1502,7 @@ def critique_recommendations(profile: dict, recommendations: list) -> list:
     )
     try:
         data = _call(CRITIQUE_SYSTEM_PROMPT, user_content, max_tokens=1000,
-                     model=MODEL_CRITIQUE)
+                     model=MODEL_CRITIQUE, effort=EFFORT_CRITIQUE)
     except Exception as exc:
         # Critique failing shouldn't sink the whole analysis - fall back to
         # the unaudited (but already threshold-enforced) recommendations.

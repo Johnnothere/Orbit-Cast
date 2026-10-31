@@ -1494,9 +1494,7 @@ def api_my_digest_test():
 
     def run():
         try:
-            status = digest.send_preview(
-                account, prefs, events,
-                lambda profile, level, field, evs: ai_engine.score_and_enrich(profile, level, field, evs))
+            status = digest.send_preview(account, prefs, events, ai_engine.score_and_enrich)
             log.info("digest preview for account %s: %s", account["id"], status)
         except Exception as exc:
             log.warning("digest preview failed for account %s: %s", account["id"], exc)
@@ -2933,10 +2931,13 @@ atexit.register(db.flush_audit)
 
 # Email digests. Same single-worker reasoning as the refresh loop above, plus
 # a database claim per send so a restart mid-run cannot double-email anyone.
+# score_fn is score_and_enrich itself, not a lambda around it: digest.py
+# calls it with the subscriber's niche text as a fifth argument, and a
+# four-argument lambda here once made every digest - preview and scheduled
+# alike - fail with a TypeError (tests/test_digest_prefs.py pins the shape).
 digest.start_scheduler(
     catalog_fn=lambda: load_events_cache().get("events", []),
-    score_fn=lambda profile, level, field, events: ai_engine.score_and_enrich(
-        profile, level, field, events),
+    score_fn=ai_engine.score_and_enrich,
 )
 
 if __name__ == "__main__":
