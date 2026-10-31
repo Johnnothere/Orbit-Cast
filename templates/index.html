@@ -690,13 +690,6 @@ details.card .body{margin-top:14px;display:grid;gap:14px;font-size:14.5px;color:
 .mo-hd h2{font:600 21px/1.25 var(--f-display);letter-spacing:-.02em}
 .mo-body{padding:10px 24px 24px;display:grid;gap:14px}
 .mo-body>p{font-size:14px;color:var(--tx-2)}
-.or{display:flex;align-items:center;gap:12px;font-size:12.5px;color:var(--tx-3)}
-.or::before,.or::after{content:"";flex:1;height:1px;background:var(--line-2)}
-.si-email{display:grid;gap:10px}
-.si-label{font:500 13px/1 var(--f-body);color:var(--tx-2);letter-spacing:-.005em}
-.si-email input[type=email]{height:44px;padding:0 14px;border-radius:12px;border:1px solid var(--line-2);background:var(--s2);color:var(--tx);font:400 15px/1 var(--f-body);transition:border-color .15s,background-color .15s}
-.si-email input[type=email]:focus{outline:none;border-color:var(--accent-2,#5b8cff);background:var(--s1)}
-.si-email input[type=email]::placeholder{color:var(--tx-3)}
 .status{min-height:20px;font-size:13.5px;color:var(--tx-2)}
 .status.ok{color:var(--ok)}.status.err{color:var(--danger)}
 .g-logo{width:18px;height:18px}
@@ -1527,7 +1520,7 @@ const S={view:'home',q:'',where:store.get('oc_where','london'),range:'all',cat:'
   sort:'soon',matchSavedFirst:false,fmt:new Set(),tod:'any',dow:'any',timed:false,hidePitch:!!store.get('oc_hide_pitch',0),
   calMode:'weeks',calOff:0,calY:TODAY.getFullYear(),calM:TODAY.getMonth(),calSel:null,
   pendingRun:false,matches:null,file:null,pane:'cv',keep:true,result:null};
-let ME={signed_in:false,google_enabled:true,email_signin_enabled:false};
+let ME={signed_in:false,google_enabled:true};
 const saved=new Set(store.get('oc_saved',[]));
 const qterms=()=>S.q.toLowerCase().split(/\s+/).filter(Boolean);
 // Captured once at load from this page's own referrer and query string.
@@ -2429,27 +2422,16 @@ function closeModal(){if($('#modal').hidden)return;$('#modal').hidden=true;$('#m
 function openSignin(gate,why){
   S.pendingRun=!!gate;
   if(gate){saveDraft();store.set('oc_pending',1);}
-  const g=ME.google_enabled!==false, e=ME.email_signin_enabled!==false;
+  const g=ME.google_enabled!==false;   /* Google is the only way in */
   const title=why?why.title:gate?'Sign in to run your analysis':'Sign in';
   const intro=why?why.intro:gate?'What you entered stays on this page while you sign in, and the analysis starts as soon as you are in.':'Your account keeps your CV and results, and can email you new matches on a schedule you choose.';
   const googleBtn=g?'<a class="btn btn-primary lg block" href="/auth/login" data-act="google">'+GLOGO+'Continue with Google</a>':'';
-  const divider=(g&&e)?'<div class="or"><span>or</span></div>':'';
-  const emailForm=e
-    ?('<form id="emailSigninForm" class="si-email" novalidate>'
-      +'<label for="siEmail" class="si-label">Email</label>'
-      +'<input id="siEmail" name="email" type="email" autocomplete="email" required placeholder="you@example.com" inputmode="email" spellcheck="false">'
-      +'<button type="submit" class="btn btn-primary block">Email me a sign-in link</button>'
-      +'<p class="muted" style="margin-top:8px;font-size:13px">One-time link, works for 15 minutes. No password.</p>'
-      +'</form>')
-    :'';
-  const neither=(!g&&!e)?'<p class="status err">Sign-in is not available right now.</p>':'';
+  const neither=!g?'<p class="status err">Sign-in is not available right now.</p>':'';
   const foot=ME.invite_only?'<p class="muted" style="margin-top:14px;font-size:13px">Access is currently by invitation.</p>':'';
   modal('<div class="mo-hd"><h2 id="moTitle">'+title+'</h2><button class="icon-btn" data-act="mclose" aria-label="Close">'+ic('x')+'</button></div>'
    +'<div class="mo-body"><p>'+intro+'</p>'
-   +googleBtn+divider+emailForm+neither+foot
+   +googleBtn+neither+foot
    +'<p class="status" id="siStatus" aria-live="polite"></p></div>');
-  const form=$('#emailSigninForm');
-  if(form)form.addEventListener('submit',onEmailSigninSubmit);
 }
 
 // Saving and adding to a calendar are account features: a visitor gets the
@@ -2473,39 +2455,14 @@ function finishAfterSignin(){
   };
   setTimeout(go,400);
 }
-async function onEmailSigninSubmit(ev){
-  ev.preventDefault();
-  const inp=$('#siEmail'), btn=ev.target.querySelector('button[type=submit]'), status=$('#siStatus');
-  const email=(inp.value||'').trim();
-  if(!email||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
-    status.className='status err';status.textContent='That doesn\'t look like an email address.';
-    inp.focus();return;
-  }
-  btn.disabled=true;const orig=btn.textContent;btn.textContent='Sending…';
-  try{
-    await fetch('/api/auth/email/request',{method:'POST',headers:{'content-type':'application/json'},
-      body:JSON.stringify({email,turnstile_token:window.OC_TURNSTILE_TOKEN||''})});
-    /* Response is always 200; we always show the same confirmation.
-       Not confirming whether the address has an account is the point. */
-    $('#modalBox').innerHTML=
-      '<div class="mo-hd"><h2>Check your inbox</h2><button class="icon-btn" data-act="mclose" aria-label="Close">'+ic('x')+'</button></div>'
-      +'<div class="mo-body"><p>If <strong>'+esc(email)+'</strong> has an OrbitCast account, or can create one, we\'ve sent a sign-in link.</p>'
-      +'<p class="muted">It works for the next 15 minutes and only once. The link opens this app and signs you in — nothing to copy or paste.</p>'
-      +'<p class="muted" style="margin-top:14px;font-size:13px">Didn\'t get it? Check spam, and try again. Corporate filters sometimes delay external mail by a minute or two.</p>'
-      +'</div>';
-  }catch(err){
-    btn.disabled=false;btn.textContent=orig;
-    status.className='status err';status.textContent='Could not reach the server. Try again.';
-  }
-}
 async function loadMe(){
-  try{const r=await fetch('/api/me',{cache:'no-store'});ME=await r.json();}catch(e){ME={signed_in:false,google_enabled:true,email_signin_enabled:false};}
+  try{const r=await fetch('/api/me',{cache:'no-store'});ME=await r.json();}catch(e){ME={signed_in:false,google_enabled:true};}
   syncRun();checkReturning();syncSaved();
   return ME;
 }
 async function signOut(){
   try{await fetch('/api/auth/logout',{method:'POST'});}catch(e){}
-  ME={signed_in:false,google_enabled:ME.google_enabled,email_signin_enabled:ME.email_signin_enabled};S.result=null;S.matches=null;
+  ME={signed_in:false,google_enabled:ME.google_enabled};S.result=null;S.matches=null;
   /* An account's saved list must not stay behind on a shared browser. */
   if(SAVED_SRV){saved.clear();store.set('oc_saved',[]);}
   SAVED_SRV=null;savedSyncedFor=null;ACCT.hist=null;
@@ -2855,7 +2812,7 @@ async function muteMatch(id,title,on){
 }
 async function deleteAll(){
   try{await fetch('/api/forget',{method:'POST'});}catch(e){}
-  ME={signed_in:false,google_enabled:ME.google_enabled,email_signin_enabled:ME.email_signin_enabled};S.result=null;S.matches=null;S.keep=true;
+  ME={signed_in:false,google_enabled:ME.google_enabled};S.result=null;S.matches=null;S.keep=true;
   ACCT.hist=null;SAVED_SRV=null;savedSyncedFor=null;saved.clear();store.set('oc_saved',[]);
   clearFile();clearDraft();$('#aiText').value='';updCount();$('#results').hidden=true;$('#results').innerHTML='';$('#returning').hidden=true;
   closeModal();syncRun();if(S.view!=='home')render();
@@ -3173,7 +3130,7 @@ window.addEventListener('resize',()=>requestAnimationFrame(measureSticky));
   const keepDraft=!!store.get('oc_keep_draft',0);store.del('oc_keep_draft');
   if(ME.signed_in||keepDraft)await restoreDraft();else{clearDraft();syncRun();}
   if(signin){
-    const msg={ok:'Signed in',failed:'That sign-in link didn\'t work. It may have expired or already been used. Request a new one.',google_off:'Sign-in is not available right now.',unavailable:'Accounts are unavailable right now. Try again shortly.',not_allowed:'That address can\'t sign in here. Access is by invitation.',email_bad:'That link is malformed. Request a new one.'}[signin];
+    const msg={ok:'Signed in',failed:'Sign-in didn\'t complete. Try again.',email_off:'Email sign-in has been removed. Sign in with Google.',google_off:'Sign-in is not available right now.',unavailable:'Accounts are unavailable right now. Try again shortly.',not_allowed:'That address can\'t sign in here. Access is by invitation.'}[signin];
     const resuming=signin==='ok'&&ME.signed_in&&!!store.get('oc_pending',0);
     if(msg&&!resuming)setTimeout(()=>toast(msg),300);   /* the resume path says it itself */
     if(signin==='ok')finishAfterSignin();else store.del('oc_after_action');
