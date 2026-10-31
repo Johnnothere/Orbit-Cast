@@ -51,6 +51,7 @@ import identity
 import jobs
 import mailer
 import rag
+import spend
 import scraper
 
 log = logging.getLogger("orbitcast.web")
@@ -706,6 +707,7 @@ def api_health():
                     "catalog_times": event_times.coverage(events),
                     "ai_outage": ai_engine.outage(),
                     "paused_hosts": scraper.paused_hosts(),
+                    "spend": spend.counts(),
                     "threads": threading.active_count()})
     return jsonify(out)
 
@@ -1683,10 +1685,6 @@ _EXTRACT_SLOTS = threading.BoundedSemaphore(
     max(1, int(os.environ.get("EXTRACT_CONCURRENCY", "3"))))
 
 
-def _ai_daily_limit():
-    return f"{int(AI_DAILY_LIMIT)} per day"
-
-
 def _per_person_key():
     """Signed-in routes are limited per account, not per network address: a
     university or office network puts hundreds of people behind one IP, and
@@ -1706,8 +1704,27 @@ ANON_PER_IP = os.environ.get("ANON_PER_IP", "2 per day")
 ANON_DAILY_LIMIT = os.environ.get("ANON_DAILY_LIMIT", "150")
 
 
-def _anon_daily_limit():
-    return f"{int(ANON_DAILY_LIMIT)} per day"
+# What each ceiling says when it is full. Same shape as every other 429
+# (security.rate_limited), so the frontend handles them identically.
+_SPEND_FULL_MESSAGES = {
+    spend.ANON_DAILY: "Today's free analyses are used up. Sign in with Google to run yours.",
+    spend.AI_DAILY: "OrbitCast has hit today's analysis limit. Please try again tomorrow.",
+}
+
+
+def _take_spend(anon):
+    """Count one analysis against the site's daily ceilings (spend.py), or
+    return the 429 to send. Called at the moment a job is accepted, so only
+    runs that actually spend tokens are counted."""
+    wants = [(spend.AI_DAILY, int(AI_DAILY_LIMIT))]
+    if anon:
+        wants.append((spend.ANON_DAILY, int(ANON_DAILY_LIMIT)))
+    try:
+        return spend.take(wants), None
+    except spend.LimitReached as full:
+        log.warning(f"Daily spend ceiling reached: {full.scope}")
+        return None, (jsonify(error=_SPEND_FULL_MESSAGES[full.scope],
+                              reason="rate_limited"), 429)
 
 
 def _signed_in():
@@ -1847,12 +1864,6 @@ def _run_reuse_job(oc_uid, last):
                deduct_when=lambda resp: resp.status_code == 202,
                error_message="That's the free look for today. Sign in with Google - it takes seconds, "
                              "there's no password, and members run up to 20 analyses an hour.")
-@limiter.shared_limit(_anon_daily_limit, scope="anon-daily", key_func=lambda: "site",
-                      exempt_when=_signed_in,
-                      deduct_when=lambda resp: resp.status_code == 202,
-                      error_message="Today's free analyses are used up. Sign in with Google to run yours.")
-@limiter.shared_limit(_ai_daily_limit, scope="ai-daily", key_func=lambda: "site",
-                      error_message="OrbitCast has hit today's analysis limit. Please try again tomorrow.")
 def api_analyze():
     anon = not _signed_in()
     # Anonymous runs are the ones worth scripting: they cost a model call and
@@ -1913,11 +1924,15 @@ def api_analyze():
     acct = auth.current_account()
     oc_uid = acct["oc_uid"] if acct else None
     consent = bool(oc_uid and db.get_consent(oc_uid))
+    receipt, refused = _take_spend(anon)
+    if refused:
+        return refused
     try:
         view = JOBS.submit(owner, "analyze", _invalidates_owner(_run_analysis_job), owner,
                            acct["id"] if acct else None,
                            oc_uid, consent, file_bytes, filename, mimetype, pasted_text)
     except jobs.QueueFull:
+        receipt.refund()                    # counted, but never ran
         log.warning("Analysis queue full - turning a request away")
         return _busy_response()
     _audit("analysis_run", acct, detail={"stored": consent, "file": bool(file_bytes),
@@ -1966,8 +1981,6 @@ def api_my_history():
 @auth.login_required
 @limiter.limit("30 per hour", key_func=_per_person_key,
                error_message="You've re-run your profile a lot in the last hour. Give it a little while.")
-@limiter.shared_limit(_ai_daily_limit, scope="ai-daily", key_func=lambda: "site",
-                      error_message="OrbitCast has hit today's analysis limit. Please try again tomorrow.")
 def api_analyze_reuse():
     """Re-scores the caller's own last stored profile against the current
     catalog, without re-running extraction or asking them to resubmit
@@ -1991,9 +2004,13 @@ def api_analyze_reuse():
         # rather than queue a job that fails the same way in a few seconds,
         # and don't spend the person's free analysis on it.
         return _ai_unavailable_response()
+    receipt, refused = _take_spend(anon=False)
+    if refused:
+        return refused
     try:
         view = JOBS.submit(owner, "reuse", _invalidates_owner(_run_reuse_job), owner, oc_uid, last)
     except jobs.QueueFull:
+        receipt.refund()                    # counted, but never ran
         log.warning("Analysis queue full - turning a re-run away")
         return _busy_response()
     return jsonify(view), 202

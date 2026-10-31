@@ -1602,6 +1602,80 @@ def save_events_cache(payload: dict) -> bool:
 
 
 # --------------------------------------------------------------------------
+# Spend ceilings
+# --------------------------------------------------------------------------
+# The site-wide daily caps on analyses. See spend.py for the policy (what is
+# capped, and what happens when this database cannot answer); these are just
+# the atomic operations on spend_counters (migration 0024).
+
+def spend_take(day, wants):
+    """Take one unit from every (scope, limit) in `wants` for `day`, or none.
+
+    One transaction: make sure each row exists, lock them all, check them
+    all, then increment them all. Locking first is what makes it atomic - two
+    requests racing for the last unit cannot both see room.
+
+    Returns ("ok", None) when taken, ("full", scope) naming the first scope
+    with no room (nothing is taken), or ("unavailable", None) when there is
+    no database or it did not answer."""
+    scopes = [scope for scope, _ in wants]
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return "unavailable", None
+            cur.execute(
+                "insert into spend_counters (day, scope) "
+                "select %s, unnest(%s::text[]) on conflict do nothing",
+                (day, scopes))
+            cur.execute(
+                "select scope, n from spend_counters "
+                "where day = %s and scope = any(%s) for update",
+                (day, scopes))
+            have = dict(cur.fetchall())
+            for scope, limit in wants:
+                if have.get(scope, 0) >= limit:
+                    return "full", scope
+            cur.execute(
+                "update spend_counters set n = n + 1, updated_at = now() "
+                "where day = %s and scope = any(%s)",
+                (day, scopes))
+            return "ok", None
+    except Exception as exc:
+        log.warning(f"spend_take failed: {exc}")
+        return "unavailable", None
+
+
+def spend_refund(day, scopes) -> bool:
+    """Give back one unit per scope - for a job that was counted and then
+    turned away before it ran (a full queue). Never takes a counter below 0."""
+    try:
+        with _cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                "update spend_counters set n = greatest(n - 1, 0), updated_at = now() "
+                "where day = %s and scope = any(%s)",
+                (day, list(scopes)))
+            return True
+    except Exception as exc:
+        log.warning(f"spend_refund failed: {exc}")
+        return False
+
+
+def spend_counts(day):
+    """{scope: n} for one day, or None when the database cannot answer."""
+    try:
+        with _read_cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute("select scope, n from spend_counters where day = %s", (day,))
+            return dict(cur.fetchall())
+    except Exception as exc:
+        log.warning(f"spend_counts failed: {exc}")
+        return None
+
+
+# --------------------------------------------------------------------------
 # Source discovery
 # --------------------------------------------------------------------------
 # Leads harvested from ingested events - host calendars that clearly run
